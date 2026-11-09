@@ -26,18 +26,18 @@ Annorex has two parts:
 
 ## Components
 
-| Component          | State   | Function                                                                                                                                                                    |
-|--------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Rex adapter        | Built   | Runs `rex block call -s SESSION -b BLOCK METHOD -` with the arguments on standard input. Gives typed results for the process, program status, and terminal modes of a pane. |
-| Agent detection    | Built   | Identifies Claude Code, Pi, or OpenCode from the `app` of the root program status record. If no record is available, uses `argv0` of the foreground process.                |
-| Dialog check       | Built   | Refuses a send when the root program status is "blocked" (a permission, question, or authentication dialog). A busy agent can get a message.                                |
-| Payload            | Built   | Removes escape characters and control characters. Keeps line feeds and tabs. Puts the text in one bracketed paste.                                                          |
-| Delivery           | Built   | Checks for a dialog two times, pastes the text, waits 300 ms, and sends Enter. It never sends again automatically.                                                          |
-| Transcript readers | Built   | Find the session of an agent and read its recent messages. Adapted from plannotator-tui (MIT).                                                                              |
-| Commands           | Built   | `annorex probe` and `annorex deliver`.                                                                                                                                      |
-| Document model     | Planned | Shows Markdown or plain text. Keeps a map from each displayed line to its source line and character position.                                                               |
-| Review             | Planned | Keeps annotations on character ranges. Saves drafts after each change. Exports the notes as Markdown.                                                                       |
-| UI                 | Planned | ratatui screens. The layout is calculated again after each resize.                                                                                                          |
+| Component          | State   | Function                                                                                                                                                                             |
+|--------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Rex adapter        | Built   | Runs `rex block call -s SESSION -b BLOCK METHOD -` with the arguments on standard input. Gives typed results for the process, program status, and terminal modes of a pane.          |
+| Agent detection    | Built   | Identifies Claude Code, Pi, or OpenCode from the `app` of the root program status record, when the foreground process confirms it. Otherwise uses `argv0` of the foreground process. |
+| Dialog check       | Built   | Refuses a send when the root program status is "blocked" (a permission, question, or authentication dialog). A busy agent can get a message.                                         |
+| Payload            | Built   | Removes escape characters and control characters. Keeps line feeds and tabs. Puts the text in one bracketed paste.                                                                   |
+| Delivery           | Built   | Checks for a dialog two times, pastes the text, waits 300 ms, checks again, and sends Enter. It never sends again automatically.                                                     |
+| Transcript readers | Built   | Find the session of an agent and read its recent messages. Adapted from plannotator-tui (MIT).                                                                                       |
+| Commands           | Built   | `annorex probe` and `annorex deliver`.                                                                                                                                               |
+| Document model     | Planned | Shows Markdown or plain text. Keeps a map from each displayed line to its source line and character position.                                                                        |
+| Review             | Planned | Keeps annotations on character ranges. Saves drafts after each change. Exports the notes as Markdown.                                                                                |
+| UI                 | Planned | ratatui screens. The layout is calculated again after each resize.                                                                                                                   |
 
 ## Crates
 

@@ -41,6 +41,9 @@ printf 'Fix the test in parser.rs.\n' | annorex deliver --target block:... --pas
 - the agent shows a dialog, such as a permission prompt or a question, or
 - the pane has not turned on bracketed paste.
 
+If the agent opens a dialog after the paste, `annorex deliver` does not press Enter. The text stays in the input box of
+the agent. Answer the dialog, then press Enter yourself.
+
 When the agent is busy, Claude Code queues the message. Pi and OpenCode use it to steer the current task.
 
 Exit codes:
@@ -48,7 +51,7 @@ Exit codes:
 | Code | Meaning                                                            |
 |------|--------------------------------------------------------------------|
 | 0    | Sent, pasted, or probe complete                                    |
-| 3    | Refused: no agent, a dialog, or no bracketed paste                 |
+| 3    | Refused: no agent, a dialog, or no bracketed paste; or Enter held  |
 | 4    | A Rex call failed, or the `rex` binary was not found               |
 | 64   | Usage error: a bad argument, no session, or an empty message       |
 
