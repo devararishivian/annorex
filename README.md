@@ -3,8 +3,59 @@
 Annorex is a review tool for coding agents in the [Rex](https://www.superlogical.com/rex) terminal. You annotate the
 text that an agent wrote. Then Annorex sends your notes back to the agent.
 
-> **Status: design stage.** No usable code exists yet. This README describes the planned features. The sections change
-> when features are complete.
+> **Status: foundation complete.** The `annorex probe` and `annorex deliver` commands work. The review interface and
+> the Rex actions are not available yet. The "Planned features" section describes them.
+
+## Available now
+
+- `annorex probe` shows the agent in a pane, its state, and whether Annorex can send to it.
+- `annorex deliver` sends text from standard input to the agent in a pane. It removes escape characters and control
+  characters, pastes the text as one bracketed paste, and presses Enter.
+
+The tests show that a multi-line Markdown message arrives intact in Claude Code, Pi, and OpenCode, also when the agent
+is busy.
+
+### Build from source
+
+```sh
+cargo build --release
+```
+
+The binary is `target/release/annorex`.
+
+### Use
+
+Run the commands in a Rex pane. Give the block ID of the agent pane as `--target`. The session is `$REX_SESSION`, or
+give it with `--session`.
+
+```sh
+annorex probe --target block:...
+annorex probe --target block:... --json
+printf 'Fix the test in parser.rs.\n' | annorex deliver --target block:...
+printf 'Fix the test in parser.rs.\n' | annorex deliver --target block:... --paste-only
+```
+
+`annorex deliver` refuses to send when:
+
+- no supported agent runs in the pane,
+- the agent shows a dialog, such as a permission prompt or a question, or
+- the pane has not turned on bracketed paste.
+
+When the agent is busy, Claude Code queues the message. Pi and OpenCode use it to steer the current task.
+
+Exit codes:
+
+| Code | Meaning                                                            |
+|------|--------------------------------------------------------------------|
+| 0    | Sent, pasted, or probe complete                                    |
+| 3    | Refused: no agent, a dialog, or no bracketed paste                 |
+| 4    | A Rex call failed, or the `rex` binary was not found               |
+| 64   | Usage error: a bad argument, no session, or an empty message       |
+
+### Known limit
+
+Claude Code asks whether to trust a folder when it starts in a new folder. Claude Code does not report this dialog to
+Rex. Annorex cannot see it. Do not send while this dialog is open.
 
 ## Planned features
 
@@ -30,11 +81,11 @@ Rex does not have a plugin system. Rex has custom actions in its Lua configurati
 
 For more information, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Planned requirements
+## Requirements
 
 - Rex on macOS (Apple silicon)
 - Claude Code, Pi 1.5.0 or later, or OpenCode 2.x
-- Rust (stable), to build from source
+- Rust 1.99 or later, to build from source
 
 ## License
 
@@ -48,8 +99,8 @@ These projects are the base of the Annorex idea:
   back to the agent" review method.
 - [herdr-annotate](https://github.com/plannotator/herdr-annotate) and
   [plannotator-tui](https://github.com/plannotator/plannotator-tui) by Plannotator and Michael Ramos. These projects do
-  the same review in a terminal. Annorex will use the transcript readers from plannotator-tui under the MIT License.
-  Annorex will keep their copyright notices.
+  the same review in a terminal. Annorex uses the transcript readers from plannotator-tui under the MIT License. See
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - [memex](https://github.com/nicosuave/memex) by Nico Ritschel. memex shows how to connect a Rust tool to Rex.
 
 Annorex is an independent project. It has no connection to these projects, and they do not endorse it.
