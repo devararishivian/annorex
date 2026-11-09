@@ -107,9 +107,10 @@ impl From<RexError> for Failure {
 impl From<DeliverError> for Failure {
     fn from(error: DeliverError) -> Self {
         let code = match &error {
-            DeliverError::NoAgent | DeliverError::Blocked { .. } | DeliverError::NoBracketedPaste => {
-                EXIT_REFUSED
-            }
+            DeliverError::NoAgent
+            | DeliverError::Blocked { .. }
+            | DeliverError::EnterWithheld { .. }
+            | DeliverError::NoBracketedPaste => EXIT_REFUSED,
             DeliverError::EmptyPayload => EXIT_USAGE,
             DeliverError::Rex(_) => EXIT_REX,
         };

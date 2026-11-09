@@ -74,6 +74,11 @@ pub enum DeliverError {
     NoAgent,
     #[error("the agent shows a dialog{}; answer it first", dialog_text(.kind.as_deref(), .msg.as_deref()))]
     Blocked { kind: Option<String>, msg: Option<String> },
+    #[error(
+        "the text is pasted, but Enter was not pressed: the agent opened a dialog{}; answer it, then press Enter",
+        dialog_text(.kind.as_deref(), .msg.as_deref())
+    )]
+    EnterWithheld { kind: Option<String>, msg: Option<String> },
     #[error("the target pane has not turned on bracketed paste")]
     NoBracketedPaste,
     #[error("the payload is empty")]
@@ -92,10 +97,10 @@ fn dialog_text(kind: Option<&str>, msg: Option<&str>) -> String {
 
 /// Deliver `payload` to the agent in `block`.
 ///
-/// The order is: process, status, modes, status again, paste, wait [`ENTER_DELAY`], Enter.
-/// Nothing is written when there is no agent, when the agent shows a dialog at either check,
-/// or when bracketed paste is off. When the paste fails, Enter is not pressed. Delivery never
-/// tries again.
+/// The order is: process, status, modes, status again, paste, wait [`ENTER_DELAY`], status a
+/// third time, Enter. Nothing is written when there is no agent, when the agent shows a dialog
+/// at the first two checks, or when bracketed paste is off. When the paste fails, or a dialog
+/// opens after the paste, Enter is not pressed. Delivery never tries again.
 pub fn deliver(
     api: &impl RexApi,
     sleeper: &impl Sleeper,
@@ -122,6 +127,10 @@ pub fn deliver(
         return Ok(Outcome::Pasted);
     }
     sleeper.sleep(ENTER_DELAY);
+    // A dialog can open during the wait. Enter would answer it, so check again.
+    if let Safety::Blocked { kind, msg } = check(&api.program_status(block)?) {
+        return Err(DeliverError::EnterWithheld { kind, msg });
+    }
     api.write(block, "\r")?;
     Ok(Outcome::Sent)
 }
@@ -244,7 +253,7 @@ mod tests {
 
     #[test]
     fn send_happy_path_order() {
-        let fake = Fake::new(&[Some("idle"), Some("idle")]);
+        let fake = Fake::new(&[Some("idle"), Some("idle"), Some("idle")]);
         let outcome = deliver(&fake, &fake, BLOCK, "hello\r\nworld", DeliveryMode::Send).expect("sent");
         assert_eq!(outcome, Outcome::Sent);
         assert_eq!(
@@ -256,6 +265,7 @@ mod tests {
                 Call::Status,
                 Call::Write("\x1b[200~hello\nworld\x1b[201~".to_owned()),
                 Call::Sleep(Duration::from_millis(300)),
+                Call::Status,
                 Call::Write("\r".to_owned()),
             ]
         );
@@ -263,7 +273,7 @@ mod tests {
 
     #[test]
     fn sends_while_working() {
-        let fake = Fake::new(&[Some("working"), Some("working")]);
+        let fake = Fake::new(&[Some("working"), Some("working"), Some("working")]);
         assert_eq!(deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send).expect("sent"), Outcome::Sent);
         assert_eq!(fake.writes().len(), 2);
     }
@@ -300,6 +310,17 @@ mod tests {
             Err(DeliverError::Blocked { .. })
         ));
         assert_eq!(fake.writes(), [] as [String; 0]);
+    }
+
+    #[test]
+    fn withholds_enter_when_dialog_opens_after_the_paste() {
+        let fake = Fake::new(&[Some("working"), Some("working"), Some("blocked")]);
+        match deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send) {
+            Err(DeliverError::EnterWithheld { kind, .. }) => assert_eq!(kind.as_deref(), Some("question")),
+            other => panic!("expected EnterWithheld, got {other:?}"),
+        }
+        assert_eq!(fake.writes(), ["\x1b[200~note\x1b[201~"]);
+        assert_eq!(fake.calls().last(), Some(&Call::Status));
     }
 
     #[test]
