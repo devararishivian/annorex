@@ -12,6 +12,7 @@ repository = "https://github.com/devararishivian/annorex"
 [workspace.dependencies]
 annorex-hosts = { path = "crates/annorex-hosts" }
 clap = { version = "4.6.7", features = ["derive"] }
+ignore = "0.4.34"
 insta = "1.49.0"
 jiff = "0.2.41"
 pulldown-cmark = { version = "0.13.6", default-features = false }

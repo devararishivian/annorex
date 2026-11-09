@@ -10,6 +10,7 @@ description = "Annotate the output of a coding agent in Rex and send the notes b
 [dependencies]
 annorex-hosts.workspace = true
 clap.workspace = true
+ignore.workspace = true
 jiff.workspace = true
 pulldown-cmark.workspace = true
 ratatui.workspace = true
