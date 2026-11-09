@@ -476,6 +476,10 @@ impl App {
     /// `W`: close the file on the screen. A file with unsent notes asks first.
     fn begin_close(&mut self) {
         match self.review() {
+            Some(review) if review.has_unsent() && self.save_error.is_some() => {
+                self.status =
+                    Some("Not closed: the draft cannot be saved, so the notes would be lost.".to_owned());
+            }
             Some(review) if review.has_unsent() => self.confirm = Some(Confirm::CloseFile),
             _ => self.close_shown(),
         }
@@ -755,6 +759,10 @@ impl App {
         let Draft { mut review, editing, sent_at, .. } = draft;
         if let Some(reply) = self.replies.iter().find(|reply| reply.id == reply_id) {
             review.reanchor(&sanitize(&reply.text));
+        }
+        // A draft of M2 keeps the send time only on the draft: all its notes were sent then.
+        if let Some(at) = &sent_at {
+            review.mark_sent(at);
         }
         self.reviews.insert(reply_id.to_owned(), review);
         match sent_at {

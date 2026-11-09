@@ -471,3 +471,30 @@ fn banner_snapshot_80x24() {
     app.file_changed(&change("a.txt", ChangeKind::Modified));
     insta::assert_snapshot!(render(&mut app, 80, 24));
 }
+
+#[test]
+fn restored_m2_draft_with_sent_at_has_no_unsent_notes() {
+    use annorex::draft::{Draft, DraftKey};
+    use annorex::review::Kind;
+    let mut app = two_files();
+    let mut draft = Draft::new(
+        DraftKey { agent: Agent::ClaudeCode, session: "s".to_owned(), document: "file:a.md".to_owned() },
+        "a.md",
+    );
+    draft.review.add("# Title\n\nalpha text\n", Kind::Comment, 0..7);
+    draft.sent_at = Some("2026-11-09T10:00:00Z".to_owned());
+    app.restore("file:a.md", draft);
+    assert_eq!(app.unsent_replies(), Vec::<usize>::new());
+    assert_eq!(app.export(), "", "nothing goes to the agent twice");
+}
+
+#[test]
+fn closing_a_file_is_refused_when_the_draft_cannot_be_saved() {
+    let mut app = two_files();
+    press(&mut app, "cnote\n");
+    app.set_save_error(Some("disk full".to_owned()));
+    press(&mut app, "W");
+    press(&mut app, "y");
+    assert_eq!(app.shown_file().and_then(|p| p.to_str()), Some("a.md"), "the file stays open");
+    assert!(app.review().is_some_and(|r| !r.annotations.is_empty()), "the notes stay");
+}
