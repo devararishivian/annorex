@@ -597,3 +597,34 @@ fn the_general_note_editor_survives_a_restart() {
     assert!(editor.general);
     assert_eq!(editor.text, "half a no");
 }
+
+#[test]
+fn editing_an_annotation_survives_a_restart_without_a_duplicate() {
+    let mut first = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press(&mut first, "ae more");
+    let draft = first.draft(Agent::ClaudeCode, "s").expect("draft");
+    let mut second = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    second.restore("r1", draft);
+    assert!(second.editor().is_some());
+    press_key(&mut second, KeyCode::Enter, KeyModifiers::NONE);
+    let review = second.review().expect("review");
+    assert_eq!(review.annotations.len(), 1, "{:?}", review.annotations);
+    assert!(review.annotations[0].note.ends_with(" more"), "{:?}", review.annotations[0].note);
+}
+
+#[test]
+fn a_paste_goes_into_the_editor_as_text() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "c");
+    let effect = app.handle_paste("foo()\r\nSee docs\n\x1b[31mXy\u{7}");
+    assert_eq!(effect, Effect::SaveDraft);
+    assert_eq!(app.editor().expect("editor").text, "foo()\nSee docs\n[31mXy");
+    assert!(app.review().is_none_or(annorex::review::Review::is_empty), "a paste never saves");
+}
+
+#[test]
+fn a_paste_outside_the_editor_does_nothing() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    assert_eq!(app.handle_paste("S\nX\ny"), Effect::None);
+    assert_eq!(app.review().expect("review").annotations.len(), 1);
+}

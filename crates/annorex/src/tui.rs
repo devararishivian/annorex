@@ -75,8 +75,13 @@ pub fn run_loop(
         }
         let Ok(mut pending) = events.next(WAIT) else { return Ok(()) };
         while let Some(event) = pending {
-            if let Event::Key(key) = event {
-                match app.handle_key(key) {
+            let effect = match event {
+                Event::Key(key) => Some(app.handle_key(key)),
+                Event::Paste(text) => Some(app.handle_paste(&text)),
+                _ => None,
+            };
+            if let Some(effect) = effect {
+                match effect {
                     Effect::None => {}
                     Effect::Quit => return Ok(()),
                     effect => {
@@ -138,7 +143,7 @@ pub fn run_last(
     let pane = target.to_owned();
     std::thread::spawn(move || watch_status(&watcher, &pane, &sender));
 
-    let mut terminal = start_terminal(ratatui::try_init, ratatui::restore)?;
+    let mut terminal = start_terminal(init_terminal, restore_terminal)?;
     let result = run_loop(
         &mut app,
         &mut CrosstermEvents,
@@ -147,8 +152,20 @@ pub fn run_last(
         &updates,
         &mut |effect, app: &mut App| viewer.apply(effect, app),
     );
-    ratatui::restore();
+    restore_terminal();
     result
+}
+
+/// Raw mode, the alternate screen, and bracketed paste, so a paste is one event and not keys.
+fn init_terminal() -> io::Result<DefaultTerminal> {
+    let terminal = ratatui::try_init()?;
+    ratatui::crossterm::execute!(io::stdout(), event::EnableBracketedPaste)?;
+    Ok(terminal)
+}
+
+fn restore_terminal() {
+    let _ = ratatui::crossterm::execute!(io::stdout(), event::DisableBracketedPaste);
+    ratatui::restore();
 }
 
 /// The agent and its state in a pane. A failed Rex call gives `None`.

@@ -49,6 +49,9 @@ pub struct Editing {
     /// True for the editor of the general note, which is not an annotation.
     #[serde(default)]
     pub general: bool,
+    /// The id of the annotation that the editor changes. `None` for a new annotation.
+    #[serde(default)]
+    pub annotation: Option<u64>,
 }
 
 /// The review of one document and its state.
@@ -263,6 +266,7 @@ mod tests {
             text: "typed so far".to_owned(),
             label: Some("must fix".to_owned()),
             general: false,
+            annotation: None,
         });
         store.save(&draft).expect("save");
         assert_eq!(store.load(&draft.key).expect("load"), Some(draft));

@@ -10,7 +10,7 @@ use crate::agent::Agent;
 use crate::config::Config;
 use crate::deliver::DeliveryMode;
 use crate::doc::Doc;
-use crate::draft::{Draft, DraftKey};
+use crate::draft::{Draft, DraftKey, Editing};
 use crate::keys::Action;
 use crate::payload::sanitize;
 use crate::replies::{Candidate, Reply};
@@ -143,7 +143,7 @@ pub struct App {
     /// The annotation that the editor changes. `None` for a new annotation.
     pub(crate) editing_id: Option<u64>,
     /// Editors of replies that are not on the screen.
-    parked: HashMap<String, crate::draft::Editing>,
+    parked: HashMap<String, Editing>,
     pub(crate) panel_view: PanelView,
     pub(crate) annotation_index: usize,
     /// The annotation that waits for `y` or `n`.
@@ -302,7 +302,8 @@ impl App {
         if self.shown_id.as_deref() != Some(id.as_str()) {
             // Another reply: its editor was parked, and a selection or a question do not carry over.
             if let (Some(editor), Some(old)) = (self.editor.take(), self.shown_id.take()) {
-                self.parked.insert(old, editor.to_editing());
+                let editing = Editing { annotation: self.editing_id, ..editor.to_editing() };
+                self.parked.insert(old, editing);
             }
             self.editing_id = None;
             self.selection = None;
@@ -310,6 +311,7 @@ impl App {
             self.annotation_index = 0;
             self.shown_id = Some(id.clone());
             if let Some(editing) = self.parked.remove(&id) {
+                self.editing_id = editing.annotation;
                 self.editor = Some(Editor::from_editing(editing));
             }
         }
@@ -351,7 +353,8 @@ impl App {
         let key = DraftKey { agent, session: session.to_owned(), document: id.clone() };
         let mut draft = Draft::new(key, "last reply");
         draft.review = self.reviews.get(&id).cloned().unwrap_or_default();
-        draft.editing = self.editor.as_ref().map(Editor::to_editing);
+        draft.editing =
+            self.editor.as_ref().map(|editor| Editing { annotation: self.editing_id, ..editor.to_editing() });
         draft.sent_at = self.sent.get(&id).cloned();
         Some(draft)
     }
@@ -370,8 +373,8 @@ impl App {
         };
         if let Some(editing) = editing {
             if self.shown_id.as_deref() == Some(reply_id) {
+                self.editing_id = editing.annotation;
                 self.editor = Some(Editor::from_editing(editing));
-                self.editing_id = None;
             } else {
                 self.parked.insert(reply_id.to_owned(), editing);
             }
@@ -409,6 +412,15 @@ impl App {
     }
 
     /// Handle one key.
+    /// Text that the terminal pasted. It goes into the open editor as text. Without an editor,
+    /// it does nothing, so a paste never works as a list of commands.
+    pub fn handle_paste(&mut self, text: &str) -> Effect {
+        let Some(editor) = &mut self.editor else { return Effect::None };
+        self.status = None;
+        editor.text.push_str(&sanitize(text));
+        Effect::SaveDraft
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> Effect {
         if key.kind != KeyEventKind::Press {
             return Effect::None;

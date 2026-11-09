@@ -59,6 +59,7 @@ impl Editor {
             text: self.text.clone(),
             label: self.label.clone(),
             general: self.general,
+            annotation: None,
         }
     }
 
