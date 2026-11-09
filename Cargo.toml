@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/annorex"]
+members = ["crates/annorex-hosts", "crates/annorex"]
 
 [workspace.package]
 version = "0.1.0"
