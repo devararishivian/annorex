@@ -22,6 +22,7 @@ use annorex::rex::{Rex, SystemRunner};
 use annorex_hosts::claude;
 use annorex_hosts::pi;
 use annorex_hosts::roots::Roots;
+use annorex_hosts::{Role, opencode};
 
 pub(crate) const CLAUDE_MODEL: &str = "claude-haiku-5-5";
 pub(crate) const PI_MODEL: &str = "omni/antigravity/gemini-3.8-flash-low";
@@ -226,4 +227,53 @@ pub(crate) fn accept_claude_trust(rex: &Rex<SystemRunner>, session: &str, live: 
         std::thread::sleep(Duration::from_millis(300));
         rex.write(&live.block, "\r").expect("enter");
     }
+}
+
+/// The human messages of the agent's transcript, oldest last.
+pub(crate) fn human_messages(rex: &Rex<SystemRunner>, roots: &Roots, live: &LiveAgent) -> Vec<String> {
+    let messages = match live.agent {
+        Agent::ClaudeCode => {
+            let Some(pid) = rex.process(&live.block).ok().and_then(|p| p.foreground).map(|fg| fg.pid) else {
+                return Vec::new();
+            };
+            let ps = Command::new("ps").args(["-eo", "pid=,ppid="]).output().expect("ps");
+            let table = claude::parse_ps(&String::from_utf8_lossy(&ps.stdout));
+            let config = roots.claude_config();
+            let found = claude::find_transcript(
+                &config.join("sessions"),
+                &config.join("projects"),
+                &live.cwd,
+                &table,
+                pid,
+            );
+            found
+                .and_then(|(path, _)| std::fs::read_to_string(path).ok())
+                .map(|text| claude::parse_messages(&text, 1000))
+                .unwrap_or_default()
+        }
+        Agent::Pi => pi::find_transcript(&roots.pi_sessions(), &live.cwd)
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(|text| pi::parse_messages(&text, 1000))
+            .unwrap_or_default(),
+        Agent::OpenCode => roots
+            .opencode_databases()
+            .iter()
+            .find_map(|db| {
+                let found = opencode::find_session(db, &live.cwd).ok()?;
+                opencode::messages_for_session(db, &found.id, found.schema, 1000).ok()
+            })
+            .unwrap_or_default(),
+    };
+    messages.into_iter().filter(|message| message.role == Role::Human).map(|message| message.text).collect()
+}
+
+/// Claude Code 2.1.319 stores a bracketed paste as `<pasted_content id="ID">TEXT</pasted_content id="ID">`
+/// [live, 2026-11-09]. Compare the text inside the wrapper.
+pub(crate) fn unwrap_paste(text: &str) -> &str {
+    let trimmed = text.trim();
+    let Some(rest) = trimmed.strip_prefix("<pasted_content id=\"") else { return trimmed };
+    let Some(open_end) = rest.find("\">") else { return trimmed };
+    let inner = &rest[open_end + 2..];
+    let Some(close) = inner.rfind("</pasted_content") else { return trimmed };
+    inner[..close].trim()
 }

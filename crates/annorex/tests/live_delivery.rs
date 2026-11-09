@@ -21,67 +21,16 @@
 
 mod common;
 
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use annorex::agent::Agent;
 use annorex::payload::sanitize;
 use annorex::rex::{Rex, SystemRunner};
 use annorex_hosts::roots::Roots;
-use annorex_hosts::{Role, claude, opencode, pi};
 use common::{
-    ARRIVAL_TIMEOUT, Cleanup, LiveAgent, accept_claude_trust, deliver, live_enabled, log, start_agents,
-    state, wait_for_state, wait_until,
+    ARRIVAL_TIMEOUT, Cleanup, LiveAgent, accept_claude_trust, deliver, human_messages, live_enabled, log,
+    start_agents, state, unwrap_paste, wait_for_state, wait_until,
 };
-
-/// The human messages of the agent's transcript, oldest last.
-fn human_messages(rex: &Rex<SystemRunner>, roots: &Roots, live: &LiveAgent) -> Vec<String> {
-    let messages = match live.agent {
-        Agent::ClaudeCode => {
-            let Some(pid) = rex.process(&live.block).ok().and_then(|p| p.foreground).map(|fg| fg.pid) else {
-                return Vec::new();
-            };
-            let ps = Command::new("ps").args(["-eo", "pid=,ppid="]).output().expect("ps");
-            let table = claude::parse_ps(&String::from_utf8_lossy(&ps.stdout));
-            let config = roots.claude_config();
-            let found = claude::find_transcript(
-                &config.join("sessions"),
-                &config.join("projects"),
-                &live.cwd,
-                &table,
-                pid,
-            );
-            found
-                .and_then(|(path, _)| std::fs::read_to_string(path).ok())
-                .map(|text| claude::parse_messages(&text, 1000))
-                .unwrap_or_default()
-        }
-        Agent::Pi => pi::find_transcript(&roots.pi_sessions(), &live.cwd)
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .map(|text| pi::parse_messages(&text, 1000))
-            .unwrap_or_default(),
-        Agent::OpenCode => roots
-            .opencode_databases()
-            .iter()
-            .find_map(|db| {
-                let found = opencode::find_session(db, &live.cwd).ok()?;
-                opencode::messages_for_session(db, &found.id, found.schema, 1000).ok()
-            })
-            .unwrap_or_default(),
-    };
-    messages.into_iter().filter(|message| message.role == Role::Human).map(|message| message.text).collect()
-}
-
-/// Claude Code 2.1.319 stores a bracketed paste as `<pasted_content id="ID">TEXT</pasted_content id="ID">`
-/// [live, 2026-11-09]. Compare the text inside the wrapper.
-fn unwrap_paste(text: &str) -> &str {
-    let trimmed = text.trim();
-    let Some(rest) = trimmed.strip_prefix("<pasted_content id=\"") else { return trimmed };
-    let Some(open_end) = rest.find("\">") else { return trimmed };
-    let inner = &rest[open_end + 2..];
-    let Some(close) = inner.rfind("</pasted_content") else { return trimmed };
-    inner[..close].trim()
-}
 
 fn arrived(rex: &Rex<SystemRunner>, roots: &Roots, live: &LiveAgent, expected: &str) -> usize {
     human_messages(rex, roots, live).iter().filter(|text| unwrap_paste(text) == expected).count()
