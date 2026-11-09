@@ -75,6 +75,24 @@ impl DocLine {
     }
 }
 
+/// How a file shows: as Markdown or as plain text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocKind {
+    Markdown,
+    Plain,
+}
+
+impl DocKind {
+    /// Files with the extension `md` or `markdown` (any case) show as Markdown. All others are plain.
+    pub fn of(path: &std::path::Path) -> Self {
+        let markdown = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"));
+        if markdown { Self::Markdown } else { Self::Plain }
+    }
+}
+
 /// A rendered document and its source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Doc {
@@ -98,6 +116,53 @@ impl Doc {
             builder.finish()
         };
         Self { source, lines, line_starts }
+    }
+
+    /// Show a text as it is: one `DocLine` for each source line, with the exact source of each
+    /// character. A tab shows as spaces up to a width of 4. It is one stop that covers the tab.
+    pub fn plain(source: &str) -> Self {
+        let source = sanitize(source);
+        let line_starts = line_starts(&source);
+        let mut lines = Vec::new();
+        for (index, &start) in line_starts.iter().enumerate() {
+            let end =
+                source.get(start..).and_then(|rest| rest.find('\n')).map_or(source.len(), |at| start + at);
+            if start == source.len() && index > 0 {
+                break; // the empty "line" after the final line feed
+            }
+            let text = source.get(start..end).unwrap_or_default();
+            let mut spans = Vec::new();
+            let mut offset = start;
+            for (position, piece) in text.split('\t').enumerate() {
+                if position > 0 {
+                    spans.push(DocSpan {
+                        text: TAB.to_owned(),
+                        style: SpanStyle::default(),
+                        source: Some(SpanSource { range: offset..offset + 1, exact: false }),
+                    });
+                    offset += 1;
+                }
+                if !piece.is_empty() {
+                    spans.push(DocSpan {
+                        text: piece.to_owned(),
+                        style: SpanStyle::default(),
+                        source: Some(SpanSource { range: offset..offset + piece.len(), exact: true }),
+                    });
+                    offset += piece.len();
+                }
+            }
+            let range = if spans.is_empty() { start..start } else { start..end };
+            lines.push(DocLine { spans, source: range, line: index + 1 });
+        }
+        Self { source, lines, line_starts }
+    }
+
+    /// Render a text as the kind says.
+    pub fn for_kind(kind: DocKind, source: &str) -> Self {
+        match kind {
+            DocKind::Markdown => Self::parse(source),
+            DocKind::Plain => Self::plain(source),
+        }
     }
 
     /// The 1-based source line of a byte offset.
@@ -526,6 +591,70 @@ mod tests {
 
     fn plains(doc: &Doc) -> Vec<String> {
         doc.lines.iter().map(DocLine::plain).collect()
+    }
+
+    #[test]
+    fn plain_doc_keeps_source_lines_and_tabs() {
+        let doc = Doc::plain("one\n\tindented\n\nlast\n");
+        let plains: Vec<String> = doc.lines.iter().map(DocLine::plain).collect();
+        assert_eq!(plains, ["one", "    indented", "", "last"]);
+        let numbers: Vec<usize> = doc.lines.iter().map(|line| line.line).collect();
+        assert_eq!(numbers, [1, 2, 3, 4]);
+        assert!(doc.lines[2].is_blank());
+        // The tab is one stop at its own byte, and `char_end` covers only that byte.
+        assert_eq!(doc.stops(1)[0], 4);
+        assert_eq!(doc.char_end(4), 5);
+        assert_eq!(doc.stops(1)[1], 5, "the next stop is `i` after the tab");
+        assert_eq!(doc.line_of(5), 2);
+    }
+
+    #[test]
+    fn plain_doc_without_final_line_feed() {
+        let doc = Doc::plain("alpha\nbeta");
+        assert_eq!(doc.lines.len(), 2);
+        assert_eq!(doc.lines[1].source, 6..10);
+        assert_eq!(Doc::plain("").lines.len(), 1, "an empty file has one blank line");
+    }
+
+    #[test]
+    fn plain_doc_maps_every_character() {
+        let source = "naïve café\t日本語 👨\u{200d}👩\n";
+        let doc = Doc::plain(source);
+        let line = &doc.lines[0];
+        for span in &line.spans {
+            let found = span.source.as_ref().expect("every plain span has a source");
+            if found.exact {
+                assert_eq!(source.get(found.range.clone()), Some(span.text.as_str()));
+            }
+        }
+        let stops = doc.stops(0);
+        assert!(stops.iter().all(|&stop| source.is_char_boundary(stop)), "{stops:?}");
+        let last = *stops.last().expect("stop");
+        assert_eq!(doc.char_end(last), source.len() - 1, "the joined emoji is one stop");
+    }
+
+    #[test]
+    fn crlf_file_gives_the_right_line_numbers() {
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(dir.path().join("w.txt"), "one\r\ntwo\r\nthree\r\n").expect("write");
+        let loaded = crate::files::load(dir.path(), std::path::Path::new("w.txt")).expect("load");
+        let doc = Doc::plain(&loaded.text);
+        assert_eq!(doc.source, "one\ntwo\nthree\n");
+        let three = doc.source.find("three").expect("three");
+        assert_eq!(doc.line_of(three), 3);
+    }
+
+    #[test]
+    fn kind_follows_the_extension() {
+        use std::path::Path;
+        for md in ["A.MD", "x.markdown", "dir/readme.Md"] {
+            assert_eq!(DocKind::of(Path::new(md)), DocKind::Markdown, "{md}");
+        }
+        for plain in ["x.rs", "Makefile", "notes.md.txt", ".md"] {
+            assert_eq!(DocKind::of(Path::new(plain)), DocKind::Plain, "{plain}");
+        }
+        assert_eq!(Doc::for_kind(DocKind::Plain, "# not a heading\n").lines[0].plain(), "# not a heading");
+        assert_eq!(Doc::for_kind(DocKind::Markdown, "# heading\n").lines[0].plain(), "heading");
     }
 
     fn find_line<'a>(doc: &'a Doc, plain: &str) -> &'a DocLine {
