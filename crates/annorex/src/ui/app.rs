@@ -19,6 +19,7 @@ use crate::payload::sanitize;
 use crate::replies::{Candidate, Reply};
 use crate::review::{Annotation, Kind, Review, Section, reanchor_range};
 use crate::safety::Safety;
+use crate::watch::{self, Change, ChangeKind, Known};
 use crate::wrap::WrapCache;
 
 /// The agent in the target pane and its state.
@@ -199,6 +200,10 @@ pub struct App {
     pub(crate) tree: Tree,
     pub(crate) finder: Finder,
     marks: HashSet<String>,
+    /// The open files that changed on disk since they were read, by document id.
+    pub(crate) changes: HashMap<String, ChangeKind>,
+    known: Option<Known>,
+    watch_rx: Option<std::sync::mpsc::Receiver<Change>>,
     scan_rx: Option<std::sync::mpsc::Receiver<Scan>>,
 }
 
@@ -244,6 +249,9 @@ impl App {
             tree: Tree::default(),
             finder: Finder::default(),
             marks: HashSet::new(),
+            changes: HashMap::new(),
+            known: None,
+            watch_rx: None,
             scan_rx: None,
         };
         if !replies.is_empty() {
@@ -284,6 +292,7 @@ impl App {
         self.replies.push(Reply { id, text: loaded.text, at: None });
         self.screen = Screen::Viewer;
         self.show_reply(self.replies.len() - 1);
+        self.sync_watch();
         Effect::None
     }
 
@@ -351,6 +360,97 @@ impl App {
         }
     }
 
+    /// Tell the watch thread which files are open and what they looked like when read.
+    fn sync_watch(&self) {
+        let Some(known) = &self.known else { return };
+        let list: Vec<(PathBuf, Stamp)> = self
+            .replies
+            .iter()
+            .filter_map(|reply| self.files.get(&reply.id))
+            .map(|file| (file.relative.clone(), file.stamp))
+            .collect();
+        if let Ok(mut guard) = known.lock() {
+            *guard = list;
+        }
+    }
+
+    /// Start the thread that looks at the open files every two seconds.
+    pub fn start_watch(&mut self) {
+        let Some(root) = self.root.clone() else { return };
+        let known: Known = Known::default();
+        self.watch_rx = Some(watch::spawn(root, &known));
+        self.known = Some(known);
+        self.sync_watch();
+    }
+
+    /// Take what the background threads found: the scan of the tree and the changes of files.
+    /// True when something changed on the screen.
+    pub fn poll_background(&mut self) -> bool {
+        let mut changed = self.poll_scan();
+        while let Some(change) = self.watch_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.file_changed(&change);
+            changed = true;
+        }
+        changed
+    }
+
+    /// A file changed on disk. The text on the screen stays until the user reads the file again.
+    pub fn file_changed(&mut self, change: &Change) {
+        let id = file_id(&change.path);
+        if self.files.contains_key(&id) {
+            self.changes.insert(id, change.kind);
+        }
+    }
+
+    /// The banner for the file on the screen, when it changed on disk.
+    pub(crate) fn banner(&self) -> Option<String> {
+        let id = self.shown_id.as_deref()?;
+        let path = self.files.get(id)?.relative.display();
+        Some(match self.changes.get(id)? {
+            ChangeKind::Modified => format!("{path} changed on disk. Press r to read it again."),
+            ChangeKind::Deleted => format!("{path} was deleted. Your notes are kept."),
+        })
+    }
+
+    /// `r` in the file viewer: read the file on the screen again.
+    fn reload_shown(&mut self) {
+        let (Some(root), Some(id)) = (self.root.clone(), self.shown_id.clone()) else { return };
+        let Some(relative) = self.files.get(&id).map(|file| file.relative.clone()) else { return };
+        match crate::files::load(&root, &relative) {
+            Ok(loaded) => self.reload_file(&id, loaded),
+            Err(crate::files::FileError::NotFound(_) | crate::files::FileError::NotAFile(_)) => {
+                self.changes.insert(id, ChangeKind::Deleted);
+                self.status = Some("The file is gone. Your notes are kept.".to_owned());
+            }
+            Err(error) => self.status = Some(error.to_string()),
+        }
+    }
+
+    /// Give an open file its new text. The notes and the open editors move to their quoted text. A
+    /// note whose text is gone stays and is marked. The cursor stays on its line.
+    pub fn reload_file(&mut self, id: &str, loaded: LoadedFile) {
+        let Some(position) = self.replies.iter().position(|reply| reply.id == id) else { return };
+        let Some(reply) = self.replies.get_mut(position) else { return };
+        let old = sanitize(&reply.text);
+        let new = sanitize(&loaded.text);
+        reply.text = loaded.text;
+        if let Some(file) = self.files.get_mut(id) {
+            file.stamp = loaded.stamp;
+        }
+        self.changes.remove(id);
+        let changed = if old == new { Vec::new() } else { vec![(id.to_owned(), old, new)] };
+        if self.shown_id.as_deref() == Some(id) {
+            let (line, top) = (self.cursor_line(), self.top);
+            self.show_reply(position);
+            self.top = top.min(self.doc.lines.len().saturating_sub(1));
+            let line = line.min(self.doc.lines.len().saturating_sub(1));
+            self.cursor = self.line_start(line).unwrap_or(0);
+            self.snap_cursor();
+        }
+        self.place_again(&changed);
+        self.sync_watch();
+    }
+
     /// `[` and `]`: show the previous or the next open file.
     fn step_file(&mut self, forward: bool) {
         let target = if forward { Some(self.selected + 1) } else { self.selected.checked_sub(1) };
@@ -375,6 +475,7 @@ impl App {
             self.replies.remove(index);
         }
         self.files.remove(&id);
+        self.changes.remove(&id);
         self.reviews.remove(&id);
         self.sent.remove(&id);
         self.parked.remove(&id);
@@ -393,6 +494,7 @@ impl App {
         } else {
             self.show_reply(index.min(self.replies.len() - 1));
         }
+        self.sync_watch();
     }
 
     pub fn doc(&self) -> &Doc {
@@ -785,6 +887,7 @@ impl App {
             KeyCode::Esc => self.selection = None,
             _ => match self.action_of(key) {
                 Some(Action::Quit) => return self.request_quit(),
+                Some(Action::Reload) if self.mode == Mode::Files => self.reload_shown(),
                 Some(Action::Reload) => return Effect::Reload,
                 Some(Action::Zoom) => return Effect::ToggleZoom,
                 Some(Action::Down) => self.move_cursor(1),
@@ -929,6 +1032,7 @@ impl App {
                 Some(Action::Right) if self.panel_view == PanelView::Tree => self.tree.expand(),
                 Some(Action::Find) if self.panel_view == PanelView::Tree => self.tree.start_filter(),
                 Some(Action::Quit) => return self.request_quit(),
+                Some(Action::Reload) if self.mode == Mode::Files => self.reload_shown(),
                 Some(Action::Reload) => return Effect::Reload,
                 Some(Action::Zoom) => return Effect::ToggleZoom,
                 Some(Action::Down) => self.panel_move(1),

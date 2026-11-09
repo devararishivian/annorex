@@ -311,6 +311,15 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         Layout::TooSmall => return,
     };
     app.overlay = overlay;
+    let doc_area = match app.banner() {
+        Some(text) if doc_area.height > 1 => {
+            let row = Rect::new(doc_area.x, doc_area.y, doc_area.width, 1);
+            let style = Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD);
+            frame.render_widget(Paragraph::new(fit(&text, doc_area.width)).style(style), row);
+            Rect::new(doc_area.x, doc_area.y + 1, doc_area.width, doc_area.height - 1)
+        }
+        _ => doc_area,
+    };
     draw_doc(frame, app, doc_area);
     if let Some(panel) = panel_area {
         let borders = match layout {
@@ -666,7 +675,13 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
             let marker = if index == app.selected { "▸" } else { " " };
             let time = short_time(reply.at.as_deref(), &app.zone);
             let unsent = app.reviews.get(&reply.id).is_some_and(Review::has_unsent);
-            let dot = if unsent { "●" } else { " " };
+            let dot = if files && app.changes.contains_key(&reply.id) {
+                "≠"
+            } else if unsent {
+                "●"
+            } else {
+                " "
+            };
             let text = if files {
                 let path = app.files.get(&reply.id).map_or_else(
                     || reply.first_line().to_owned(),

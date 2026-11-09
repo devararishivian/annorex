@@ -9,6 +9,7 @@ use annorex::config::Config;
 use annorex::files::{LoadedFile, Stamp};
 use annorex::safety::Safety;
 use annorex::ui::{AgentState, App, Effect, draw};
+use annorex::watch::{Change, ChangeKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -381,4 +382,92 @@ fn snapshot_tree_overlay_50x20() {
     let (_dir, mut app) = tree_app(&Config::default());
     press(&mut app, "T\n");
     insta::assert_snapshot!(render(&mut app, 50, 20));
+}
+
+/// An app on a real work directory with `name` written and opened.
+fn real_app(name: &str, text: &str) -> (tempfile::TempDir, App) {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::write(dir.path().join(name), text).expect("write");
+    let mut app = App::new_files(state(), dir.path().to_path_buf(), &Config::default());
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    app.open_file(annorex::files::load(dir.path(), std::path::Path::new(name)).expect("load"));
+    (dir, app)
+}
+
+fn change(path: &str, kind: ChangeKind) -> Change {
+    Change { path: PathBuf::from(path), kind }
+}
+
+#[test]
+fn changed_file_shows_the_banner_and_r_clears_it() {
+    let (dir, mut app) = real_app("a.txt", "alpha beta\n");
+    assert!(!render(&mut app, 80, 12).contains("changed on disk"));
+    std::fs::write(dir.path().join("a.txt"), "new text\nalpha beta\n").expect("change");
+    app.file_changed(&change("a.txt", ChangeKind::Modified));
+    let screen = render(&mut app, 80, 12);
+    assert!(screen.contains("a.txt changed on disk. Press r to read it again."), "{screen}");
+    assert!(screen.contains("alpha beta") && !screen.contains("new text"), "the old text stays: {screen}");
+    press(&mut app, "p");
+    assert!(render(&mut app, 80, 12).contains("≠ a.txt"), "the list marks the file");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "r");
+    let screen = render(&mut app, 80, 12);
+    assert!(!screen.contains("changed on disk") && screen.contains("new text"), "{screen}");
+}
+
+#[test]
+fn changed_file_reanchors_and_detaches() {
+    let (dir, mut app) = real_app("a.txt", "alpha beta gamma\n");
+    press(&mut app, "0vllllcfirst\n");
+    press(&mut app, "wwvllllcsecond\n"); // "gamma"
+    std::fs::write(dir.path().join("a.txt"), "intro line\nalpha beta\n").expect("change");
+    app.file_changed(&change("a.txt", ChangeKind::Modified));
+    press(&mut app, "r");
+    let notes = &app.review().expect("review").annotations;
+    assert_eq!(notes.len(), 2, "nothing is deleted");
+    assert_eq!(notes[0].range, 11..16, "the note follows its text");
+    assert!(!notes[0].detached);
+    assert!(notes[1].detached, "the text of the second note is gone");
+    let export = app.export();
+    assert!(export.contains("text not found"), "{export}");
+    assert!(export.contains("first") && export.contains("second"), "{export}");
+}
+
+#[test]
+fn deleted_file_keeps_notes_and_exports() {
+    let (dir, mut app) = real_app("a.txt", "alpha beta\n");
+    press(&mut app, "0vllllcnote\n");
+    std::fs::remove_file(dir.path().join("a.txt")).expect("remove");
+    app.file_changed(&change("a.txt", ChangeKind::Deleted));
+    let screen = render(&mut app, 80, 12);
+    assert!(screen.contains("a.txt was deleted. Your notes are kept."), "{screen}");
+    press(&mut app, "r");
+    assert_eq!(app.status(), Some("The file is gone. Your notes are kept."));
+    assert!(app.export().contains("note"), "{}", app.export());
+    assert!(render(&mut app, 80, 12).contains("alpha beta"), "the text stays");
+}
+
+#[test]
+fn editor_open_during_a_change_survives_the_reload() {
+    let (dir, mut app) = real_app("a.txt", "alpha beta\n");
+    press(&mut app, "0vllllcwip");
+    std::fs::write(dir.path().join("a.txt"), "x\nalpha beta\n").expect("change");
+    app.file_changed(&change("a.txt", ChangeKind::Modified));
+    let screen = render(&mut app, 80, 12);
+    assert!(screen.contains("wip") && screen.contains("changed on disk"), "{screen}");
+    let loaded = annorex::files::load(dir.path(), std::path::Path::new("a.txt")).expect("load");
+    app.reload_file(&annorex::ui::file_id(std::path::Path::new("a.txt")), loaded);
+    press(&mut app, "\n");
+    let note = &app.review().expect("review").annotations[0];
+    assert_eq!(note.range, 2..7, "the editor range moved with its text");
+    assert_eq!(note.note, "wip");
+}
+
+#[test]
+fn banner_snapshot_80x24() {
+    let (dir, mut app) = real_app("a.txt", "alpha beta\nsecond line\n");
+    press(&mut app, "0vllllcnote\n");
+    std::fs::write(dir.path().join("a.txt"), "changed\n").expect("change");
+    app.file_changed(&change("a.txt", ChangeKind::Modified));
+    insta::assert_snapshot!(render(&mut app, 80, 24));
 }

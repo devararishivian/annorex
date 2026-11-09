@@ -21,4 +21,5 @@ pub mod safety;
 pub mod send;
 pub mod tui;
 pub mod ui;
+pub mod watch;
 pub mod wrap;

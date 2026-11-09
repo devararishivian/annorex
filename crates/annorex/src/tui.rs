@@ -98,6 +98,7 @@ pub fn run_loop(
         while let Ok(state) = updates.try_recv() {
             app.set_state(state);
         }
+        app.poll_background();
         if stop.load(Ordering::SeqCst) {
             return Ok(());
         }

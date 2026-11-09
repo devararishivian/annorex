@@ -163,7 +163,7 @@ pub fn load(root: &Path, relative: &Path) -> Result<LoadedFile, FileError> {
 
 /// The stamp of a file now. `None` when the file is gone or cannot be read.
 pub fn stamp(root: &Path, relative: &Path) -> Option<Stamp> {
-    let metadata = std::fs::metadata(root.join(relative)).ok()?;
+    let metadata = std::fs::metadata(root.join(relative)).ok().filter(std::fs::Metadata::is_file)?;
     Some(Stamp { size: metadata.len(), modified: metadata.modified().ok() })
 }
 
