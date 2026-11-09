@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod cli;
 pub mod deliver;
+pub mod doc;
 pub mod install;
 pub mod open;
 pub mod payload;
