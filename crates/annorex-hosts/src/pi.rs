@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: added `sessions_for_cwd` (all sessions of one directory that have a reply).
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: added `sessions_for_cwd` (the newest sessions of one directory that have a reply, up to a limit).
 //! Pi (pi-mono coding agent): `<sessions>/--<encoded cwd>--/<timestamp>_<uuid>.jsonl`.
 //!
 //! One file per session. The first line is a `session` header carrying the `cwd`; every
@@ -120,18 +120,27 @@ pub(crate) fn newest_with_messages(mut files: Vec<PathBuf>) -> Option<PathBuf> {
         .find(|p| std::fs::read_to_string(p).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1))))
 }
 
-/// All sessions in the encoded directory of `cwd` that hold at least one reply, newest
-/// modification first. Annorex uses the list to see whether the session of a pane is ambiguous.
-pub fn sessions_for_cwd(sessions_dir: &Path, cwd: &Path) -> Vec<(PathBuf, std::time::SystemTime)> {
-    let mut found: Vec<(PathBuf, std::time::SystemTime)> = jsonl_files(&sessions_dir.join(encoded_dir(cwd)))
+/// The newest sessions in the encoded directory of `cwd` that hold at least one reply, newest
+/// modification first, a maximum of `limit`. Annorex uses the list to see whether the session of a
+/// pane is ambiguous. The files are ranked by modification time first, so only the files that the
+/// list needs are read.
+pub fn sessions_for_cwd(
+    sessions_dir: &Path,
+    cwd: &Path,
+    limit: usize,
+) -> Vec<(PathBuf, std::time::SystemTime)> {
+    let mut ranked: Vec<(PathBuf, std::time::SystemTime)> = jsonl_files(&sessions_dir.join(encoded_dir(cwd)))
         .into_iter()
-        .filter(|path| {
-            std::fs::read_to_string(path).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1)))
-        })
         .filter_map(|path| modified(&path).map(|time| (path, time)))
         .collect();
-    found.sort_by(|(a, a_time), (b, b_time)| b_time.cmp(a_time).then_with(|| b.cmp(a)));
-    found
+    ranked.sort_by(|(a, a_time), (b, b_time)| b_time.cmp(a_time).then_with(|| b.cmp(a)));
+    ranked
+        .into_iter()
+        .filter(|(path, _)| {
+            std::fs::read_to_string(path).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1)))
+        })
+        .take(limit)
+        .collect()
 }
 
 fn modified(path: &Path) -> Option<std::time::SystemTime> {

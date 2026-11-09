@@ -17,7 +17,7 @@ use unicode_width::UnicodeWidthStr;
 const LONG: &str = include_str!("fixtures/reply-long.md");
 
 fn state(agent: Agent, state: &str) -> AgentState {
-    AgentState { agent, safety: Safety::Clear { state: Some(state.to_owned()) } }
+    AgentState { agent: Some(agent), safety: Safety::Clear { state: Some(state.to_owned()) } }
 }
 
 fn reply(id: &str, text: &str) -> Reply {
@@ -208,12 +208,15 @@ fn panel_lists_replies_and_enter_selects() {
 fn header_shows_blocked_kind() {
     let mut app = viewer();
     app.set_state(AgentState {
-        agent: Agent::OpenCode,
+        agent: Some(Agent::OpenCode),
         safety: Safety::Blocked { kind: Some("permission".into()), msg: Some("allow bash?".into()) },
     });
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
     assert!(header.contains("opencode (waiting for permission)"), "{header}");
-    app.set_state(AgentState { agent: Agent::OpenCode, safety: Safety::Blocked { kind: None, msg: None } });
+    app.set_state(AgentState {
+        agent: Some(Agent::OpenCode),
+        safety: Safety::Blocked { kind: None, msg: None },
+    });
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
     assert!(header.contains("opencode (blocked)"), "{header}");
 }
@@ -224,7 +227,7 @@ fn header_shows_working() {
     app.set_state(state(Agent::Pi, "working"));
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
     assert!(header.contains("pi (working…)"), "{header}");
-    app.set_state(AgentState { agent: Agent::Pi, safety: Safety::Clear { state: None } });
+    app.set_state(AgentState { agent: Some(Agent::Pi), safety: Safety::Clear { state: None } });
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
     assert!(header.contains("pi (unknown)"), "{header}");
 }
@@ -338,4 +341,17 @@ fn picker_keeps_the_selected_session_visible() {
         assert!(screen.contains(&wanted), "after {n} presses:\n{screen}");
     }
     assert_eq!(press(&mut app, "\n"), Effect::PickSession(29));
+}
+
+#[test]
+fn not_an_agent_shows_in_the_pane() {
+    let message = "the focused pane is not running Claude Code, Pi, or OpenCode";
+    let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+    let mut app = App::new(state, Screen::Error(message.into()), Vec::new());
+    let screen = render(&mut app, 100, 12);
+    let header = screen.lines().next().expect("header");
+    assert!(header.contains("no agent"), "{header}");
+    assert!(screen.contains(&format!("Annorex: {message}")), "{screen}");
+    assert_eq!(press(&mut app, "r"), Effect::Reload);
+    assert_eq!(press(&mut app, "q"), Effect::Quit);
 }

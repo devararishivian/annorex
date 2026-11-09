@@ -1,9 +1,10 @@
 //! Calls of the `rex` CLI.
 
 use std::ffi::OsString;
-use std::io::Write as _;
+use std::io::{Read, Write as _};
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 
@@ -24,8 +25,18 @@ impl<R: Runner + ?Sized> Runner for &R {
     }
 }
 
-impl Runner for SystemRunner {
-    fn run(&self, argv: &[OsString], stdin: Option<&[u8]>) -> std::io::Result<Output> {
+/// How long one Rex call can take. A call that takes longer fails with [`RexError::Timeout`].
+pub(crate) const REX_TIMEOUT: Duration = Duration::from_secs(10);
+
+impl SystemRunner {
+    /// Run the command. Kill it and give an error of kind `TimedOut` when it runs longer than
+    /// `timeout`.
+    pub fn run_with_timeout(
+        &self,
+        argv: &[OsString],
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+    ) -> std::io::Result<Output> {
         let Some((program, rest)) = argv.split_first() else {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty command"));
         };
@@ -35,8 +46,8 @@ impl Runner for SystemRunner {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
-        // Write standard input on its own thread, so a child that writes much output before it
-        // reads all of its input cannot block both sides.
+        // Each pipe has its own thread, so a child that writes much output before it reads all of
+        // its input cannot block both sides, and the wait below can time out.
         let writer = match (stdin, child.stdin.take()) {
             (Some(data), Some(mut pipe)) => {
                 let data = data.to_vec();
@@ -44,7 +55,24 @@ impl Runner for SystemRunner {
             }
             _ => None,
         };
-        let output = child.wait_with_output()?;
+        let stdout = child.stdout.take().map(read_all);
+        let stderr = child.stderr.take().map(read_all);
+        let deadline = Instant::now() + timeout;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the command timed out"));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let collect = |handle: Option<std::thread::JoinHandle<Vec<u8>>>| {
+            handle.map(|handle| handle.join().unwrap_or_default()).unwrap_or_default()
+        };
+        let output = Output { status, stdout: collect(stdout), stderr: collect(stderr) };
         if let Some(writer) = writer {
             let written = writer.join().map_err(|_| std::io::Error::other("stdin writer thread failed"))?;
             // A child that fails can exit before it reads all of its input. Then its exit status and
@@ -55,6 +83,21 @@ impl Runner for SystemRunner {
             }
         }
         Ok(output)
+    }
+}
+
+/// Read a pipe to its end on its own thread.
+fn read_all(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut data = Vec::new();
+        let _ = pipe.read_to_end(&mut data);
+        data
+    })
+}
+
+impl Runner for SystemRunner {
+    fn run(&self, argv: &[OsString], stdin: Option<&[u8]>) -> std::io::Result<Output> {
+        self.run_with_timeout(argv, stdin, REX_TIMEOUT)
     }
 }
 
@@ -69,6 +112,8 @@ pub enum RexError {
     Failed { method: String, code: Option<i32>, stderr: String },
     #[error("{} {method} gave JSON that Annorex cannot read: {source}", call_of(method))]
     BadJson { method: String, source: serde_json::Error },
+    #[error("{} {method} did not answer in {} s", call_of(method), REX_TIMEOUT.as_secs())]
+    Timeout { method: String },
     #[error("cannot run rex: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -178,7 +223,13 @@ impl<R: Runner> Rex<R> {
     ) -> Result<serde_json::Value, RexError> {
         let input = serde_json::to_vec(args)
             .map_err(|source| RexError::BadJson { method: method.to_owned(), source })?;
-        let output = self.runner.run(command, Some(&input))?;
+        let output = self.runner.run(command, Some(&input)).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                RexError::Timeout { method: method.to_owned() }
+            } else {
+                RexError::Io(error)
+            }
+        })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr = stderr.trim();
@@ -300,6 +351,40 @@ mod tests {
 
     fn strings(argv: &[OsString]) -> Vec<String> {
         argv.iter().map(|arg| arg.to_string_lossy().into_owned()).collect()
+    }
+
+    /// A runner that always times out.
+    struct TimeoutRunner;
+
+    impl Runner for TimeoutRunner {
+        fn run(&self, _argv: &[OsString], _stdin: Option<&[u8]>) -> std::io::Result<Output> {
+            Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"))
+        }
+    }
+
+    #[test]
+    fn hung_rex_call_times_out() {
+        let dir = tempfile::tempdir().expect("dir");
+        let pid_file = dir.path().join("pid");
+        let script = format!("echo $$ > {}; exec sleep 5", pid_file.display());
+        let argv: Vec<OsString> = ["sh", "-c", script.as_str()].map(OsString::from).to_vec();
+        let start = Instant::now();
+        let result = SystemRunner.run_with_timeout(&argv, None, Duration::from_millis(300));
+        assert!(start.elapsed() < Duration::from_secs(2), "{:?}", start.elapsed());
+        assert_eq!(result.expect_err("timeout").kind(), std::io::ErrorKind::TimedOut);
+        let pid = std::fs::read_to_string(&pid_file).expect("pid file");
+        let alive = Command::new("kill").args(["-0", pid.trim()]).output().expect("kill");
+        assert!(!alive.status.success(), "the child {} is still alive", pid.trim());
+    }
+
+    #[test]
+    fn a_timed_out_call_is_a_rex_timeout() {
+        let rex = Rex::new(PathBuf::from("/opt/rex/bin/rex"), "session:s1".to_owned(), TimeoutRunner);
+        let error = rex.view().expect_err("timeout");
+        assert!(matches!(error, RexError::Timeout { .. }), "{error:?}");
+        assert_eq!(error.to_string(), "rex api call session.view did not answer in 10 s");
+        let error = rex.process("block:b1").expect_err("timeout");
+        assert_eq!(error.to_string(), "rex block call process did not answer in 10 s");
     }
 
     #[test]

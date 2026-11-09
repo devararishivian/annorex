@@ -21,6 +21,9 @@ pub enum BusyEffect {
     Steers,
 }
 
+/// The message when a pane does not run a supported agent (spec §6.1).
+pub const NOT_AGENT: &str = "the focused pane is not running Claude Code, Pi, or OpenCode";
+
 impl Agent {
     const ALL: [Agent; 3] = [Agent::ClaudeCode, Agent::Pi, Agent::OpenCode];
 
@@ -40,6 +43,12 @@ impl Agent {
             Self::Pi => "pi",
             Self::OpenCode => "opencode",
         }
+    }
+
+    /// The agent that an `argv0` names. Only the file name counts: `/opt/homebrew/bin/pi` is Pi.
+    pub fn from_argv0(argv0: &str) -> Option<Self> {
+        let name = argv0.rsplit('/').next().unwrap_or(argv0);
+        Self::ALL.into_iter().find(|agent| agent.argv0() == name)
     }
 
     /// The transcript reader of the agent.
@@ -69,10 +78,7 @@ impl Agent {
 /// of the foreground process decides. The process name is never used: Pi runs as `node`.
 pub fn detect(process: &ProcessInfo, status: &StatusList) -> Option<Agent> {
     let foreground = process.foreground.as_ref()?;
-    let by_argv0 = foreground
-        .argv0
-        .as_deref()
-        .and_then(|argv0| Agent::ALL.into_iter().find(|agent| agent.argv0() == argv0));
+    let by_argv0 = foreground.argv0.as_deref().and_then(Agent::from_argv0);
     let by_app = status.root().and_then(|root| {
         let agent = Agent::ALL.into_iter().find(|agent| Some(agent.status_app()) == root.app.as_deref())?;
         let owner_runs = root.owner.as_ref().is_some_and(|owner| owner.pid == foreground.pid);
@@ -177,5 +183,23 @@ mod tests {
             fg.name = "opencode".to_owned();
         }
         assert_eq!(detect(&shell, &empty()), None);
+    }
+
+    #[test]
+    fn argv0_with_a_path_is_detected() {
+        assert_eq!(Agent::from_argv0("/opt/homebrew/bin/pi"), Some(Agent::Pi));
+        assert_eq!(Agent::from_argv0("pi"), Some(Agent::Pi));
+        assert_eq!(Agent::from_argv0("/Users/dev/.local/bin/claude"), Some(Agent::ClaudeCode));
+        assert_eq!(Agent::from_argv0("/usr/bin/zsh"), None);
+        assert_eq!(Agent::from_argv0("/opt/pi/bin/pip"), None, "only the file name counts");
+        let text = include_str!("../tests/fixtures/rex/process-pi.json")
+            .replace("\"argv0\": \"pi\"", "\"argv0\": \"/opt/homebrew/bin/pi\"");
+        let process: ProcessInfo = serde_json::from_str(&text).expect("process");
+        assert_eq!(
+            process.foreground.as_ref().and_then(|fg| fg.argv0.as_deref()),
+            Some("/opt/homebrew/bin/pi"),
+            "the fixture changed"
+        );
+        assert_eq!(detect(&process, &empty()), Some(Agent::Pi));
     }
 }

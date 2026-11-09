@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: renamed the crate; the host detection test is now a label test, because detect_host is removed; added a test for sessions_for_cwd.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: renamed the crate; the host detection test is now a label test, because detect_host is removed; added tests for sessions_for_cwd, also for its limit.
 //! Pi sessions: the active branch, what counts as a message, and finding a session by cwd.
 //! Semantics match Plannotator's `apps/pi-extension/assistant-message.ts`.
 
@@ -202,10 +202,37 @@ fn pi_sessions_for_cwd_newest_first() {
         std::fs::write(&path, text).expect("session");
         touch(&path, seconds);
     }
-    let found = sessions_for_cwd(&root, Path::new("/work/app"));
+    let found = sessions_for_cwd(&root, Path::new("/work/app"), usize::MAX);
     let names: Vec<_> = found.iter().map(|(path, _)| path.file_name().expect("name").to_owned()).collect();
     assert_eq!(names, ["b.jsonl", "a.jsonl"], "newest first; c.jsonl has no reply");
     assert_eq!(found[0].1, std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000));
-    assert_eq!(sessions_for_cwd(&root, Path::new("/work/none")), []);
+    assert_eq!(sessions_for_cwd(&root, Path::new("/work/none"), usize::MAX), []);
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}
+
+#[test]
+fn pi_sessions_for_cwd_stops_at_the_limit() {
+    let root = temp("sessions-limit");
+    let bucket = root.join(encoded_dir(Path::new("/work/app")));
+    std::fs::create_dir_all(&bucket).expect("bucket");
+    let full = fixture("pi.jsonl");
+    let header = full.lines().next().expect("header line").to_owned() + "\n";
+    for n in 0..25_u64 {
+        let path = bucket.join(format!("s{n:02}.jsonl"));
+        std::fs::write(&path, &full).expect("session");
+        touch(&path, 1_000 + n);
+    }
+    // The newest file has no reply. It must not use one place of the limit.
+    let empty = bucket.join("zz-empty.jsonl");
+    std::fs::write(&empty, &header).expect("empty session");
+    touch(&empty, 9_000);
+    let found = sessions_for_cwd(&root, Path::new("/work/app"), 20);
+    let names: Vec<_> = found
+        .iter()
+        .map(|(path, _)| path.file_name().expect("name").to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 20);
+    assert_eq!(names[0], "s24.jsonl", "newest first");
+    assert_eq!(names[19], "s05.jsonl", "the 20 newest sessions with a reply");
     std::fs::remove_dir_all(&root).expect("cleanup");
 }

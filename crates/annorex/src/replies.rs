@@ -13,6 +13,8 @@ use crate::rex::{ProcessInfo, Rex, RexError, Runner};
 
 /// The reply list shows a maximum of this many replies (spec §6.3).
 pub const REPLY_LIMIT: usize = 25;
+/// The most sessions of one directory that the picker lists.
+pub const SESSION_LIMIT: usize = 20;
 
 /// Two sessions of one directory that changed in this time make the session ambiguous.
 pub const RECENT: Duration = Duration::from_mins(10);
@@ -127,7 +129,7 @@ pub fn candidates(
         Agent::Pi => {
             let sessions = roots.pi_sessions();
             searched = sessions.display().to_string();
-            for (path, updated) in pi::sessions_for_cwd(&sessions, &source.cwd) {
+            for (path, updated) in pi::sessions_for_cwd(&sessions, &source.cwd, SESSION_LIMIT) {
                 found.push((SessionRef::Pi(path), updated));
             }
         }
@@ -135,7 +137,7 @@ pub fn candidates(
             let databases = roots.opencode_databases();
             searched = databases.iter().map(|db| db.display().to_string()).collect::<Vec<_>>().join(", ");
             for db in databases {
-                for session in opencode::sessions_for_cwd(&db, &source.cwd)? {
+                for session in opencode::sessions_for_cwd(&db, &source.cwd, SESSION_LIMIT)? {
                     let updated =
                         UNIX_EPOCH + Duration::from_millis(u64::try_from(session.updated).unwrap_or(0));
                     found.push((SessionRef::OpenCode { db: db.clone(), found: session }, updated));
@@ -186,7 +188,7 @@ pub fn matching_panes<R: Runner>(rex: &Rex<R>, agent: Agent, cwd: &Path) -> Resu
         for block in view.blocks().filter(|block| block.creator_name.as_deref() == Some(TERMINAL_CREATOR)) {
             let Ok(process) = rex.process(&block.block_id) else { continue };
             let Some(foreground) = process.foreground else { continue };
-            let same_agent = foreground.argv0.as_deref() == Some(agent.argv0());
+            let same_agent = foreground.argv0.as_deref().and_then(Agent::from_argv0) == Some(agent);
             if same_agent && foreground.cwd.as_deref().is_some_and(|dir| same_dir(dir, cwd)) {
                 count += 1;
             }
@@ -333,6 +335,8 @@ mod tests {
     /// Answers `rex` calls by the method name in argv.
     struct RexScript {
         calls: RefCell<Vec<String>>,
+        /// The `argv0` of the second Pi pane.
+        pi2_argv0: &'static str,
     }
 
     impl Runner for RexScript {
@@ -365,7 +369,8 @@ mod tests {
                     _ => view(&["block:pi2", "block:pi-other-dir", "block:gone"]),
                 },
                 [_, _, _, _, _, _, block, method, _] if method == "process" => match block.as_str() {
-                    "block:pi1" | "block:pi2" => process("pi", "/Users/dev/app"),
+                    "block:pi1" => process("pi", "/Users/dev/app"),
+                    "block:pi2" => process(self.pi2_argv0, "/Users/dev/app"),
                     "block:pi-other-dir" => process("pi", "/Users/dev/other"),
                     "block:shell" => process("zsh", "/Users/dev/app"),
                     _ => {
@@ -380,12 +385,23 @@ mod tests {
 
     #[test]
     fn two_panes_same_agent_same_dir_need_picker() {
-        let rex =
-            Rex::new(PathBuf::from("/rex"), "session:a".into(), RexScript { calls: RefCell::default() });
+        let rex = Rex::new(
+            PathBuf::from("/rex"),
+            "session:a".into(),
+            RexScript { calls: RefCell::default(), pi2_argv0: "pi" },
+        );
         let panes = matching_panes(&rex, Agent::Pi, Path::new("/Users/dev/app")).expect("panes");
         assert_eq!(panes, 2, "pi1 and pi2; not the shell, not the other directory, not the failed pane");
         let now = SystemTime::now();
         assert!(needs_picker(Agent::Pi, panes, &[candidate(now)], now));
         assert!(!needs_picker(Agent::Pi, 1, &[candidate(now)], now));
+    }
+
+    #[test]
+    fn two_panes_with_full_paths_need_picker() {
+        let script = RexScript { calls: RefCell::default(), pi2_argv0: "/opt/homebrew/bin/pi" };
+        let rex = Rex::new(PathBuf::from("/rex"), "session:a".into(), script);
+        let panes = matching_panes(&rex, Agent::Pi, Path::new("/Users/dev/app")).expect("panes");
+        assert_eq!(panes, 2, "a pane that starts pi with a full path counts");
     }
 }

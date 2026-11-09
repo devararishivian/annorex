@@ -11,14 +11,14 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event};
 use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGTERM};
 
-use crate::agent::{Agent, detect};
+use crate::agent::{Agent, NOT_AGENT, detect};
 use crate::open::pane_label;
 use crate::replies::{
     Candidate, Reply, SessionRef, Source, candidates, load_replies, matching_panes, needs_picker,
     process_table,
 };
 use crate::rex::{Rex, RexError, Runner, SystemRunner};
-use crate::safety::check;
+use crate::safety::{Safety, check};
 use crate::ui::{AgentState, App, Effect, Screen, draw};
 
 /// The longest wait for an event before the loop draws again.
@@ -90,37 +90,34 @@ pub fn run_loop(
     }
 }
 
-/// Why `annorex last` stopped before the viewer started.
-#[derive(Debug, thiserror::Error)]
-pub enum LastError {
-    #[error(transparent)]
-    Rex(#[from] RexError),
-    #[error("the pane is not running Claude Code, Pi, or OpenCode")]
-    NotAgent,
-    #[error("cannot use the terminal: {0}")]
-    Terminal(#[from] io::Error),
+/// Start the terminal. When `init` fails, call `restore`: a half-done init can leave raw mode on.
+fn start_terminal<T>(init: impl FnOnce() -> io::Result<T>, restore: impl FnOnce()) -> io::Result<T> {
+    init().inspect_err(|_| restore())
 }
 
-/// `annorex last`: show the replies of the agent in `target` in this terminal.
-pub fn run_last(rex: &Rex<SystemRunner>, target: &str) -> Result<(), LastError> {
+/// `annorex last`: show the replies of the agent in `target` in this terminal. Every problem after
+/// the Rex discovery shows in the pane, so the user can read it.
+pub fn run_last(rex: &Rex<SystemRunner>, target: &str) -> io::Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [SIGHUP, SIGTERM, SIGINT] {
         signal_hook::flag::register(signal, Arc::clone(&stop))?;
     }
-    let process = rex.process(target)?;
-    let status = rex.program_status(target)?;
-    let agent = detect(&process, &status).ok_or(LastError::NotAgent)?;
-    let state = AgentState { agent, safety: check(&status) };
-    let mut viewer = Viewer { rex, target, agent, session: None, candidates: Vec::new() };
-    let (screen, replies) = viewer.start()?;
-    let mut app = App::new(state, screen, replies);
+    let mut viewer = Viewer {
+        rex,
+        target,
+        state: AgentState { agent: None, safety: Safety::Clear { state: None } },
+        session: None,
+        candidates: Vec::new(),
+    };
+    let (screen, replies) = viewer.start_or_error();
+    let mut app = App::new(viewer.state.clone(), screen, replies);
 
     let (sender, updates) = mpsc::channel();
     let watcher = Rex::new(rex.bin.clone(), rex.session.clone(), SystemRunner);
     let pane = target.to_owned();
-    std::thread::spawn(move || watch_status(&watcher, &pane, agent, &sender));
+    std::thread::spawn(move || watch_status(&watcher, &pane, &sender));
 
-    let mut terminal = ratatui::try_init()?;
+    let mut terminal = start_terminal(ratatui::try_init, ratatui::restore)?;
     let result = run_loop(
         &mut app,
         &mut CrosstermEvents,
@@ -130,15 +127,22 @@ pub fn run_last(rex: &Rex<SystemRunner>, target: &str) -> Result<(), LastError> 
         &mut |effect, app: &mut App| viewer.apply(effect, app),
     );
     ratatui::restore();
-    Ok(result?)
+    result
+}
+
+/// The agent and its state in a pane. A failed Rex call gives `None`.
+fn read_state<R: Runner>(rex: &Rex<R>, target: &str) -> Result<AgentState, RexError> {
+    let process = rex.process(target)?;
+    let status = rex.program_status(target)?;
+    Ok(AgentState { agent: detect(&process, &status), safety: check(&status) })
 }
 
 /// Send the state of the agent every `STATUS_EVERY`. Stop when the receiver is gone.
-fn watch_status<R: Runner>(rex: &Rex<R>, target: &str, agent: Agent, sender: &Sender<AgentState>) {
+fn watch_status<R: Runner>(rex: &Rex<R>, target: &str, sender: &Sender<AgentState>) {
     loop {
         std::thread::sleep(STATUS_EVERY);
-        let Ok(status) = rex.program_status(target) else { continue };
-        if sender.send(AgentState { agent, safety: check(&status) }).is_err() {
+        let Ok(state) = read_state(rex, target) else { continue };
+        if sender.send(state).is_err() {
             return;
         }
     }
@@ -148,19 +152,29 @@ fn watch_status<R: Runner>(rex: &Rex<R>, target: &str, agent: Agent, sender: &Se
 struct Viewer<'a, R: Runner> {
     rex: &'a Rex<R>,
     target: &'a str,
-    agent: Agent,
+    /// The agent and its state at the last start. `agent` is `None` before the first start.
+    state: AgentState,
     /// The session that the viewer shows. `None` before the user picks one.
     session: Option<SessionRef>,
     candidates: Vec<Candidate>,
 }
 
 impl<R: Runner> Viewer<'_, R> {
-    /// Find the session of the agent and read its replies. Only a failed Rex call is an error.
+    /// `start`, with a failed Rex call as a message for the pane.
+    fn start_or_error(&mut self) -> (Screen, Vec<Reply>) {
+        self.start().unwrap_or_else(|error| (Screen::Error(error.to_string()), Vec::new()))
+    }
+
+    /// Find the agent and its session, and read its replies. Only a failed Rex call is an error.
     /// Other problems give `Screen::Error`.
     fn start(&mut self) -> Result<(Screen, Vec<Reply>), RexError> {
         self.session = None;
+        self.state = read_state(self.rex, self.target)?;
+        let Some(agent) = self.state.agent else {
+            return Ok((Screen::Error(NOT_AGENT.to_owned()), Vec::new()));
+        };
         let process = self.rex.process(self.target)?;
-        let Some(source) = Source::from_process(self.agent, &process) else {
+        let Some(source) = Source::from_process(agent, &process) else {
             let message = "Rex does not report the directory of the agent process".to_owned();
             return Ok((Screen::Error(message), Vec::new()));
         };
@@ -174,13 +188,10 @@ impl<R: Runner> Viewer<'_, R> {
             Ok(found) => found,
             Err(error) => return Ok((Screen::Error(error.to_string()), Vec::new())),
         };
-        let panes = if self.agent == Agent::ClaudeCode {
-            1
-        } else {
-            matching_panes(self.rex, self.agent, &source.cwd)?
-        };
+        let panes =
+            if agent == Agent::ClaudeCode { 1 } else { matching_panes(self.rex, agent, &source.cwd)? };
         self.candidates = found;
-        if needs_picker(self.agent, panes, &self.candidates, SystemTime::now()) {
+        if needs_picker(agent, panes, &self.candidates, SystemTime::now()) {
             return Ok((Screen::Picker(self.candidates.clone()), Vec::new()));
         }
         Ok(self.open(0))
@@ -219,7 +230,7 @@ impl<R: Runner> Viewer<'_, R> {
     fn reload(&mut self, app: &mut App) {
         let showing = matches!(app.screen, Screen::Viewer);
         let result = match &self.session {
-            Some(session) if self.agent != Agent::ClaudeCode => Ok(match load_replies(session) {
+            Some(session) if self.state.agent != Some(Agent::ClaudeCode) => Ok(match load_replies(session) {
                 Ok(replies) => (Screen::Viewer, replies),
                 Err(error) => (Screen::Error(error.to_string()), Vec::new()),
             }),
@@ -235,6 +246,7 @@ impl<R: Runner> Viewer<'_, R> {
             Err(error) if showing => app.set_status(error.to_string()),
             Err(error) => app.set_error(error.to_string()),
         }
+        app.set_state(self.state.clone());
     }
 
     fn toggle_zoom(&self) -> Result<(), String> {
@@ -309,8 +321,10 @@ mod tests {
     }
 
     fn app() -> App {
-        let state =
-            AgentState { agent: Agent::ClaudeCode, safety: Safety::Clear { state: Some("idle".into()) } };
+        let state = AgentState {
+            agent: Some(Agent::ClaudeCode),
+            safety: Safety::Clear { state: Some("idle".into()) },
+        };
         let reply = Reply { id: "r1".into(), text: "# Title\n\nSome text.".into(), at: None };
         App::new(state, Screen::Viewer, vec![reply])
     }
@@ -326,6 +340,19 @@ mod tests {
 
     fn no_effects() -> impl FnMut(Effect, &mut App) {
         |effect, _| panic!("unexpected effect {effect:?}")
+    }
+
+    #[test]
+    fn failed_init_restores_the_terminal() {
+        let restored = std::cell::Cell::new(false);
+        let result: io::Result<u8> =
+            super::start_terminal(|| Err(io::Error::other("no alternate screen")), || restored.set(true));
+        assert!(result.is_err());
+        assert!(restored.get(), "restore must run when the init fails");
+        let restored = std::cell::Cell::new(false);
+        let result = super::start_terminal(|| Ok(7_u8), || restored.set(true));
+        assert_eq!(result.expect("init"), 7);
+        assert!(!restored.get(), "restore must not run when the init works");
     }
 
     #[test]
@@ -405,8 +432,11 @@ mod tests {
         let mut events = script(vec![Ok(None)]);
         let mut canvas = Counting::new();
         let (tx, rx) = mpsc::channel();
-        tx.send(AgentState { agent: Agent::Pi, safety: Safety::Clear { state: Some("working".into()) } })
-            .expect("send");
+        tx.send(AgentState {
+            agent: Some(Agent::Pi),
+            safety: Safety::Clear { state: Some("working".into()) },
+        })
+        .expect("send");
         let stop = AtomicBool::new(false);
         run_loop(&mut app(), &mut events, &mut canvas, &stop, &rx, &mut no_effects()).expect("loop");
         assert!(canvas.header().contains("pi (working…)"), "{}", canvas.header());

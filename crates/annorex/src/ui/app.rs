@@ -11,14 +11,16 @@ use crate::wrap::WrapCache;
 /// The agent in the target pane and its state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentState {
-    pub agent: Agent,
+    /// `None` when the pane does not run a supported agent.
+    pub agent: Option<Agent>,
     pub safety: Safety,
 }
 
 impl AgentState {
     /// For example `claude (idle)`, `pi (working…)`, `opencode (waiting for permission)`.
     pub fn header_text(&self) -> String {
-        let name = self.agent.host().label();
+        let Some(agent) = self.agent else { return "no agent".to_owned() };
+        let name = agent.host().label();
         let state = match &self.safety {
             Safety::Blocked { kind: Some(kind), .. } => format!("waiting for {kind}"),
             Safety::Blocked { kind: None, .. } => "blocked".to_owned(),

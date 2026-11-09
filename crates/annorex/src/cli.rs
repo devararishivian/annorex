@@ -13,7 +13,7 @@ use crate::open::{OpenError, Placement, open_last};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
-use crate::tui::{LastError, run_last};
+use crate::tui::run_last;
 
 /// Exit code: sent, pasted, or probe complete.
 pub const EXIT_OK: i32 = 0;
@@ -131,7 +131,7 @@ pub fn run(
         Command::Probe { target, session, json } => probe(&env, &target, session, json, out),
         Command::Deliver { target, session, paste_only } => {
             let mode = if paste_only { DeliveryMode::PasteOnly } else { DeliveryMode::Send };
-            send(&env, &target, session, mode, stdin, out)
+            send(&env, &target, session, mode, stdin, out, err)
         }
         Command::Last { target, session } => last(&env, &target, session),
         Command::Rex { command: RexCommand::Install { dir } } => rex_install(&env, dir, out),
@@ -247,6 +247,7 @@ fn send(
     mode: DeliveryMode,
     stdin: &mut impl Read,
     out: &mut impl Write,
+    err: &mut impl Write,
 ) -> Result<i32, Failure> {
     let mut payload = String::new();
     stdin.read_to_string(&mut payload).map_err(|error| Failure {
@@ -263,8 +264,16 @@ fn send(
         Outcome::Sent => "sent",
         Outcome::Pasted => "pasted",
     };
-    writeln!(out, "{word}").map_err(|error| io_failure(&error))?;
-    Ok(EXIT_OK)
+    Ok(report_sent(out, err, word))
+}
+
+/// Print the result word of a delivery. The text is already in the agent when this runs, so a
+/// closed output must not turn the result into a failure: report it on `err` and give `0`.
+pub fn report_sent(out: &mut impl Write, err: &mut impl Write, word: &str) -> i32 {
+    if let Err(error) = writeln!(out, "{word}") {
+        let _ = writeln!(err, "annorex: {word}, but cannot write the output: {error}");
+    }
+    EXIT_OK
 }
 
 fn last(
@@ -273,10 +282,9 @@ fn last(
     session: Option<String>,
 ) -> Result<i32, Failure> {
     let rex = Rex::discover_with(env, session)?;
-    run_last(&rex, target).map_err(|error| match error {
-        LastError::Rex(rex) => Failure::from(rex),
-        LastError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
-        LastError::Terminal(_) => Failure { code: EXIT_FAILURE, message: error.to_string() },
+    run_last(&rex, target).map_err(|error| Failure {
+        code: EXIT_FAILURE,
+        message: format!("cannot use the terminal: {error}"),
     })?;
     Ok(EXIT_OK)
 }
@@ -347,4 +355,39 @@ fn rex_open_last(
         .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
     writeln!(out, "{json}").map_err(|error| io_failure(&error))?;
     Ok(EXIT_OK)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+mod tests {
+    use super::*;
+
+    /// A writer that always fails, like a closed pipe.
+    struct Closed;
+
+    impl Write for Closed {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+    }
+
+    #[test]
+    fn sent_with_closed_output_exits_0() {
+        let mut err = Vec::new();
+        assert_eq!(report_sent(&mut Closed, &mut err, "sent"), EXIT_OK);
+        let text = String::from_utf8(err).expect("utf8");
+        assert!(text.contains("sent, but cannot write the output"), "{text}");
+    }
+
+    #[test]
+    fn sent_with_working_output_prints_the_word() {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        assert_eq!(report_sent(&mut out, &mut err, "pasted"), EXIT_OK);
+        assert_eq!(String::from_utf8(out).expect("utf8"), "pasted\n");
+        assert_eq!(err, Vec::<u8>::new());
+    }
 }

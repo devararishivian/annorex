@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: added `sessions_for_cwd` (all top-level sessions of one directory).
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: added `sessions_for_cwd` (the newest top-level sessions of one directory, up to a limit).
 //! `OpenCode`: sessions, messages and parts live in `SQLite` (`opencode.db` under the XDG data
 //! dir), one row per message and one per part, with the payload as JSON in `data`.
 //!
@@ -91,9 +91,10 @@ pub fn find_session(db: &Path, cwd: &Path) -> Result<Found, HostError> {
         .ok_or_else(|| HostError::NoTranscript(format!("no OpenCode session for {cwd} in {}", db.display())))
 }
 
-/// All top-level, unarchived sessions started exactly in `cwd`, across both schemas, newest
-/// `time_updated` first. Annorex uses the list to see whether the session of a pane is ambiguous.
-pub fn sessions_for_cwd(db: &Path, cwd: &Path) -> Result<Vec<Found>, HostError> {
+/// The top-level, unarchived sessions started exactly in `cwd`, across both schemas, newest
+/// `time_updated` first, a maximum of `limit`. Annorex uses the list to see whether the session of a
+/// pane is ambiguous.
+pub fn sessions_for_cwd(db: &Path, cwd: &Path, limit: usize) -> Result<Vec<Found>, HostError> {
     let connection = open_read_only(db, WHAT)?;
     let cwd = normalize(&cwd.to_string_lossy());
     let mut found = Vec::new();
@@ -120,6 +121,7 @@ pub fn sessions_for_cwd(db: &Path, cwd: &Path) -> Result<Vec<Found>, HostError> 
         }
     }
     found.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| b.id.cmp(&a.id)));
+    found.truncate(limit);
     Ok(found)
 }
 

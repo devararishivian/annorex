@@ -106,7 +106,7 @@ pub struct Opened {
 
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
-    #[error("the focused pane is not running Claude Code, Pi, or OpenCode")]
+    #[error("{}", crate::agent::NOT_AGENT)]
     NotAgent,
     #[error("Rex did not give the id of the new pane")]
     NoNewBlock,
