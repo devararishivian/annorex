@@ -559,10 +559,10 @@ fn discard_removes_the_review_after_y() {
 
 #[test]
 fn copy_gives_the_export_to_the_clipboard() {
-    use annorex::clipboard::{Clipboard, copy_review};
-    struct Fake(Vec<String>, Result<(), String>);
+    use annorex::clipboard::{Clipboard, CopyError, copy_review};
+    struct Fake(Vec<String>, Result<(), CopyError>);
     impl Clipboard for Fake {
-        fn copy(&mut self, text: &str) -> Result<(), String> {
+        fn copy(&mut self, text: &str) -> Result<(), CopyError> {
             self.0.push(text.to_owned());
             self.1.clone()
         }
@@ -572,9 +572,13 @@ fn copy_gives_the_export_to_the_clipboard() {
     copy_review(&mut app, &mut fake);
     assert_eq!(fake.0, [app.export()]);
     assert_eq!(app.status(), Some("Copied 1 annotation."));
-    let mut failing = Fake(Vec::new(), Err("no pbcopy".to_owned()));
+    let mut failing = Fake(Vec::new(), Err(CopyError::failed("no pbcopy")));
     copy_review(&mut app, &mut failing);
     assert_eq!(app.status(), Some("Copy failed: no pbcopy"));
+    let mut partial = Fake(Vec::new(), Err(CopyError::terminal_only("no pbcopy")));
+    copy_review(&mut app, &mut partial);
+    let status = app.status().expect("status");
+    assert!(status.contains("terminal only") && status.contains("no pbcopy"), "{status}");
     let mut empty = self::app("alpha\n");
     let mut none = Fake(Vec::new(), Ok(()));
     copy_review(&mut empty, &mut none);

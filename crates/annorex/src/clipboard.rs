@@ -8,7 +8,26 @@ use crate::ui::App;
 
 /// A place that takes text.
 pub trait Clipboard {
-    fn copy(&mut self, text: &str) -> Result<(), String>;
+    /// # Errors
+    /// Gives a [`CopyError`] when a way to copy failed.
+    fn copy(&mut self, text: &str) -> Result<(), CopyError>;
+}
+
+/// A failed copy. When the terminal got the OSC 52 sequence, the copy can still work through it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyError {
+    pub message: String,
+    pub terminal_sent: bool,
+}
+
+impl CopyError {
+    pub fn failed(message: impl Into<String>) -> Self {
+        Self { message: message.into(), terminal_sent: false }
+    }
+
+    pub fn terminal_only(message: impl Into<String>) -> Self {
+        Self { message: message.into(), terminal_sent: true }
+    }
 }
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -62,23 +81,32 @@ impl<W: Write> SystemClipboard<W> {
 }
 
 impl<W: Write> Clipboard for SystemClipboard<W> {
-    fn copy(&mut self, text: &str) -> Result<(), String> {
+    fn copy(&mut self, text: &str) -> Result<(), CopyError> {
         self.out
             .write_all(osc52(text).as_bytes())
             .and_then(|()| self.out.flush())
-            .map_err(|error| format!("cannot write to the terminal: {error}"))?;
+            .map_err(|error| CopyError::failed(format!("cannot write to the terminal: {error}")))?;
         let mut child = Command::new(&self.program)
             .args(&self.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|error| format!("cannot run {}: {error}", self.program.to_string_lossy()))?;
+            .map_err(|error| {
+                CopyError::terminal_only(format!("cannot run {}: {error}", self.program.to_string_lossy()))
+            })?;
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(text.as_bytes()).map_err(|error| format!("cannot write to pbcopy: {error}"))?;
+            stdin
+                .write_all(text.as_bytes())
+                .map_err(|error| CopyError::terminal_only(format!("cannot write to pbcopy: {error}")))?;
         }
-        let status = child.wait().map_err(|error| format!("pbcopy failed: {error}"))?;
-        if status.success() { Ok(()) } else { Err(format!("pbcopy failed: {status}")) }
+        let status =
+            child.wait().map_err(|error| CopyError::terminal_only(format!("pbcopy failed: {error}")))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(CopyError::terminal_only(format!("pbcopy failed: {status}")))
+        }
     }
 }
 
@@ -92,7 +120,10 @@ pub fn copy_review(app: &mut App, clipboard: &mut impl Clipboard) {
     }
     let message = match clipboard.copy(&text) {
         Ok(()) => format!("Copied {count} annotation{}.", if count == 1 { "" } else { "s" }),
-        Err(error) => format!("Copy failed: {error}"),
+        Err(error) if error.terminal_sent => {
+            format!("Copied through the terminal only ({}). The terminal may ignore it.", error.message)
+        }
+        Err(error) => format!("Copy failed: {}", error.message),
     };
     app.set_status(message);
 }
@@ -141,13 +172,13 @@ mod tests {
         let mut out = Vec::new();
         let mut clipboard = SystemClipboard::with(&mut out, "/nonexistent/pbcopy", &[]);
         let error = clipboard.copy("x").expect_err("missing program");
-        assert!(error.contains("pbcopy"), "{error}");
+        assert!(error.message.contains("pbcopy") && error.terminal_sent, "{error:?}");
         assert_eq!(String::from_utf8(out).expect("utf8"), osc52("x"));
     }
 
     #[test]
     fn a_failing_program_is_an_error() {
         let mut clipboard = SystemClipboard::with(Vec::new(), "sh", &["-c", "cat >/dev/null; exit 3"]);
-        assert!(clipboard.copy("x").expect_err("exit 3").contains("failed"));
+        assert!(clipboard.copy("x").expect_err("exit 3").message.contains("failed"));
     }
 }
