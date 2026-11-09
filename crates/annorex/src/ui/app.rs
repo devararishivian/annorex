@@ -85,6 +85,8 @@ pub struct App {
     pub(crate) page: usize,
     /// True when the last frame showed the panel over the document.
     pub(crate) overlay: bool,
+    /// The time zone of the times in the reply list. The default is the system zone.
+    pub(crate) zone: jiff::tz::TimeZone,
 }
 
 impl App {
@@ -107,6 +109,7 @@ impl App {
             status: None,
             page: 20,
             overlay: false,
+            zone: jiff::tz::TimeZone::system(),
         };
         if !replies.is_empty() {
             app.replies = replies;
@@ -162,6 +165,17 @@ impl App {
 
     pub fn set_state(&mut self, state: AgentState) {
         self.state = state;
+    }
+
+    /// Set the time zone of the times in the reply list.
+    pub fn set_time_zone(&mut self, zone: jiff::tz::TimeZone) {
+        self.zone = zone;
+    }
+
+    /// Show the session picker, with the first session selected.
+    pub fn set_picker(&mut self, candidates: Vec<Candidate>) {
+        self.screen = Screen::Picker(candidates);
+        self.picker_index = 0;
     }
 
     pub fn set_error(&mut self, message: String) {
@@ -307,7 +321,7 @@ impl App {
             KeyCode::Backspace => {
                 input.pop();
             }
-            KeyCode::Char(c) => input.push(c),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => input.push(c),
             _ => {}
         }
     }

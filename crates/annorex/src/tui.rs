@@ -264,7 +264,7 @@ fn show(app: &mut App, screen: Screen, replies: Vec<Reply>) {
     match screen {
         Screen::Viewer => app.set_replies(replies),
         Screen::Error(message) => app.set_error(message),
-        picker @ Screen::Picker(_) => app.screen = picker,
+        Screen::Picker(candidates) => app.set_picker(candidates),
     }
 }
 

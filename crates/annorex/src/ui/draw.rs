@@ -7,6 +7,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Focus, Screen, match_ranges};
 use crate::doc::{DocSpan, SpanStyle};
@@ -68,8 +69,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, view: &str, right: Opti
     let left = format!("Annorex · {view} · {}", app.state.header_text());
     let width = usize::from(area.width);
     let text = match right {
-        Some(right) if left.chars().count() + 1 + right.chars().count() <= width => {
-            let gap = width - left.chars().count() - right.chars().count();
+        Some(right) if left.width() + 1 + right.width() <= width => {
+            let gap = width - left.width() - right.width();
             format!("{left}{}{right}", " ".repeat(gap))
         }
         _ => fit(&left, area.width),
@@ -146,7 +147,10 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .skip(top_row)
         .take(height)
-        .map(|row| {
+        .enumerate()
+        .map(|(offset, row)| {
+            let matches =
+                query.as_deref().map(|query| row_matches(rows, top_row + offset, query)).unwrap_or_default();
             let number_style = if row.doc_line == cursor_line {
                 Style::new().add_modifier(Modifier::REVERSED)
             } else {
@@ -161,7 +165,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(format!("{number:>number_width$}"), number_style),
                 Span::raw(if gutter > 0 { " " } else { "" }),
             ];
-            spans.extend(row_spans(row, query.as_deref()));
+            spans.extend(row_spans(row, &matches));
             Line::from(spans)
         })
         .collect();
@@ -197,9 +201,35 @@ fn style_of(style: SpanStyle) -> Style {
     out
 }
 
-/// The spans of a row, with the matches of the query marked.
-fn row_spans(row: &VisualLine, query: Option<&str>) -> Vec<Span<'static>> {
-    let matches = query.map(|query| match_ranges(&row.plain(), query)).unwrap_or_default();
+/// The matches of `query` in row `index`, as character ranges of the row. A match can go over a
+/// wrap: the rows of one `DocLine` are joined with the space that the wrap removed.
+fn row_matches(rows: &[VisualLine], index: usize, query: &str) -> Vec<std::ops::Range<usize>> {
+    let Some(row) = rows.get(index) else { return Vec::new() };
+    let start = rows.partition_point(|other| other.doc_line < row.doc_line);
+    let group: Vec<&VisualLine> =
+        rows.iter().skip(start).take_while(|other| other.doc_line == row.doc_line).collect();
+    let texts: Vec<String> = group.iter().map(|row| row.plain()).collect();
+    let joined = texts.join(" ");
+    let mut begin = 0;
+    let mut mine = (0, 0);
+    for (position, text) in texts.iter().enumerate() {
+        let length = text.chars().count();
+        if start + position == index {
+            mine = (begin, begin + length);
+        }
+        begin += length + 1;
+    }
+    match_ranges(&joined, query)
+        .into_iter()
+        .filter_map(|range| {
+            let (from, to) = (range.start.max(mine.0), range.end.min(mine.1));
+            (from < to).then(|| from - mine.0..to - mine.0)
+        })
+        .collect()
+}
+
+/// The spans of a row, with the matches marked.
+fn row_spans(row: &VisualLine, matches: &[std::ops::Range<usize>]) -> Vec<Span<'static>> {
     let highlight = Style::new().fg(Color::Black).bg(Color::Yellow);
     let mut out = Vec::new();
     let mut position = 0;
@@ -241,7 +271,7 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         .take(height)
         .map(|(index, reply)| {
             let marker = if index == app.selected { "▸" } else { " " };
-            let time = short_time(reply.at.as_deref());
+            let time = short_time(reply.at.as_deref(), &app.zone);
             let text = format!("{marker} {:>2} {time} {}", index + 1, reply.first_line());
             let style = if index == app.panel_index && app.focus == Focus::Panel {
                 Style::new().add_modifier(Modifier::REVERSED)
@@ -256,14 +286,12 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// `MM-DD HH:MM` for an RFC 3339 time. Other text stays as it is.
-fn short_time(at: Option<&str>) -> String {
-    match at {
-        Some(at) if at.len() >= 16 && at.as_bytes().get(10) == Some(&b'T') => {
-            format!("{} {}", at.get(5..10).unwrap_or(""), at.get(11..16).unwrap_or(""))
-        }
-        Some(at) => at.to_owned(),
-        None => String::new(),
+/// `MM-DD HH:MM` in `zone` for an RFC 3339 time. Other text stays as it is.
+fn short_time(at: Option<&str>, zone: &jiff::tz::TimeZone) -> String {
+    let Some(at) = at else { return String::new() };
+    match at.parse::<jiff::Timestamp>() {
+        Ok(time) => time.to_zoned(zone.clone()).strftime("%m-%d %H:%M").to_string(),
+        Err(_) => at.to_owned(),
     }
 }
 
@@ -296,5 +324,28 @@ fn age(now: SystemTime, then: SystemTime) -> String {
         60..3600 => format!("updated {} min ago", seconds / 60),
         3600..86_400 => format!("updated {} h ago", seconds / 3600),
         _ => format!("updated {} d ago", seconds / 86_400),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::tz::{TimeZone, offset};
+
+    use super::short_time;
+
+    #[test]
+    fn reply_time_is_local() {
+        let zone = TimeZone::fixed(offset(7));
+        assert_eq!(short_time(Some("2026-11-09T10:48:00Z"), &zone), "11-09 17:48");
+        assert_eq!(short_time(Some("2026-11-09T10:30:30.000Z"), &TimeZone::UTC), "11-09 10:30");
+        let west = TimeZone::fixed(offset(-5));
+        assert_eq!(short_time(Some("2026-11-09T02:10:00+00:00"), &west), "11-08 21:10", "the date moves too");
+    }
+
+    #[test]
+    fn other_time_text_stays_as_it_is() {
+        let zone = TimeZone::fixed(offset(7));
+        assert_eq!(short_time(Some("yesterday"), &zone), "yesterday");
+        assert_eq!(short_time(None, &zone), "");
     }
 }

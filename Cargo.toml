@@ -13,6 +13,7 @@ repository = "https://github.com/devararishivian/annorex"
 annorex-hosts = { path = "crates/annorex-hosts" }
 clap = { version = "4.6.7", features = ["derive"] }
 insta = "1.49.0"
+jiff = "0.2.41"
 pulldown-cmark = { version = "0.13.6", default-features = false }
 ratatui = { version = "0.30.2", features = ["crossterm_0_29"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }

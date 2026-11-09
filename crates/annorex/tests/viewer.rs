@@ -33,7 +33,10 @@ fn replies() -> Vec<Reply> {
 }
 
 fn viewer() -> App {
-    App::new(state(Agent::ClaudeCode, "idle"), Screen::Viewer, replies())
+    let mut app = App::new(state(Agent::ClaudeCode, "idle"), Screen::Viewer, replies());
+    // The snapshots must not depend on the time zone of the machine.
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    app
 }
 
 fn key(code: KeyCode) -> KeyEvent {
@@ -354,4 +357,71 @@ fn not_an_agent_shows_in_the_pane() {
     assert!(screen.contains(&format!("Annorex: {message}")), "{screen}");
     assert_eq!(press(&mut app, "r"), Effect::Reload);
     assert_eq!(press(&mut app, "q"), Effect::Quit);
+}
+
+#[test]
+fn wide_state_keeps_reply_position() {
+    let mut app = App::new(
+        AgentState {
+            agent: Some(Agent::Pi), safety: Safety::Clear { state: Some("許可許可許可".into()) }
+        },
+        Screen::Viewer,
+        replies(),
+    );
+    let screen = render(&mut app, 50, 12);
+    let header = screen.lines().next().expect("header");
+    assert!(header.ends_with("reply 1/3") || header.contains('…'), "{header}");
+    assert!(header.width() <= 50, "{header}");
+    // At a larger width the whole header fits, with "reply 1/3" at the right edge.
+    let header = render(&mut app, 80, 12).lines().next().expect("header").to_owned();
+    assert!(header.ends_with("reply 1/3"), "{header}");
+}
+
+fn candidate(name: &str) -> Candidate {
+    Candidate {
+        session: SessionRef::Pi(PathBuf::from(format!("/{name}.jsonl"))),
+        updated: SystemTime::now(),
+        last_line: name.to_owned(),
+    }
+}
+
+#[test]
+fn new_picker_starts_at_the_first_session() {
+    let five: Vec<Candidate> = (0..5).map(|n| candidate(&format!("s{n}"))).collect();
+    let mut app = App::new(state(Agent::Pi, "idle"), Screen::Picker(five), Vec::new());
+    press(&mut app, "jjjj");
+    app.set_picker(vec![candidate("a"), candidate("b")]);
+    assert_eq!(press(&mut app, "\n"), Effect::PickSession(0));
+    assert!(render(&mut app, 80, 24).contains("▸ updated just now · a"));
+}
+
+#[test]
+fn ctrl_keys_do_not_type_in_find() {
+    let mut app = viewer();
+    press(&mut app, "/ab");
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    let screen = render(&mut app, 80, 24);
+    let footer = screen.lines().last().expect("footer");
+    assert_eq!(footer.trim(), "/ab", "{footer}");
+}
+
+#[test]
+fn match_split_by_wrap_is_highlighted() {
+    use ratatui::style::Color;
+    let text = "alpha beta gamma delta epsilon pi the text of end";
+    let state = state(Agent::ClaudeCode, "idle");
+    let mut app = App::new(state, Screen::Viewer, vec![reply("r1", text)]);
+    press(&mut app, "/the text\n");
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).expect("terminal");
+    terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let marked = |y: u16| -> String {
+        (0..40)
+            .filter(|&x| buffer.cell((x, y)).is_some_and(|cell| cell.bg == Color::Yellow))
+            .filter_map(|x| buffer.cell((x, y)).map(|cell| cell.symbol().to_owned()))
+            .collect()
+    };
+    assert_eq!(marked(1), "the", "the first row ends with the start of the match");
+    assert_eq!(marked(2), "text", "the second row starts with the rest of the match");
 }
