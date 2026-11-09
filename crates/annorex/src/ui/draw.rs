@@ -143,6 +143,17 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     app.top = rows.get(top_row).map_or(0, |row| row.doc_line);
     let query = app.query.clone();
+    // The cursor cell: the first row of the cursor line that shows the cursor stop.
+    let cursor_cell = (app.focus == Focus::Doc)
+        .then(|| {
+            let start = first_row(cursor_line)?;
+            rows.iter()
+                .enumerate()
+                .skip(start)
+                .take_while(|(_, row)| row.doc_line == cursor_line)
+                .find_map(|(index, row)| row.cell_of(app.cursor).map(|cell| (index, cell)))
+        })
+        .flatten();
     let lines: Vec<Line<'static>> = rows
         .iter()
         .skip(top_row)
@@ -165,7 +176,8 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(format!("{number:>number_width$}"), number_style),
                 Span::raw(if gutter > 0 { " " } else { "" }),
             ];
-            spans.extend(row_spans(row, &matches));
+            let cursor = cursor_cell.filter(|&(index, _)| index == top_row + offset).map(|(_, cell)| cell);
+            spans.extend(row_spans(row, &matches, cursor));
             Line::from(spans)
         })
         .collect();
@@ -228,27 +240,39 @@ fn row_matches(rows: &[VisualLine], index: usize, query: &str) -> Vec<std::ops::
         .collect()
 }
 
-/// The spans of a row, with the matches marked.
-fn row_spans(row: &VisualLine, matches: &[std::ops::Range<usize>]) -> Vec<Span<'static>> {
+/// The spans of a row, with the matches marked and the cursor cell reversed.
+fn row_spans(
+    row: &VisualLine,
+    matches: &[std::ops::Range<usize>],
+    cursor: Option<usize>,
+) -> Vec<Span<'static>> {
     let highlight = Style::new().fg(Color::Black).bg(Color::Yellow);
     let mut out = Vec::new();
     let mut position = 0;
-    for DocSpan { text, style } in &row.spans {
+    for DocSpan { text, style, .. } in &row.spans {
         let base = style_of(*style);
-        let mut current = String::new();
-        let mut current_marked = false;
-        for c in text.chars() {
-            let marked = matches.iter().any(|range| range.contains(&position));
-            if marked != current_marked && !current.is_empty() {
-                let style = if current_marked { highlight } else { base };
-                out.push(Span::styled(std::mem::take(&mut current), style));
+        let style_at = |position: usize| {
+            if cursor == Some(position) {
+                base.add_modifier(Modifier::REVERSED)
+            } else if matches.iter().any(|range| range.contains(&position)) {
+                highlight
+            } else {
+                base
             }
-            current_marked = marked;
+        };
+        let mut current = String::new();
+        let mut current_style = base;
+        for c in text.chars() {
+            let style = style_at(position);
+            if style != current_style && !current.is_empty() {
+                out.push(Span::styled(std::mem::take(&mut current), current_style));
+            }
+            current_style = style;
             current.push(c);
             position += 1;
         }
         if !current.is_empty() {
-            out.push(Span::styled(current, if current_marked { highlight } else { base }));
+            out.push(Span::styled(current, current_style));
         }
     }
     out

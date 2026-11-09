@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::payload::sanitize;
 
@@ -26,11 +26,31 @@ pub struct SpanStyle {
     pub rule: bool,
 }
 
+/// Where the text of a span comes from in the source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpanSource {
+    /// The bytes in `Doc::source` that the span shows.
+    pub range: Range<usize>,
+    /// True when the text is the same as the source bytes. Then character `i` of the text maps to
+    /// its own bytes. When false (a tab, an entity, an escape), all characters map to `range`.
+    pub exact: bool,
+}
+
 /// Text with one style.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocSpan {
     pub text: String,
     pub style: SpanStyle,
+    /// `None` for text that the display adds: list markers, quote bars, and table lines.
+    pub source: Option<SpanSource>,
+}
+
+/// The zero width joiner. A character after it belongs to the same glyph.
+const ZWJ: char = '\u{200d}';
+
+/// True when `c` does not start a new glyph: it joins to the character before it.
+pub(crate) fn joins(previous: Option<char>, c: char) -> bool {
+    previous == Some(ZWJ) || c == ZWJ || c.width().unwrap_or(0) == 0
 }
 
 /// One displayed line, before wrapping.
@@ -88,6 +108,93 @@ impl Doc {
     /// The number of source lines.
     pub fn source_lines(&self) -> usize {
         self.line_starts.len()
+    }
+
+    /// The cursor stops of a `DocLine` with their display columns, in display order. A stop is
+    /// the source byte offset of an exact character, or the start of an inexact span. A character
+    /// that joins the one before it has no stop.
+    fn stop_columns(&self, line: usize) -> Vec<(usize, usize)> {
+        let Some(line) = self.lines.get(line) else { return Vec::new() };
+        let mut out = Vec::new();
+        let mut column = 0;
+        for span in &line.spans {
+            match &span.source {
+                Some(SpanSource { range, exact: true }) => {
+                    let mut previous = None;
+                    for (index, c) in span.text.char_indices() {
+                        if !joins(previous, c) {
+                            out.push((range.start + index, column));
+                        }
+                        column += c.width().unwrap_or(0);
+                        previous = Some(c);
+                    }
+                }
+                Some(SpanSource { range, exact: false }) => {
+                    if !span.text.is_empty() {
+                        out.push((range.start, column));
+                    }
+                    column += span.text.width();
+                }
+                None => column += span.text.width(),
+            }
+        }
+        out
+    }
+
+    /// The cursor positions of a `DocLine`, as source byte offsets, in display order.
+    pub fn stops(&self, line: usize) -> Vec<usize> {
+        self.stop_columns(line).into_iter().map(|(offset, _)| offset).collect()
+    }
+
+    /// The stop of a `DocLine` at the display column `column`: the last stop that starts at or
+    /// before the column, else the first stop.
+    pub fn stop_near(&self, line: usize, column: usize) -> Option<usize> {
+        let stops = self.stop_columns(line);
+        stops.iter().rev().find(|&&(_, at)| at <= column).or(stops.first()).map(|&(offset, _)| offset)
+    }
+
+    /// The `DocLine` index and the display column of the stop at `offset`. An offset that is not
+    /// a stop gives the last text line that starts at or before it, and column 0.
+    pub fn locate(&self, offset: usize) -> (usize, usize) {
+        for line in 0..self.lines.len() {
+            if let Some((_, column)) = self.stop_columns(line).into_iter().find(|&(stop, _)| stop == offset) {
+                return (line, column);
+            }
+        }
+        let line = self
+            .lines
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, line)| !line.is_blank() && line.source.start <= offset)
+            .map_or(0, |(index, _)| index);
+        (line, 0)
+    }
+
+    /// The end byte of the character at `offset`. A stop of an inexact span ends where the span
+    /// ends. A character with joining characters after it ends after them.
+    pub fn char_end(&self, offset: usize) -> usize {
+        let inexact =
+            self.lines.iter().flat_map(|line| line.spans.iter()).find_map(|span| match &span.source {
+                Some(SpanSource { range, exact: false }) if range.start == offset => Some(range.end),
+                _ => None,
+            });
+        if let Some(end) = inexact {
+            return end;
+        }
+        let Some(rest) = self.source.get(offset..) else { return self.source.len() };
+        let mut chars = rest.char_indices();
+        let Some((_, first)) = chars.next() else { return offset };
+        let mut end = first.len_utf8();
+        let mut previous = first;
+        for (index, c) in chars {
+            if !joins(Some(previous), c) {
+                break;
+            }
+            end = index + c.len_utf8();
+            previous = c;
+        }
+        offset + end
     }
 }
 
@@ -163,7 +270,7 @@ impl<'a> Builder<'a> {
         let spans = if prefix.is_empty() {
             Vec::new()
         } else {
-            vec![DocSpan { text: prefix, style: self.prefix_style() }]
+            vec![DocSpan { text: prefix, style: self.prefix_style(), source: None }]
         };
         self.pending = Some(Pending { spans, source: start..start });
     }
@@ -173,7 +280,10 @@ impl<'a> Builder<'a> {
         if let Some(pending) = &mut self.pending {
             pending.source.end = pending.source.end.max(range.end);
             if !text.is_empty() || style.code_block {
-                pending.spans.push(DocSpan { text: text.replace('\t', TAB), style });
+                let text = text.replace('\t', TAB);
+                let exact = self.source.get(range.clone()) == Some(text.as_str());
+                let source = Some(SpanSource { range: range.clone(), exact });
+                pending.spans.push(DocSpan { text, style, source });
             }
         }
     }
@@ -529,6 +639,56 @@ mod tests {
         assert!(numbers.windows(2).all(|pair| pair[0] <= pair[1]), "{numbers:?}");
         assert!(numbers.iter().all(|&line| line >= 1 && line <= doc.source_lines()));
         assert!(doc.lines.iter().all(|line| doc.source.get(line.source.clone()).is_some()));
+    }
+
+    #[test]
+    fn exact_spans_map_each_char() {
+        let doc = Doc::parse("We change the **login** page\n");
+        let stops = doc.stops(0);
+        let plain = doc.lines[0].plain();
+        assert_eq!(stops.len(), plain.chars().count());
+        for (stop, c) in stops.iter().zip(plain.chars()) {
+            assert_eq!(doc.source[*stop..].chars().next(), Some(c), "stop {stop}");
+        }
+        let l = doc.source.find("login").expect("login");
+        assert!(stops.contains(&l) && stops.contains(&(l + 1)));
+        assert_eq!(doc.locate(l), (0, 14));
+        assert_eq!(doc.char_end(l), l + 1);
+    }
+
+    #[test]
+    fn inexact_span_has_one_stop() {
+        let doc = Doc::parse("```\na\tb\n```\n");
+        assert_eq!(plains(&doc), ["a    b"]);
+        assert_eq!(doc.stops(0), [4]);
+        assert_eq!(doc.locate(4), (0, 0));
+        assert_eq!(doc.char_end(4), 7);
+    }
+
+    #[test]
+    fn an_entity_is_one_stop_that_covers_the_entity() {
+        let doc = Doc::parse("a &amp; b\n");
+        assert_eq!(plains(&doc), ["a & b"]);
+        let amp = doc.source.find("&amp;").expect("entity");
+        assert!(doc.stops(0).contains(&amp));
+        assert_eq!(doc.char_end(amp), amp + 5);
+    }
+
+    #[test]
+    fn a_joined_glyph_is_one_stop() {
+        let doc = Doc::parse("e\u{301}x 👩\u{200d}💻 y\n");
+        let stops = doc.stops(0);
+        let plain = doc.lines[0].plain();
+        assert_eq!(stops.len(), 6, "{plain:?}: {stops:?}");
+        assert_eq!(doc.char_end(0), "e\u{301}".len());
+    }
+
+    #[test]
+    fn prefixes_have_no_stops() {
+        let doc = Doc::parse("- item\n");
+        assert_eq!(plains(&doc), ["- item"]);
+        assert_eq!(doc.stops(0).len(), 4);
+        assert_eq!(doc.locate(doc.stops(0)[0]), (0, 2));
     }
 
     #[test]

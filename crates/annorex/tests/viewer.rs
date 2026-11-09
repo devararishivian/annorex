@@ -12,6 +12,7 @@ use annorex::ui::{AgentState, App, Effect, Screen, draw};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Modifier;
 use unicode_width::UnicodeWidthStr;
 
 const LONG: &str = include_str!("fixtures/reply-long.md");
@@ -424,4 +425,67 @@ fn match_split_by_wrap_is_highlighted() {
     };
     assert_eq!(marked(1), "the", "the first row ends with the start of the match");
     assert_eq!(marked(2), "text", "the second row starts with the rest of the match");
+}
+
+fn small(text: &str) -> App {
+    let mut app = App::new(state(Agent::ClaudeCode, "idle"), Screen::Viewer, vec![reply("r1", text)]);
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    app
+}
+
+#[test]
+fn motions_follow_the_display() {
+    let mut app = small("alpha beta\n\ngamma delta\n");
+    assert_eq!(app.cursor(), 0);
+    press(&mut app, "lll");
+    assert_eq!(app.cursor(), 3);
+    press(&mut app, "w");
+    assert_eq!(app.cursor(), 6);
+    press(&mut app, "$");
+    assert_eq!(app.cursor(), 9);
+    press(&mut app, "0");
+    assert_eq!(app.cursor(), 0);
+    press(&mut app, "lllj");
+    assert_eq!(app.cursor(), 15, "j keeps the display column");
+    press(&mut app, "b");
+    assert_eq!(app.cursor(), 12, "b goes to the start of the word");
+    press(&mut app, "b");
+    assert_eq!(app.cursor(), 6, "b crosses to the word before");
+    press(&mut app, "k");
+    assert_eq!(app.cursor(), 6);
+    press(&mut app, "hhhhhhhhhhhh");
+    assert_eq!(app.cursor(), 0, "h stops at the first stop of the line");
+}
+
+#[test]
+fn l_stops_at_the_last_char_and_h_at_the_first() {
+    let mut app = small("ab\n");
+    press(&mut app, "lllll");
+    assert_eq!(app.cursor(), 1);
+    press(&mut app, "hhhh");
+    assert_eq!(app.cursor(), 0);
+}
+
+#[test]
+fn g_and_capital_g_go_to_the_first_and_last_line() {
+    let mut app = small("one\n\ntwo\n");
+    press(&mut app, "G");
+    assert_eq!(app.cursor(), 5);
+    press(&mut app, "g");
+    assert_eq!(app.cursor(), 0);
+}
+
+#[test]
+fn cursor_cell_is_reversed() {
+    let mut app = small("alpha beta\n");
+    press(&mut app, "l");
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).expect("terminal");
+    terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let reversed =
+        |x: u16| buffer.cell((x, 1)).expect("cell").style().add_modifier.contains(Modifier::REVERSED);
+    assert_eq!(buffer.cell((3, 1)).expect("cell").symbol(), "l");
+    assert!(reversed(3), "the second character is the cursor");
+    assert!(!reversed(2), "the first character is not");
+    assert!(!reversed(4));
 }

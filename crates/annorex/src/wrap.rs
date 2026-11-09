@@ -4,10 +4,7 @@ use std::collections::BTreeMap;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::doc::{Doc, DocSpan, SpanStyle};
-
-/// The zero width joiner. A character after it belongs to the same glyph.
-const ZWJ: char = '\u{200d}';
+use crate::doc::{Doc, DocSpan, SpanSource, SpanStyle, joins};
 
 /// One row of the document view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +20,30 @@ impl VisualLine {
     pub fn plain(&self) -> String {
         self.spans.iter().map(|span| span.text.as_str()).collect()
     }
+
+    /// The index of the character of this row that shows the stop at source `offset`.
+    pub fn cell_of(&self, offset: usize) -> Option<usize> {
+        let mut position = 0;
+        for span in &self.spans {
+            let count = span.text.chars().count();
+            match &span.source {
+                Some(SpanSource { range, exact: true }) if range.contains(&offset) => {
+                    let skipped = span
+                        .text
+                        .char_indices()
+                        .take_while(|&(index, _)| range.start + index < offset)
+                        .count();
+                    return Some(position + skipped);
+                }
+                Some(SpanSource { range, exact: false }) if range.start == offset && count > 0 => {
+                    return Some(position);
+                }
+                _ => {}
+            }
+            position += count;
+        }
+        None
+    }
 }
 
 /// A glyph: one character and the zero-width characters that join it.
@@ -30,6 +51,7 @@ struct Cluster {
     text: String,
     style: SpanStyle,
     width: usize,
+    source: Option<SpanSource>,
 }
 
 impl Cluster {
@@ -40,33 +62,75 @@ impl Cluster {
 
 fn clusters(spans: &[DocSpan]) -> Vec<Cluster> {
     let mut out: Vec<Cluster> = Vec::new();
-    let mut joined = false;
+    let mut previous: Option<char> = None;
     for span in spans {
-        for c in span.text.chars() {
-            let joins = joined || c == ZWJ || c.width().unwrap_or(0) == 0;
-            joined = c == ZWJ;
+        for (index, c) in span.text.char_indices() {
+            let source = span.source.as_ref().map(|source| {
+                if source.exact {
+                    let start = source.range.start + index;
+                    SpanSource { range: start..start + c.len_utf8(), exact: true }
+                } else {
+                    source.clone()
+                }
+            });
             match out.last_mut() {
-                Some(last) if joins && last.style == span.style => {
+                Some(last) if joins(previous, c) && last.style == span.style => {
                     last.text.push(c);
                     last.width = last.text.width();
+                    join_source(&mut last.source, source);
                 }
                 _ => out.push(Cluster {
                     text: c.to_string(),
                     style: span.style,
                     width: c.width().unwrap_or(0),
+                    source,
                 }),
             }
+            previous = Some(c);
         }
     }
     out
+}
+
+/// Add the source of a joined character to the source of its glyph.
+fn join_source(into: &mut Option<SpanSource>, next: Option<SpanSource>) {
+    let (Some(first), Some(next)) = (into.as_mut(), next) else { return };
+    if first.exact && next.exact && first.range.end == next.range.start {
+        first.range.end = next.range.end;
+    } else {
+        first.exact = false;
+        first.range.end = first.range.end.max(next.range.end);
+    }
+}
+
+/// True when `next` continues `last` in the source, so one span can hold both.
+fn continues(last: &DocSpan, cluster: &Cluster) -> bool {
+    last.style == cluster.style
+        && match (&last.source, &cluster.source) {
+            (None, None) => true,
+            (Some(a), Some(b)) if a.exact && b.exact => a.range.end == b.range.start,
+            (Some(a), Some(b)) => !a.exact && !b.exact && a.range == b.range,
+            _ => false,
+        }
 }
 
 fn spans_of(row: &[Cluster]) -> Vec<DocSpan> {
     let mut spans: Vec<DocSpan> = Vec::new();
     for cluster in row {
         match spans.last_mut() {
-            Some(last) if last.style == cluster.style => last.text.push_str(&cluster.text),
-            _ => spans.push(DocSpan { text: cluster.text.clone(), style: cluster.style }),
+            Some(last) if continues(last, cluster) => {
+                last.text.push_str(&cluster.text);
+                if let (Some(into), Some(next)) = (last.source.as_mut(), cluster.source.as_ref())
+                    && into.exact
+                {
+                    into.range.end = next.range.end;
+                }
+            }
+            _ => spans.push(DocSpan {
+                text: cluster.text.clone(),
+                style: cluster.style,
+                source: cluster.source.clone(),
+            }),
         }
     }
     spans
@@ -84,7 +148,12 @@ fn wrap_spans(spans: &[DocSpan], width: usize) -> Vec<Vec<DocSpan>> {
             if used < width {
                 used += 1;
                 if let Some(row) = rows.last_mut() {
-                    row.push(Cluster { text: " ".into(), style: cluster.style, width: 1 });
+                    row.push(Cluster {
+                        text: " ".into(),
+                        style: cluster.style,
+                        width: 1,
+                        source: cluster.source.clone(),
+                    });
                 }
             } else {
                 rows.push(Vec::new());
@@ -104,10 +173,11 @@ fn wrap_spans(spans: &[DocSpan], width: usize) -> Vec<Vec<DocSpan>> {
             used = 0;
         }
         for cluster in word {
-            let (text, cluster_width) = if cluster.width > width {
-                ("…".to_owned(), 1)
+            let (text, cluster_width, source) = if cluster.width > width {
+                let source = cluster.source.clone().map(|source| SpanSource { exact: false, ..source });
+                ("…".to_owned(), 1, source)
             } else {
-                (cluster.text.clone(), cluster.width)
+                (cluster.text.clone(), cluster.width, cluster.source.clone())
             };
             if used + cluster_width > width {
                 rows.push(Vec::new());
@@ -115,7 +185,7 @@ fn wrap_spans(spans: &[DocSpan], width: usize) -> Vec<Vec<DocSpan>> {
             }
             used += cluster_width;
             if let Some(row) = rows.last_mut() {
-                row.push(Cluster { text, style: cluster.style, width: cluster_width });
+                row.push(Cluster { text, style: cluster.style, width: cluster_width, source });
             }
         }
         index = word_end;
@@ -181,7 +251,7 @@ pub fn fit(text: &str, width: u16) -> String {
     }
     let mut out = String::new();
     let mut used = 0;
-    for cluster in clusters(&[DocSpan { text: text.to_owned(), style: SpanStyle::default() }]) {
+    for cluster in clusters(&[DocSpan { text: text.to_owned(), style: SpanStyle::default(), source: None }]) {
         if used + cluster.width > width - 1 {
             break;
         }
@@ -268,6 +338,55 @@ mod tests {
             .map(|span| span.text.as_str())
             .collect();
         assert_eq!(bold.concat().replace(' ', ""), "boldwords");
+    }
+
+    #[test]
+    fn wrap_splits_source_ranges() {
+        let doc = Doc::parse("alpha beta gamma delta\n");
+        let lines = wrap_doc(&doc, 11);
+        let ranges: Vec<Vec<(std::ops::Range<usize>, bool)>> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .filter_map(|s| s.source.as_ref())
+                    .map(|s| (s.range.clone(), s.exact))
+                    .collect()
+            })
+            .collect();
+        assert_eq!(ranges, [vec![(0..10, true)], vec![(11..22, true)]]);
+    }
+
+    #[test]
+    fn a_broken_long_token_keeps_continuous_ranges() {
+        let doc = Doc::parse("abcdefghij\n");
+        let lines = wrap_doc(&doc, 4);
+        let ranges: Vec<std::ops::Range<usize>> = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .filter_map(|s| s.source.clone())
+            .map(|s| s.range)
+            .collect();
+        assert_eq!(ranges, [0..4, 4..8, 8..10]);
+    }
+
+    #[test]
+    fn an_inexact_range_stays_on_both_parts() {
+        let doc = Doc::parse("```\nab\tcd ef\n```\n");
+        let lines = wrap_doc(&doc, 4);
+        let sources: Vec<_> =
+            lines.iter().flat_map(|line| line.spans.iter()).filter_map(|s| s.source.clone()).collect();
+        assert!(sources.len() >= 2);
+        assert!(sources.iter().all(|s| !s.exact && s.range == (4..12)), "{sources:?}");
+    }
+
+    #[test]
+    fn cell_of_finds_the_char_of_a_stop() {
+        let doc = Doc::parse("alpha beta gamma delta\n");
+        let lines = wrap_doc(&doc, 11);
+        assert_eq!(lines[0].cell_of(3), Some(3));
+        assert_eq!(lines[1].cell_of(11), Some(0));
+        assert_eq!(lines[1].cell_of(3), None);
     }
 
     #[test]

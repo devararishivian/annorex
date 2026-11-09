@@ -125,21 +125,35 @@ impl App {
 
     /// The `DocLine` of the cursor.
     pub fn cursor_line(&self) -> usize {
-        self.doc
-            .lines
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, line)| !line.is_blank() && line.source.start <= self.cursor)
-            .map_or(0, |(index, _)| index)
+        self.doc.locate(self.cursor).0
+    }
+
+    /// The cursor, as a byte offset in the source of the document.
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// The first cursor position of a `DocLine`.
+    fn line_start(&self, index: usize) -> Option<usize> {
+        let line = self.doc.lines.get(index)?;
+        Some(self.doc.stops(index).first().copied().unwrap_or(line.source.start))
     }
 
     /// Put `doc_line` at the top of the view and the cursor on it.
     pub fn jump_to_line(&mut self, doc_line: usize) {
-        if let Some(line) = self.doc.lines.get(doc_line) {
+        if let Some(start) = self.line_start(doc_line) {
             self.top = doc_line;
-            self.cursor = line.source.start;
+            self.cursor = start;
         }
+    }
+
+    /// Move the cursor to the nearest stop at or before it, so it is always a stop.
+    fn snap_cursor(&mut self) {
+        let line = self.doc.locate(self.cursor).0;
+        let stops = self.doc.stops(line);
+        let cursor = self.cursor;
+        let snapped = stops.iter().rev().find(|&&stop| stop <= cursor).or(stops.first()).copied();
+        self.cursor = snapped.or_else(|| self.line_start(line)).unwrap_or(0);
     }
 
     /// New replies after a read. The selected reply stays when it is still there.
@@ -158,6 +172,7 @@ impl App {
                 self.show_reply(index);
                 self.top = top.min(self.doc.lines.len().saturating_sub(1));
                 self.cursor = cursor.min(self.doc.source.len());
+                self.snap_cursor();
             }
             None => self.show_reply(0),
         }
@@ -199,7 +214,8 @@ impl App {
         self.doc = Doc::parse(&reply.text);
         self.cache.clear();
         self.top = 0;
-        self.cursor = 0;
+        let first = self.doc.lines.iter().position(|line| !line.is_blank());
+        self.cursor = first.and_then(|index| self.line_start(index)).unwrap_or(0);
     }
 
     /// Handle one key.
@@ -257,6 +273,12 @@ impl App {
             KeyCode::Char('u') if ctrl => self.move_cursor(-signed(half)),
             KeyCode::PageDown => self.move_cursor(signed(self.page.max(1))),
             KeyCode::PageUp => self.move_cursor(-signed(self.page.max(1))),
+            KeyCode::Char('h') | KeyCode::Left => self.step(false),
+            KeyCode::Char('l') | KeyCode::Right => self.step(true),
+            KeyCode::Char('w') => self.word(true),
+            KeyCode::Char('b') => self.word(false),
+            KeyCode::Char('0') => self.line_edge(false),
+            KeyCode::Char('$') => self.line_edge(true),
             KeyCode::Char('g') | KeyCode::Home => self.set_cursor_line(0),
             KeyCode::Char('G') | KeyCode::End => self.set_cursor_line(self.doc.lines.len().saturating_sub(1)),
             KeyCode::Char('/') => self.find_input = Some(String::new()),
@@ -351,21 +373,70 @@ impl App {
     }
 
     fn set_cursor_line(&mut self, index: usize) {
-        if let Some(line) = self.doc.lines.get(index) {
-            self.cursor = line.source.start;
+        if let Some(start) = self.line_start(index) {
+            self.cursor = start;
         }
     }
 
-    /// Move the cursor by `delta` text lines. Blank lines do not count.
+    /// Move the cursor to the previous or next stop of its line.
+    fn step(&mut self, forward: bool) {
+        let stops = self.doc.stops(self.cursor_line());
+        let Some(at) = stops.iter().position(|&stop| stop == self.cursor) else { return };
+        let target = if forward { at + 1 } else { at.wrapping_sub(1) };
+        if let Some(&stop) = stops.get(target) {
+            self.cursor = stop;
+        }
+    }
+
+    /// Move the cursor to the first or the last stop of its line.
+    fn line_edge(&mut self, last: bool) {
+        let stops = self.doc.stops(self.cursor_line());
+        if let Some(&stop) = if last { stops.last() } else { stops.first() } {
+            self.cursor = stop;
+        }
+    }
+
+    /// Move the cursor to the next word start, or to the start of this word or the word before.
+    fn word(&mut self, forward: bool) {
+        let mut starts = Vec::new();
+        for line in 0..self.doc.lines.len() {
+            let mut in_word = false;
+            for stop in self.doc.stops(line) {
+                let word =
+                    self.doc.source.get(stop..).and_then(|rest| rest.chars().next()).is_some_and(is_word);
+                if word && !in_word {
+                    starts.push(stop);
+                }
+                in_word = word;
+            }
+        }
+        let target = if forward {
+            starts.iter().find(|&&start| start > self.cursor)
+        } else {
+            starts.iter().rev().find(|&&start| start < self.cursor)
+        };
+        if let Some(&start) = target {
+            self.cursor = start;
+        }
+    }
+
+    /// Move the cursor by `delta` text lines, to the same display column. Blank lines do not count.
     fn move_cursor(&mut self, delta: isize) {
         let text: Vec<usize> =
             self.doc.lines.iter().enumerate().filter(|(_, line)| !line.is_blank()).map(|(i, _)| i).collect();
-        let Some(position) = text.iter().position(|&index| index == self.cursor_line()) else { return };
+        let (line, column) = self.doc.locate(self.cursor);
+        let Some(position) = text.iter().position(|&index| index == line) else { return };
         let target = position.saturating_add_signed(delta).min(text.len().saturating_sub(1));
-        if let Some(&index) = text.get(target) {
-            self.set_cursor_line(index);
+        let Some(&index) = text.get(target) else { return };
+        if let Some(stop) = self.doc.stop_near(index, column).or_else(|| self.line_start(index)) {
+            self.cursor = stop;
         }
     }
+}
+
+/// A character of a word: a letter, a digit, or an underscore.
+fn is_word(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
 }
 
 fn signed(value: usize) -> isize {
