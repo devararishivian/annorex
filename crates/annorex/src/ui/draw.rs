@@ -9,11 +9,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Focus, PanelView, Screen, match_ranges};
+use super::app::{App, Confirm, Focus, PanelView, Screen, match_ranges};
+use crate::agent::Agent;
 use crate::doc::{DocSpan, SpanStyle};
 use crate::layout::{Layout, compute};
 use crate::replies::Candidate;
 use crate::review::Kind;
+use crate::safety::Safety;
 use crate::wrap::{VisualLine, fit, gutter_width};
 
 /// The key hints of the viewer, most important first.
@@ -68,19 +70,62 @@ fn draw_too_small(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(text).centered(), row);
 }
 
+/// A piece of the right side of the header, with its style.
+type Part = (String, Style);
+
+fn parts_width(parts: &[Part]) -> usize {
+    parts.iter().map(|(text, _)| text.width()).sum()
+}
+
 /// The header. `rights` are the texts for the right side, the preferred one first. The first
 /// that fits stays.
-fn draw_header(frame: &mut Frame, area: Rect, app: &App, view: &str, rights: &[String]) {
+fn draw_header(frame: &mut Frame, area: Rect, app: &App, view: &str, rights: &[Vec<Part>]) {
+    let bold = Style::new().add_modifier(Modifier::BOLD);
     let left = format!("Annorex · {view} · {}", app.state.header_text());
     let width = usize::from(area.width);
-    let text = match rights.iter().find(|right| left.width() + 1 + right.width() <= width) {
-        Some(right) => {
-            let gap = width - left.width() - right.width();
-            format!("{left}{}{right}", " ".repeat(gap))
+    let line = match rights.iter().find(|parts| left.width() + 1 + parts_width(parts) <= width) {
+        Some(parts) => {
+            let gap = width - left.width() - parts_width(parts);
+            let mut spans = vec![Span::styled(left, bold), Span::raw(" ".repeat(gap))];
+            spans.extend(parts.iter().map(|(text, style)| Span::styled(text.clone(), *style)));
+            Line::from(spans)
         }
-        None => fit(&left, area.width),
+        None => Line::styled(fit(&left, area.width), bold),
     };
-    frame.render_widget(Paragraph::new(text).style(Style::new().add_modifier(Modifier::BOLD)), area);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+/// `HH:MM` in the time zone of the app for an RFC 3339 time.
+fn clock(at: &str, zone: &jiff::tz::TimeZone) -> String {
+    at.parse::<jiff::Timestamp>()
+        .map_or_else(|_| at.to_owned(), |time| time.to_zoned(zone.clone()).strftime("%H:%M").to_string())
+}
+
+/// The send button: `[Send N ▸]`, with the effect of a message while the agent works, or
+/// `[Sent HH:MM]` after a send. Dim when the agent shows a dialog.
+fn send_button(app: &App) -> Option<Part> {
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    if let Some(at) = app.shown_sent() {
+        return Some((format!("[Sent {}]", clock(at, &app.zone)), bold));
+    }
+    let count = app.annotation_count();
+    let note = app.review().is_some_and(|review| !review.note.trim().is_empty());
+    if count == 0 && !note {
+        return None;
+    }
+    let effect = match (&app.state.safety, app.state.agent) {
+        (Safety::Clear { state: Some(state) }, Some(Agent::ClaudeCode)) if state == "working" => " · queued",
+        (Safety::Clear { state: Some(state) }, Some(Agent::Pi | Agent::OpenCode)) if state == "working" => {
+            " · steers"
+        }
+        _ => "",
+    };
+    let style = if matches!(app.state.safety, Safety::Blocked { .. }) {
+        Style::new().add_modifier(Modifier::DIM)
+    } else {
+        bold
+    };
+    Some((format!("[Send {count}{effect} ▸]"), style))
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect, keys: &str, message: Option<String>) {
@@ -94,13 +139,24 @@ fn draw_footer(frame: &mut Frame, area: Rect, keys: &str, message: Option<String
 fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
     let (selected, count) = app.reply_position();
     let position = format!("reply {}/{count}", selected + 1);
+    let bold = Style::new().add_modifier(Modifier::BOLD);
     let unsent = app.unsent_replies();
+    let button = send_button(app);
+    let with_button = |text: String| -> Vec<Part> {
+        let mut parts = vec![(text, bold)];
+        if let Some(button) = button.clone() {
+            parts.push(("  ".to_owned(), bold));
+            parts.push(button);
+        }
+        parts
+    };
     let mut rights = Vec::new();
     if !unsent.is_empty() {
         let numbers: Vec<String> = unsent.iter().map(ToString::to_string).collect();
-        rights.push(format!("{position} · unsent {}", numbers.join(",")));
+        rights.push(with_button(format!("{position} · unsent {}", numbers.join(","))));
     }
-    rights.push(position);
+    rights.push(with_button(position.clone()));
+    rights.push(vec![(position, bold)]);
     draw_header(frame, header, app, "last reply", &rights);
     let (doc_area, panel_area, overlay) = match layout {
         Layout::Single { doc, overlay, .. } => (doc, app.panel_open.then_some(overlay), true),
@@ -126,9 +182,13 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         }
     }
     draw_editor(frame, app, doc_area);
-    let prompt = app.confirm.map(|id| {
-        let number = app.review().and_then(|review| review.in_order().iter().position(|a| a.id == id));
-        format!("Delete annotation {}? y/n", number.map_or(0, |index| index + 1))
+    let prompt = app.confirm.map(|what| match what {
+        Confirm::Annotation(id) => {
+            let number = app.review().and_then(|review| review.in_order().iter().position(|a| a.id == id));
+            format!("Delete annotation {}? y/n", number.map_or(0, |index| index + 1))
+        }
+        Confirm::Discard => "Discard the notes of this reply? y/n".to_owned(),
+        Confirm::Quit => "Unsent notes. s send · k keep the draft · d discard · esc back".to_owned(),
     });
     let message = prompt
         .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")))
@@ -447,10 +507,15 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
     let typed = format!("{}▏", editor.text);
     let text_rows: usize = typed.split('\n').map(|line| line.width().max(1).div_ceil(width)).sum();
     lines.extend(typed.split('\n').map(|line| Line::raw(line.to_owned())));
-    let height = u16::try_from(text_rows.min(6) + 4).unwrap_or(u16::MAX).min(area.height);
+    let fixed = 2 + lines.len() - typed.split('\n').count();
+    let height = u16::try_from(text_rows.min(6) + fixed).unwrap_or(u16::MAX).min(area.height);
     let rect = Rect::new(area.x, area.bottom() - height, area.width, height);
     let prefix = if app.editing_id.is_some() { "Edit " } else { "" };
-    let title = format!(" {prefix}{} · l.{} ", kind_word(editor.kind), app.doc.line_of(editor.range.start));
+    let title = if editor.general {
+        " Note ".to_owned()
+    } else {
+        format!(" {prefix}{} · l.{} ", kind_word(editor.kind), app.doc.line_of(editor.range.start))
+    };
     frame.render_widget(Clear, rect);
     let block = Block::new().borders(Borders::ALL).title(title);
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(block), rect);

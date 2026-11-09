@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod cli;
+pub mod clipboard;
 pub mod config;
 pub mod deliver;
 pub mod doc;
@@ -15,6 +16,7 @@ pub mod replies;
 pub mod review;
 pub mod rex;
 pub mod safety;
+pub mod send;
 pub mod tui;
 pub mod ui;
 pub mod wrap;

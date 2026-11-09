@@ -2,7 +2,7 @@
 source: crates/annorex/tests/annotate.rs
 expression: "render(&mut app, 120, 40)"
 ---
-Annorex · last reply · claude (idle)                                                                reply 1/1 · unsent 1
+Annorex · last reply · claude (idle)                                                    reply 1/1 · unsent 1  [Send 2 ▸]
 1 alpha beta gamma                                                              │ Annotations
                                                                                 │  1  l.1  comment
 3 - one                                                                         │    Which page?

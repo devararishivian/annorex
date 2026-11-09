@@ -46,6 +46,9 @@ pub struct Editing {
     pub range: Range<usize>,
     pub text: String,
     pub label: Option<String>,
+    /// True for the editor of the general note, which is not an annotation.
+    #[serde(default)]
+    pub general: bool,
 }
 
 /// The review of one document and its state.
@@ -62,7 +65,8 @@ pub struct Draft {
     pub sent_at: Option<String>,
 }
 
-fn now() -> String {
+/// The time now as RFC 3339 in UTC.
+pub fn now() -> String {
     jiff::Timestamp::now().to_string()
 }
 
@@ -258,6 +262,7 @@ mod tests {
             range: 0..5,
             text: "typed so far".to_owned(),
             label: Some("must fix".to_owned()),
+            general: false,
         });
         store.save(&draft).expect("save");
         assert_eq!(store.load(&draft.key).expect("load"), Some(draft));

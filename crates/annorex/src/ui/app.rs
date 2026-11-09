@@ -8,12 +8,13 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use super::editor::{Editor, EditorResult};
 use crate::agent::Agent;
 use crate::config::Config;
+use crate::deliver::DeliveryMode;
 use crate::doc::Doc;
 use crate::draft::{Draft, DraftKey};
 use crate::keys::Action;
 use crate::payload::sanitize;
 use crate::replies::{Candidate, Reply};
-use crate::review::{Annotation, Kind, Review};
+use crate::review::{Annotation, Kind, Review, Section};
 use crate::safety::Safety;
 use crate::wrap::WrapCache;
 
@@ -61,6 +62,25 @@ pub enum Effect {
     PickSession(usize),
     /// The review or the editor of the current reply changed. The caller saves the draft.
     SaveDraft,
+    /// Give the notes of the reply on the screen to the agent.
+    Send(DeliveryMode),
+    /// The same, after the user wrote the general note (`App::export` has it).
+    SendWithNote,
+    /// Copy the notes to the clipboard.
+    Copy,
+    /// The review of the reply on the screen is gone. The caller removes the draft file.
+    Discard,
+}
+
+/// A question that waits for a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Confirm {
+    /// Delete this annotation? `y` or `n`.
+    Annotation(u64),
+    /// Discard the notes of this reply? `y` or `n`.
+    Discard,
+    /// Quit with unsent notes: `s`, `k`, `d`, or `esc`.
+    Quit,
 }
 
 /// Where the keys go.
@@ -86,6 +106,7 @@ pub(crate) enum Selection {
 
 /// The state of the viewer.
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools, reason = "independent flags of the viewer state")]
 pub struct App {
     pub state: AgentState,
     pub screen: Screen,
@@ -126,7 +147,10 @@ pub struct App {
     pub(crate) panel_view: PanelView,
     pub(crate) annotation_index: usize,
     /// The annotation that waits for `y` or `n`.
-    pub(crate) confirm: Option<u64>,
+    pub(crate) confirm: Option<Confirm>,
+    /// A send or a discard from the quit question. The viewer ends when it works.
+    quit_after: bool,
+    exit: bool,
     /// The id of the reply in `doc`.
     shown_id: Option<String>,
     /// Why the last save of the draft failed.
@@ -164,6 +188,8 @@ impl App {
             panel_view: PanelView::Replies,
             annotation_index: 0,
             confirm: None,
+            quit_after: false,
+            exit: false,
             shown_id: None,
             save_error: None,
         };
@@ -359,6 +385,16 @@ impl App {
         }
     }
 
+    /// The id of the reply on the screen.
+    pub fn shown_reply_id(&self) -> Option<&str> {
+        self.shown_id.as_deref()
+    }
+
+    /// The time of the last send of the reply on the screen, if no change came after it.
+    pub fn shown_sent(&self) -> Option<&str> {
+        self.sent.get(self.shown_id.as_deref()?).map(String::as_str)
+    }
+
     /// The numbers (1 is the newest) of the replies with annotations that no send has covered.
     pub fn unsent_replies(&self) -> Vec<usize> {
         self.replies
@@ -384,8 +420,8 @@ impl App {
         if self.editor.is_some() {
             return self.editor_key(key);
         }
-        if let Some(id) = self.confirm {
-            return self.confirm_key(key, id);
+        if let Some(what) = self.confirm {
+            return self.confirm_key(key, what);
         }
         if self.find_input.is_some() {
             self.find_key(key);
@@ -442,7 +478,7 @@ impl App {
             KeyCode::Tab if self.panel_open => self.focus = Focus::Panel,
             KeyCode::Esc => self.selection = None,
             _ => match self.action_of(key) {
-                Some(Action::Quit) => return Effect::Quit,
+                Some(Action::Quit) => return self.request_quit(),
                 Some(Action::Reload) => return Effect::Reload,
                 Some(Action::Zoom) => return Effect::ToggleZoom,
                 Some(Action::Down) => self.move_cursor(1),
@@ -468,6 +504,13 @@ impl App {
                 Some(Action::Delete) => return self.begin_new(Kind::Delete),
                 Some(Action::Replace) => return self.begin_new(Kind::Replace),
                 Some(Action::Label) => return self.begin_label(),
+                Some(Action::Send) => return self.request_send(DeliveryMode::Send),
+                Some(Action::Paste) => return self.request_send(DeliveryMode::PasteOnly),
+                Some(Action::SendWithNote) => return self.begin_note(),
+                Some(Action::Copy) => return Effect::Copy,
+                Some(Action::Discard) if self.review().is_some_and(|review| !review.is_empty()) => {
+                    self.confirm = Some(Confirm::Discard);
+                }
                 _ => {}
             },
         }
@@ -501,7 +544,7 @@ impl App {
             KeyCode::Enter => return self.panel_enter(),
             KeyCode::Esc | KeyCode::Tab => self.close_panel_if_overlay(),
             _ => match self.action_of(key) {
-                Some(Action::Quit) => return Effect::Quit,
+                Some(Action::Quit) => return self.request_quit(),
                 Some(Action::Reload) => return Effect::Reload,
                 Some(Action::Zoom) => return Effect::ToggleZoom,
                 Some(Action::Down) => self.panel_move(1),
@@ -516,7 +559,7 @@ impl App {
                     }
                 }
                 Some(Action::Remove) if self.panel_view == PanelView::Annotations => {
-                    self.confirm = self.listed_annotation();
+                    self.confirm = self.listed_annotation().map(Confirm::Annotation);
                 }
                 _ => {}
             },
@@ -573,19 +616,140 @@ impl App {
         Effect::None
     }
 
-    fn confirm_key(&mut self, key: KeyEvent, id: u64) -> Effect {
-        self.confirm = None;
-        if key.code != KeyCode::Char('y') {
+    fn confirm_key(&mut self, key: KeyEvent, what: Confirm) -> Effect {
+        match what {
+            Confirm::Quit => match key.code {
+                KeyCode::Char('s') => {
+                    self.confirm = None;
+                    self.quit_after = true;
+                    let effect = self.request_send(DeliveryMode::Send);
+                    if effect == Effect::None {
+                        self.quit_after = false;
+                    }
+                    effect
+                }
+                KeyCode::Char('k') => {
+                    self.confirm = None;
+                    Effect::Quit
+                }
+                KeyCode::Char('d') => {
+                    self.confirm = None;
+                    self.quit_after = true;
+                    self.discard_review()
+                }
+                KeyCode::Esc => {
+                    self.confirm = None;
+                    Effect::None
+                }
+                _ => Effect::None,
+            },
+            Confirm::Annotation(id) => {
+                self.confirm = None;
+                if key.code != KeyCode::Char('y') {
+                    return Effect::None;
+                }
+                let Some(reply) = self.shown_id.clone() else { return Effect::None };
+                if let Some(review) = self.reviews.get_mut(&reply) {
+                    review.remove(id);
+                }
+                self.sent.remove(&reply);
+                let count = self.review().map_or(0, |review| review.annotations.len());
+                self.annotation_index = self.annotation_index.min(count.saturating_sub(1));
+                Effect::SaveDraft
+            }
+            Confirm::Discard => {
+                self.confirm = None;
+                if key.code == KeyCode::Char('y') { self.discard_review() } else { Effect::None }
+            }
+        }
+    }
+
+    /// Remove the review of the reply on the screen. The caller removes the draft file.
+    fn discard_review(&mut self) -> Effect {
+        if let Some(id) = self.shown_id.clone() {
+            self.reviews.remove(&id);
+            self.sent.remove(&id);
+        }
+        self.selection = None;
+        self.annotation_index = 0;
+        Effect::Discard
+    }
+
+    /// `q`: quit, but ask first when the reply on the screen has notes that no send covered.
+    fn request_quit(&mut self) -> Effect {
+        let unsent = self.shown_id.as_ref().is_some_and(|id| {
+            self.reviews.get(id).is_some_and(|review| !review.is_empty()) && !self.sent.contains_key(id)
+        });
+        if unsent {
+            self.confirm = Some(Confirm::Quit);
+            Effect::None
+        } else {
+            Effect::Quit
+        }
+    }
+
+    /// `S` and `P`: send or paste the export, when there is something to send.
+    fn request_send(&mut self, mode: DeliveryMode) -> Effect {
+        if self.export().is_empty() {
+            self.status = Some("Nothing to send: no annotations yet.".to_owned());
             return Effect::None;
         }
-        let Some(reply) = self.shown_id.clone() else { return Effect::None };
-        if let Some(review) = self.reviews.get_mut(&reply) {
-            review.remove(id);
-        }
-        self.sent.remove(&reply);
-        self.annotation_index =
-            self.annotation_index.min(self.review().map_or(0, |r| r.annotations.len()).saturating_sub(1));
+        Effect::Send(mode)
+    }
+
+    /// `M`: write the general note. The note goes first in the export.
+    fn begin_note(&mut self) -> Effect {
+        let Some(id) = self.shown_id.clone() else { return Effect::None };
+        let note = self.reviews.get(&id).map(|review| review.note.clone()).unwrap_or_default();
+        self.editor = Some(Editor::general(note));
+        self.editing_id = None;
         Effect::SaveDraft
+    }
+
+    /// The number of annotations of the reply on the screen.
+    pub fn annotation_count(&self) -> usize {
+        self.review().map_or(0, |review| review.annotations.len())
+    }
+
+    /// The Markdown for the agent: the general note, then the annotations. Empty when there is
+    /// nothing to send.
+    pub fn export(&self) -> String {
+        let Some(review) = self.review() else { return String::new() };
+        let line_of = |offset: usize| self.doc.line_of(offset);
+        let section = Section {
+            name: "last reply",
+            source: &self.doc.source,
+            line_of: &line_of,
+            annotations: review.in_order(),
+        };
+        crate::review::export(&review.note, &[section])
+    }
+
+    /// The reply counts as sent at `at`, and the general note is used up.
+    pub fn finish_send(&mut self, at: String) {
+        if let Some(id) = self.shown_id.clone() {
+            if let Some(review) = self.reviews.get_mut(&id) {
+                review.note.clear();
+            }
+            self.sent.insert(id, at);
+        }
+    }
+
+    /// End the viewer after the send or the discard that the quit question started.
+    pub fn quit_if_pending(&mut self) {
+        if self.quit_after {
+            self.exit = true;
+        }
+    }
+
+    /// The send failed: stay in the viewer.
+    pub fn cancel_pending_quit(&mut self) {
+        self.quit_after = false;
+    }
+
+    /// True when the viewer must end now.
+    pub fn should_exit(&self) -> bool {
+        self.exit
     }
 
     /// `v` and `V`: start a selection, or end it when the same kind is on.
@@ -657,6 +821,7 @@ impl App {
             range: annotation.range.clone(),
             text,
             label: annotation.label.clone(),
+            general: false,
         });
         self.editing_id = Some(id);
         Effect::SaveDraft
@@ -676,15 +841,33 @@ impl App {
                     self.status = Some(problem.to_owned());
                     return Effect::None;
                 }
+                if editor.general {
+                    return self.commit_note();
+                }
                 self.commit_editor();
                 Effect::SaveDraft
             }
         }
     }
 
+    /// Store the general note and ask for the send.
+    fn commit_note(&mut self) -> Effect {
+        let (Some(editor), Some(reply)) = (self.editor.take(), self.shown_id.clone()) else {
+            return Effect::None;
+        };
+        let review = self.reviews.entry(reply.clone()).or_default();
+        editor.text.trim().clone_into(&mut review.note);
+        self.sent.remove(&reply);
+        if self.export().is_empty() {
+            self.status = Some("Nothing to send: no annotations yet.".to_owned());
+            return Effect::SaveDraft;
+        }
+        Effect::SendWithNote
+    }
+
     /// Put the editor into the review: a new annotation, or the change of an old one.
     fn commit_editor(&mut self) {
-        let (Some(Editor { kind, range, text, label }), Some(reply)) =
+        let (Some(Editor { kind, range, text, label, .. }), Some(reply)) =
             (self.editor.take(), self.shown_id.clone())
         else {
             return;

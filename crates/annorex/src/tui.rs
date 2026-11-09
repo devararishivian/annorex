@@ -12,7 +12,9 @@ use ratatui::crossterm::event::{self, Event};
 use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGTERM};
 
 use crate::agent::{Agent, NOT_AGENT, detect};
+use crate::clipboard::{SystemClipboard, copy_review};
 use crate::config::Config;
+use crate::deliver::{DeliveryMode, RealSleeper};
 use crate::draft::{DraftError, DraftKey, DraftStore};
 use crate::open::pane_label;
 use crate::replies::{
@@ -21,6 +23,7 @@ use crate::replies::{
 };
 use crate::rex::{Rex, RexError, Runner, SystemRunner};
 use crate::safety::{Safety, check};
+use crate::send::{apply_result, send_review};
 use crate::ui::{AgentState, App, Effect, Screen, draw};
 
 /// The longest wait for an event before the loop draws again.
@@ -76,7 +79,12 @@ pub fn run_loop(
                 match app.handle_key(key) {
                     Effect::None => {}
                     Effect::Quit => return Ok(()),
-                    effect => effects(effect, app),
+                    effect => {
+                        effects(effect, app);
+                        if app.should_exit() {
+                            return Ok(());
+                        }
+                    }
                 }
             }
             let Ok(next) = events.next(Duration::ZERO) else { return Ok(()) };
@@ -116,6 +124,7 @@ pub fn run_last(
         session: None,
         candidates: Vec::new(),
         store,
+        enter_delay: config.enter_delay,
     };
     let (screen, replies) = viewer.start_or_error();
     let mut app = App::new(viewer.state.clone(), screen, replies, config);
@@ -171,6 +180,8 @@ struct Viewer<'a, R: Runner> {
     candidates: Vec<Candidate>,
     /// Where the drafts are. `None` when there is no home directory.
     store: Option<DraftStore>,
+    /// The wait between the paste and the Enter key.
+    enter_delay: Duration,
 }
 
 impl<R: Runner> Viewer<'_, R> {
@@ -250,6 +261,27 @@ impl<R: Runner> Viewer<'_, R> {
         }
     }
 
+    /// Give the export of the reply on the screen to the agent, and save the draft when the notes
+    /// count as sent.
+    fn send(&self, app: &mut App, mode: DeliveryMode) {
+        let export = app.export();
+        let result = send_review(self.rex, &RealSleeper, self.target, &export, mode, self.enter_delay);
+        if apply_result(app, result, &crate::draft::now()) {
+            self.save_draft(app);
+        }
+    }
+
+    /// The review is gone from the app. Remove the draft file too.
+    fn discard(&self, app: &mut App) {
+        let key = app.shown_reply_id().and_then(|id| self.draft_key(id));
+        if let (Some(store), Some(key)) = (&self.store, key)
+            && let Err(error) = store.discard(&key)
+        {
+            app.set_save_error(Some(error.to_string()));
+        }
+        app.quit_if_pending();
+    }
+
     /// Save the draft of the reply on the screen.
     fn save_draft(&self, app: &mut App) {
         let (Some(store), Some(agent), Some(session)) =
@@ -265,6 +297,13 @@ impl<R: Runner> Viewer<'_, R> {
         match effect {
             Effect::None | Effect::Quit => {}
             Effect::SaveDraft => self.save_draft(app),
+            Effect::Send(mode) => self.send(app, mode),
+            Effect::SendWithNote => {
+                self.save_draft(app);
+                self.send(app, DeliveryMode::Send);
+            }
+            Effect::Copy => copy_review(app, &mut SystemClipboard::new()),
+            Effect::Discard => self.discard(app),
             Effect::Reload => self.reload(app),
             Effect::PickSession(index) => {
                 let (screen, replies) = self.open(index);
@@ -458,6 +497,27 @@ mod tests {
         let stop = AtomicBool::new(false);
         let result = run_loop(&mut app(), &mut events, &mut canvas, &stop, &rx, &mut no_effects());
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn a_send_from_the_quit_question_ends_the_loop() {
+        use crate::send::{SendResult, apply_result};
+        let enter = Ok(Some(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))));
+        let mut events = script(vec![key('c'), key('x'), enter, key('q'), key('s'), key('j'), Ok(None)]);
+        let mut canvas = Counting::new();
+        let (_tx, rx) = mpsc::channel();
+        let stop = AtomicBool::new(false);
+        let mut app = app();
+        let mut sent = 0;
+        let mut effects = |effect: Effect, app: &mut App| {
+            if matches!(effect, Effect::Send(_)) {
+                sent += 1;
+                apply_result(app, SendResult::Sent, "2026-11-09T14:30:00Z");
+            }
+        };
+        run_loop(&mut app, &mut events, &mut canvas, &stop, &rx, &mut effects).expect("loop");
+        assert_eq!(sent, 1);
+        assert_eq!(canvas.draws, 0, "the loop ended in the same turn as the send");
     }
 
     #[test]

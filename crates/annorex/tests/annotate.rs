@@ -371,3 +371,225 @@ fn snapshot_editor_80x24() {
     press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
     insta::assert_snapshot!(render(&mut app, 80, 24));
 }
+
+fn state_of(agent: Agent, safety: Safety) -> AgentState {
+    AgentState { agent: Some(agent), safety }
+}
+
+fn annotated(agent: Agent, safety: Safety) -> App {
+    let mut app = App::new(
+        state_of(agent, safety),
+        Screen::Viewer,
+        vec![reply("r1", "alpha beta\n")],
+        &Config::default(),
+    );
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    press(&mut app, "cnote\n");
+    app
+}
+
+fn header(app: &mut App) -> String {
+    render(app, 120, 12).lines().next().expect("header").to_owned()
+}
+
+#[test]
+fn send_keys_ask_the_caller() {
+    use annorex::deliver::DeliveryMode;
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    assert_eq!(
+        press_key(&mut app, KeyCode::Char('S'), KeyModifiers::SHIFT),
+        Effect::Send(DeliveryMode::Send)
+    );
+    assert_eq!(
+        press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT),
+        Effect::Send(DeliveryMode::PasteOnly)
+    );
+    assert_eq!(press_key(&mut app, KeyCode::Char('Y'), KeyModifiers::SHIFT), Effect::Copy);
+}
+
+#[test]
+fn nothing_to_send_says_so() {
+    let mut app = app("alpha beta\n");
+    assert_eq!(press_key(&mut app, KeyCode::Char('S'), KeyModifiers::SHIFT), Effect::None);
+    assert!(app.status().is_some_and(|text| text.contains("Nothing to send")), "{:?}", app.status());
+}
+
+#[test]
+fn send_with_note_puts_the_note_first() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press(&mut app, "M");
+    assert!(app.editor().is_some_and(|editor| editor.general));
+    press(&mut app, "Please fix all.");
+    assert_eq!(press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE), Effect::SendWithNote);
+    let export = app.export();
+    assert!(export.starts_with("Please fix all.\n\n# Annotations on last reply\n"), "{export}");
+    assert!(export.contains("## Annotation 1 (line 1)"), "{export}");
+}
+
+#[test]
+fn send_marks_the_draft_sent_and_a_change_makes_it_unsent_again() {
+    use annorex::send::{SendResult, apply_result};
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    assert!(header(&mut app).contains("[Send 1 ▸]"), "{}", header(&mut app));
+    assert!(apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z"));
+    let draft = app.draft(Agent::ClaudeCode, "s").expect("draft");
+    assert_eq!(draft.sent_at.as_deref(), Some("2026-11-09T14:30:00Z"));
+    assert_eq!(draft.review.annotations.len(), 1, "the annotations stay");
+    assert!(app.status().is_some_and(|text| text.contains("If the agent prompt had text")));
+    let top = header(&mut app);
+    assert!(top.contains("[Sent 14:30]") && !top.contains("unsent"), "{top}");
+    press(&mut app, "cmore\n");
+    assert!(app.draft(Agent::ClaudeCode, "s").expect("draft").sent_at.is_none());
+    assert!(header(&mut app).contains("[Send 2 ▸]"));
+}
+
+#[test]
+fn a_refused_send_keeps_the_draft_unsent() {
+    use annorex::send::{SendResult, apply_result};
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    let before = app.draft(Agent::ClaudeCode, "s").expect("draft").review;
+    assert!(!apply_result(&mut app, SendResult::Refused("Not sent: x".to_owned()), "2026-11-09T14:30:00Z"));
+    let draft = app.draft(Agent::ClaudeCode, "s").expect("draft");
+    assert_eq!((draft.sent_at, draft.review), (None, before));
+    assert_eq!(app.status(), Some("Not sent: x"));
+}
+
+#[test]
+fn sending_clears_the_general_note() {
+    use annorex::send::{SendResult, apply_result};
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press(&mut app, "Mhello\n");
+    apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z");
+    assert!(!app.export().contains("hello"));
+}
+
+#[test]
+fn working_state_shows_queued_or_steers() {
+    let working = || Safety::Clear { state: Some("working".to_owned()) };
+    let mut claude = annotated(Agent::ClaudeCode, working());
+    assert!(header(&mut claude).contains("[Send 1 · queued ▸]"), "{}", header(&mut claude));
+    for agent in [Agent::Pi, Agent::OpenCode] {
+        let mut app = annotated(agent, working());
+        assert!(header(&mut app).contains("[Send 1 · steers ▸]"), "{}", header(&mut app));
+    }
+}
+
+#[test]
+fn blocked_state_dims_the_button() {
+    use ratatui::style::Modifier;
+    let blocked = Safety::Blocked { kind: Some("permission".to_owned()), msg: None };
+    let mut app = annotated(Agent::ClaudeCode, blocked);
+    let mut terminal = Terminal::new(TestBackend::new(120, 12)).expect("terminal");
+    terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let x = (0..120)
+        .rev()
+        .find(|&x| buffer.cell((x, 0)).is_some_and(|cell| cell.symbol() == "["))
+        .expect("button");
+    assert!(buffer.cell((x + 1, 0)).expect("cell").style().add_modifier.contains(Modifier::DIM));
+    let mut idle = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    let mut terminal = Terminal::new(TestBackend::new(120, 12)).expect("terminal");
+    terminal.draw(|frame| draw(frame, &mut idle)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    assert!(!buffer.cell((x + 1, 0)).expect("cell").style().add_modifier.contains(Modifier::DIM));
+}
+
+#[test]
+fn quit_with_unsent_notes_asks_once() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::None);
+    let screen = render(&mut app, 120, 12);
+    assert!(screen.contains("Unsent notes. s send · k keep the draft · d discard · esc back"), "{screen}");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(!render(&mut app, 120, 12).contains("Unsent notes."));
+    assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::None);
+    assert_eq!(press_key(&mut app, KeyCode::Char('k'), KeyModifiers::NONE), Effect::Quit);
+}
+
+#[test]
+fn quit_prompt_send_and_discard() {
+    use annorex::deliver::DeliveryMode;
+    use annorex::send::{SendResult, apply_result};
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press(&mut app, "q");
+    assert_eq!(press_key(&mut app, KeyCode::Char('s'), KeyModifiers::NONE), Effect::Send(DeliveryMode::Send));
+    assert!(!app.should_exit());
+    apply_result(&mut app, SendResult::Refused("Not sent".to_owned()), "t");
+    assert!(!app.should_exit(), "a refused send does not quit");
+    press(&mut app, "q");
+    press(&mut app, "s");
+    apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z");
+    assert!(app.should_exit(), "a sent review quits");
+
+    let mut other = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press(&mut other, "q");
+    assert_eq!(press_key(&mut other, KeyCode::Char('d'), KeyModifiers::NONE), Effect::Discard);
+    assert!(!other.should_exit(), "the caller removes the draft file first");
+    other.quit_if_pending();
+    assert!(other.should_exit());
+    assert!(other.review().is_none());
+}
+
+#[test]
+fn quit_after_send_does_not_ask() {
+    use annorex::send::{SendResult, apply_result};
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z");
+    assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::Quit);
+}
+
+#[test]
+fn quit_without_notes_does_not_ask() {
+    let mut app = app("alpha beta\n");
+    assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::Quit);
+}
+
+#[test]
+fn discard_removes_the_review_after_y() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    assert_eq!(press_key(&mut app, KeyCode::Char('X'), KeyModifiers::SHIFT), Effect::None);
+    assert!(render(&mut app, 120, 12).contains("Discard the notes of this reply? y/n"));
+    assert_eq!(press_key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE), Effect::None);
+    assert!(app.review().is_some_and(|review| !review.is_empty()));
+    press_key(&mut app, KeyCode::Char('X'), KeyModifiers::SHIFT);
+    assert_eq!(press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE), Effect::Discard);
+    assert!(app.review().is_none());
+    assert!(!header(&mut app).contains("unsent"));
+}
+
+#[test]
+fn copy_gives_the_export_to_the_clipboard() {
+    use annorex::clipboard::{Clipboard, copy_review};
+    struct Fake(Vec<String>, Result<(), String>);
+    impl Clipboard for Fake {
+        fn copy(&mut self, text: &str) -> Result<(), String> {
+            self.0.push(text.to_owned());
+            self.1.clone()
+        }
+    }
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    let mut fake = Fake(Vec::new(), Ok(()));
+    copy_review(&mut app, &mut fake);
+    assert_eq!(fake.0, [app.export()]);
+    assert_eq!(app.status(), Some("Copied 1 annotation."));
+    let mut failing = Fake(Vec::new(), Err("no pbcopy".to_owned()));
+    copy_review(&mut app, &mut failing);
+    assert_eq!(app.status(), Some("Copy failed: no pbcopy"));
+    let mut empty = self::app("alpha\n");
+    let mut none = Fake(Vec::new(), Ok(()));
+    copy_review(&mut empty, &mut none);
+    assert_eq!(none.0, Vec::<String>::new());
+    assert!(empty.status().is_some_and(|text| text.contains("Nothing to copy")));
+}
+
+#[test]
+fn the_general_note_editor_survives_a_restart() {
+    let mut first = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press(&mut first, "Mhalf a no");
+    let draft = first.draft(Agent::ClaudeCode, "s").expect("draft");
+    let mut second = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    second.restore("r1", draft);
+    let editor = second.editor().expect("editor");
+    assert!(editor.general);
+    assert_eq!(editor.text, "half a no");
+}
