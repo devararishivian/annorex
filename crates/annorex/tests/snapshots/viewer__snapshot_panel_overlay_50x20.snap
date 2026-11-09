@@ -1,0 +1,24 @@
+---
+source: crates/annorex/tests/viewer.rs
+expression: "render(&mut app, 50, 20)"
+---
+Annorex · last reply · claude (idle)     reply 1/3
+┌ Replies ───────────────────────────────────────┐
+│▸  1 11-09 10:30 # Migration plan               │
+│   2 11-09 10:30 ## Earlier answer              │
+│   3 11-09 10:30 Oldest reply: short.           │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+└────────────────────────────────────────────────┘
+j/k move  enter show  esc back  p close  q quit

@@ -1,0 +1,99 @@
+# Migration plan
+
+We change the login page and the session store. The work has four steps, and each step has a test.
+
+## Steps
+
+1. Step 1: update the module number 1 and run its tests. This item is long, so it wraps on a narrow pane.
+2. Step 2: update the module number 2 and run its tests. This item is long, so it wraps on a narrow pane.
+3. Step 3: update the module number 3 and run its tests. This item is long, so it wraps on a narrow pane.
+4. Step 4: update the module number 4 and run its tests. This item is long, so it wraps on a narrow pane.
+5. Step 5: update the module number 5 and run its tests. This item is long, so it wraps on a narrow pane.
+6. Step 6: update the module number 6 and run its tests. This item is long, so it wraps on a narrow pane.
+   - check the logs
+   - check the metrics
+
+## Code
+
+```rust
+fn main() {
+    let message = "hello";
+    println!("{message}");
+}
+```
+
+## Table
+
+| Name | Owner | State |
+|------|-------|-------|
+| login | 田中 | done |
+| session store | dev | working |
+| export | — | planned |
+
+## Notes
+
+Note 1: the text of note 1 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 2: the text of note 2 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 3: the text of note 3 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 4: the text of note 4 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 5: the text of note 5 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 6: the text of note 6 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 7: the text of note 7 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 8: the text of note 8 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 9: the text of note 9 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 10: the text of note 10 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 11: the text of note 11 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 12: the text of note 12 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 13: the text of note 13 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 14: the text of note 14 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 15: the text of note 15 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 16: the text of note 16 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 17: the text of note 17 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 18: the text of note 18 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 19: the text of note 19 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 20: the text of note 20 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 21: the text of note 21 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 22: the text of note 22 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 23: the text of note 23 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 24: the text of note 24 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 25: the text of note 25 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 26: the text of note 26 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 27: the text of note 27 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 28: the text of note 28 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 29: the text of note 29 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+Note 30: the text of note 30 has **bold words**, *emphasis*, and `code`. 日本語の文も含みます。
+
+> A quote at the end.
+
+---
+
+Last line of the reply.

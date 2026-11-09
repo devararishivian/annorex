@@ -11,4 +11,5 @@ pub mod payload;
 pub mod replies;
 pub mod rex;
 pub mod safety;
+pub mod ui;
 pub mod wrap;

@@ -1,0 +1,16 @@
+---
+source: crates/annorex/tests/viewer.rs
+expression: "render(&mut viewer(), 40, 12)"
+---
+Annorex · last reply · claude (idle)
+ 1 Migration plan
+
+ 3 We change the login page and the
+   session store. The work has four
+   steps, and each step has a test.
+
+ 5 Steps
+
+ 7 1. Step 1: update the module number 1
+   and run its tests. This item is long,
+j/k scroll  / find  n/N next  p replies…
