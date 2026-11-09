@@ -9,15 +9,18 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Focus, Screen, match_ranges};
+use super::app::{App, Focus, PanelView, Screen, match_ranges};
 use crate::doc::{DocSpan, SpanStyle};
 use crate::layout::{Layout, compute};
 use crate::replies::Candidate;
+use crate::review::Kind;
 use crate::wrap::{VisualLine, fit, gutter_width};
 
 /// The key hints of the viewer, most important first.
-const VIEWER_KEYS: &str = "j/k scroll  / find  n/N next  p replies  r reload  z zoom  q quit";
+const VIEWER_KEYS: &str = "j/k move  v select  c/d/s annotate  a list  p replies  / find  q quit";
 const PANEL_KEYS: &str = "j/k move  enter show  esc back  p close  q quit";
+const ANNOTATION_KEYS: &str = "j/k move  enter go  e edit  x delete  a close  esc back  q quit";
+const EDITOR_KEYS: &str = "enter save  ctrl+j new line  tab label  esc cancel";
 const PICKER_KEYS: &str = "j/k move  enter open  q quit";
 const ERROR_KEYS: &str = "r try again  q quit";
 
@@ -31,14 +34,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     };
     match app.screen.clone() {
         Screen::Error(message) => {
-            draw_header(frame, header, app, "last reply", None);
+            draw_header(frame, header, app, "last reply", &[]);
             let body = Rect::new(area.x, header.bottom(), area.width, footer.y - header.bottom());
             let paragraph = Paragraph::new(format!("Annorex: {message}")).wrap(Wrap { trim: true });
             frame.render_widget(paragraph, body);
             draw_footer(frame, footer, ERROR_KEYS, None);
         }
         Screen::Picker(candidates) => {
-            draw_header(frame, header, app, "choose the session", None);
+            draw_header(frame, header, app, "choose the session", &[]);
             let body = Rect::new(area.x, header.bottom(), area.width, footer.y - header.bottom());
             draw_picker(frame, body, &candidates, app.picker_index);
             draw_footer(frame, footer, PICKER_KEYS, None);
@@ -65,15 +68,17 @@ fn draw_too_small(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(text).centered(), row);
 }
 
-fn draw_header(frame: &mut Frame, area: Rect, app: &App, view: &str, right: Option<String>) {
+/// The header. `rights` are the texts for the right side, the preferred one first. The first
+/// that fits stays.
+fn draw_header(frame: &mut Frame, area: Rect, app: &App, view: &str, rights: &[String]) {
     let left = format!("Annorex · {view} · {}", app.state.header_text());
     let width = usize::from(area.width);
-    let text = match right {
-        Some(right) if left.width() + 1 + right.width() <= width => {
+    let text = match rights.iter().find(|right| left.width() + 1 + right.width() <= width) {
+        Some(right) => {
             let gap = width - left.width() - right.width();
             format!("{left}{}{right}", " ".repeat(gap))
         }
-        _ => fit(&left, area.width),
+        None => fit(&left, area.width),
     };
     frame.render_widget(Paragraph::new(text).style(Style::new().add_modifier(Modifier::BOLD)), area);
 }
@@ -88,7 +93,15 @@ fn draw_footer(frame: &mut Frame, area: Rect, keys: &str, message: Option<String
 
 fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
     let (selected, count) = app.reply_position();
-    draw_header(frame, header, app, "last reply", Some(format!("reply {}/{count}", selected + 1)));
+    let position = format!("reply {}/{count}", selected + 1);
+    let unsent = app.unsent_replies();
+    let mut rights = Vec::new();
+    if !unsent.is_empty() {
+        let numbers: Vec<String> = unsent.iter().map(ToString::to_string).collect();
+        rights.push(format!("{position} · unsent {}", numbers.join(",")));
+    }
+    rights.push(position);
+    draw_header(frame, header, app, "last reply", &rights);
     let (doc_area, panel_area, overlay) = match layout {
         Layout::Single { doc, overlay, .. } => (doc, app.panel_open.then_some(overlay), true),
         Layout::Bottom { doc, panel, .. } | Layout::Side { doc, panel, .. } => {
@@ -107,13 +120,29 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         if overlay {
             frame.render_widget(Clear, panel);
         }
-        draw_reply_list(frame, app, panel, borders);
+        match app.panel_view {
+            PanelView::Replies => draw_reply_list(frame, app, panel, borders),
+            PanelView::Annotations => draw_annotation_list(frame, app, panel, borders),
+        }
     }
-    let message = match &app.find_input {
-        Some(input) => Some(format!("/{input}")),
-        None => app.status.clone(),
+    draw_editor(frame, app, doc_area);
+    let prompt = app.confirm.map(|id| {
+        let number = app.review().and_then(|review| review.in_order().iter().position(|a| a.id == id));
+        format!("Delete annotation {}? y/n", number.map_or(0, |index| index + 1))
+    });
+    let message = prompt
+        .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")))
+        .or_else(|| app.status.clone())
+        .or_else(|| app.save_error.as_ref().map(|error| format!("draft not saved: {error}")));
+    let keys = if app.editor.is_some() {
+        EDITOR_KEYS
+    } else if app.focus == Focus::Panel && app.panel_view == PanelView::Annotations {
+        ANNOTATION_KEYS
+    } else if app.focus == Focus::Panel {
+        PANEL_KEYS
+    } else {
+        VIEWER_KEYS
     };
-    let keys = if app.focus == Focus::Panel { PANEL_KEYS } else { VIEWER_KEYS };
     draw_footer(frame, footer, keys, message);
 }
 
@@ -126,6 +155,11 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
     let gutter = gutter_width(&app.doc).min(area.width.saturating_sub(1));
     let text_width = area.width - gutter;
     let cursor_line = app.cursor_line();
+    let annotated: Vec<std::ops::Range<usize>> = app
+        .review()
+        .map(|review| review.annotations.iter().filter(|a| !a.detached).map(|a| a.range.clone()).collect())
+        .unwrap_or_default();
+    let selection = app.selection_range();
     let rows = app.cache.get(&app.doc, text_width);
     let first_row = |doc_line: usize| rows.iter().position(|row| row.doc_line >= doc_line);
     let mut top_row = first_row(app.top).unwrap_or(0);
@@ -177,7 +211,15 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
                 Span::raw(if gutter > 0 { " " } else { "" }),
             ];
             let cursor = cursor_cell.filter(|&(index, _)| index == top_row + offset).map(|(_, cell)| cell);
-            spans.extend(row_spans(row, &matches, cursor));
+            let offsets = row.offsets();
+            let flags = |ranges: &[std::ops::Range<usize>]| -> Vec<bool> {
+                offsets
+                    .iter()
+                    .map(|at| at.is_some_and(|at| ranges.iter().any(|range| range.contains(&at))))
+                    .collect()
+            };
+            let marks = Marks { underline: flags(&annotated), selected: flags(selection.as_slice()) };
+            spans.extend(row_spans(row, &matches, cursor, &marks));
             Line::from(spans)
         })
         .collect();
@@ -240,11 +282,19 @@ fn row_matches(rows: &[VisualLine], index: usize, query: &str) -> Vec<std::ops::
         .collect()
 }
 
-/// The spans of a row, with the matches marked and the cursor cell reversed.
+/// Which characters of a row are annotated and which are selected.
+struct Marks {
+    underline: Vec<bool>,
+    selected: Vec<bool>,
+}
+
+/// The spans of a row, with the matches marked, the cursor cell reversed, annotated text underlined,
+/// and the selection reversed.
 fn row_spans(
     row: &VisualLine,
     matches: &[std::ops::Range<usize>],
     cursor: Option<usize>,
+    marks: &Marks,
 ) -> Vec<Span<'static>> {
     let highlight = Style::new().fg(Color::Black).bg(Color::Yellow);
     let mut out = Vec::new();
@@ -252,13 +302,20 @@ fn row_spans(
     for DocSpan { text, style, .. } in &row.spans {
         let base = style_of(*style);
         let style_at = |position: usize| {
-            if cursor == Some(position) {
+            let mut style = if cursor == Some(position) {
                 base.add_modifier(Modifier::REVERSED)
             } else if matches.iter().any(|range| range.contains(&position)) {
                 highlight
             } else {
                 base
+            };
+            if marks.selected.get(position) == Some(&true) {
+                style = style.add_modifier(Modifier::REVERSED);
             }
+            if marks.underline.get(position) == Some(&true) {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            }
+            style
         };
         let mut current = String::new();
         let mut current_style = base;
@@ -296,7 +353,10 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         .map(|(index, reply)| {
             let marker = if index == app.selected { "▸" } else { " " };
             let time = short_time(reply.at.as_deref(), &app.zone);
-            let text = format!("{marker} {:>2} {time} {}", index + 1, reply.first_line());
+            let unsent = app.reviews.get(&reply.id).is_some_and(|review| !review.is_empty())
+                && !app.sent.contains_key(&reply.id);
+            let dot = if unsent { "●" } else { " " };
+            let text = format!("{marker} {:>2}{dot}{time} {}", index + 1, reply.first_line());
             let style = if index == app.panel_index && app.focus == Focus::Panel {
                 Style::new().add_modifier(Modifier::REVERSED)
             } else if index == app.selected {
@@ -308,6 +368,92 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn kind_word(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Comment => "comment",
+        Kind::Delete => "delete",
+        Kind::Replace => "replace",
+    }
+}
+
+fn draw_annotation_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
+    let block = Block::new().borders(borders).title(" Annotations ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let items = app.review().map(crate::review::Review::in_order).unwrap_or_default();
+    if items.is_empty() {
+        frame.render_widget(Paragraph::new(fit("no annotations yet", inner.width)), inner);
+        return;
+    }
+    let visible = usize::from(inner.height / 2).max(1);
+    let offset = app.annotation_index.saturating_sub(visible - 1);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (index, annotation) in items.iter().enumerate().skip(offset).take(visible) {
+        let bang = if annotation.detached { "!" } else { " " };
+        let label = annotation.label.as_ref().map_or_else(String::new, |label| format!("  [{label}]"));
+        let first = format!(
+            "{bang}{:>2}  l.{}  {}{label}",
+            index + 1,
+            app.doc.line_of(annotation.range.start),
+            kind_word(annotation.kind)
+        );
+        let detail = match annotation.kind {
+            Kind::Replace => annotation.replacement.as_deref().unwrap_or_default(),
+            _ if annotation.note.trim().is_empty() => annotation.quote.as_str(),
+            _ => annotation.note.as_str(),
+        };
+        let second = format!("    {}", detail.lines().next().unwrap_or_default());
+        let style = if index == app.annotation_index && app.focus == Focus::Panel {
+            Style::new().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::new()
+        };
+        lines.push(Line::styled(fit(&first, inner.width), style));
+        lines.push(Line::styled(fit(&second, inner.width), style.add_modifier(Modifier::DIM)));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The editor box at the bottom of the document area.
+fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
+    let Some(editor) = &app.editor else { return };
+    if area.width < 4 || area.height < 5 {
+        return;
+    }
+    let width = usize::from(area.width - 2);
+    let quote = app.doc.source.get(editor.range.clone()).unwrap_or_default();
+    let mut first = quote.lines().next().unwrap_or_default().to_owned();
+    if quote.lines().count() > 1 {
+        first.push('…');
+    }
+    let word = match editor.kind {
+        Kind::Comment => "Comment on",
+        Kind::Delete => "Remove",
+        Kind::Replace => "Replace",
+    };
+    let label = editor.label.as_deref().unwrap_or("none");
+    let mut lines = vec![
+        Line::styled(
+            fit(&format!("{word}: \"{first}\""), area.width - 2),
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+        Line::raw(fit(&format!("label: {label}"), area.width - 2)),
+    ];
+    let typed = format!("{}▏", editor.text);
+    let text_rows: usize = typed.split('\n').map(|line| line.width().max(1).div_ceil(width)).sum();
+    lines.extend(typed.split('\n').map(|line| Line::raw(line.to_owned())));
+    let height = u16::try_from(text_rows.min(6) + 4).unwrap_or(u16::MAX).min(area.height);
+    let rect = Rect::new(area.x, area.bottom() - height, area.width, height);
+    let prefix = if app.editing_id.is_some() { "Edit " } else { "" };
+    let title = format!(" {prefix}{} · l.{} ", kind_word(editor.kind), app.doc.line_of(editor.range.start));
+    frame.render_widget(Clear, rect);
+    let block = Block::new().borders(Borders::ALL).title(title);
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(block), rect);
 }
 
 /// `MM-DD HH:MM` in `zone` for an RFC 3339 time. Other text stays as it is.

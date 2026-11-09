@@ -12,6 +12,8 @@ use ratatui::crossterm::event::{self, Event};
 use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGTERM};
 
 use crate::agent::{Agent, NOT_AGENT, detect};
+use crate::config::Config;
+use crate::draft::{DraftError, DraftKey, DraftStore};
 use crate::open::pane_label;
 use crate::replies::{
     Candidate, Reply, SessionRef, Source, candidates, load_replies, matching_panes, needs_picker,
@@ -97,7 +99,12 @@ fn start_terminal<T>(init: impl FnOnce() -> io::Result<T>, restore: impl FnOnce(
 
 /// `annorex last`: show the replies of the agent in `target` in this terminal. Every problem after
 /// the Rex discovery shows in the pane, so the user can read it.
-pub fn run_last(rex: &Rex<SystemRunner>, target: &str) -> io::Result<()> {
+pub fn run_last(
+    rex: &Rex<SystemRunner>,
+    target: &str,
+    config: &Config,
+    store: Option<DraftStore>,
+) -> io::Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [SIGHUP, SIGTERM, SIGINT] {
         signal_hook::flag::register(signal, Arc::clone(&stop))?;
@@ -108,9 +115,14 @@ pub fn run_last(rex: &Rex<SystemRunner>, target: &str) -> io::Result<()> {
         state: AgentState { agent: None, safety: Safety::Clear { state: None } },
         session: None,
         candidates: Vec::new(),
+        store,
     };
     let (screen, replies) = viewer.start_or_error();
-    let mut app = App::new(viewer.state.clone(), screen, replies);
+    let mut app = App::new(viewer.state.clone(), screen, replies, config);
+    if viewer.store.is_none() {
+        app.set_save_error(Some("no home directory, so no place for drafts".to_owned()));
+    }
+    viewer.restore_drafts(&mut app);
 
     let (sender, updates) = mpsc::channel();
     let watcher = Rex::new(rex.bin.clone(), rex.session.clone(), SystemRunner);
@@ -157,6 +169,8 @@ struct Viewer<'a, R: Runner> {
     /// The session that the viewer shows. `None` before the user picks one.
     session: Option<SessionRef>,
     candidates: Vec<Candidate>,
+    /// Where the drafts are. `None` when there is no home directory.
+    store: Option<DraftStore>,
 }
 
 impl<R: Runner> Viewer<'_, R> {
@@ -209,13 +223,53 @@ impl<R: Runner> Viewer<'_, R> {
         }
     }
 
+    /// The key of the draft of a reply in the session on the screen.
+    fn draft_key(&self, reply_id: &str) -> Option<DraftKey> {
+        Some(DraftKey {
+            agent: self.state.agent?,
+            session: self.session.as_ref()?.id(),
+            document: reply_id.to_owned(),
+        })
+    }
+
+    /// Load the draft of each reply that the app has no review for. A draft that cannot be read
+    /// stays on disk and shows in the footer.
+    fn restore_drafts(&self, app: &mut App) {
+        let Some(store) = &self.store else { return };
+        for id in app.reply_ids() {
+            if app.has_review(&id) {
+                continue;
+            }
+            let Some(key) = self.draft_key(&id) else { return };
+            match store.load(&key) {
+                Ok(Some(draft)) => app.restore(&id, draft),
+                Ok(None) => {}
+                Err(error @ DraftError::Unreadable { .. }) => app.set_status(error.to_string()),
+                Err(error) => app.set_save_error(Some(error.to_string())),
+            }
+        }
+    }
+
+    /// Save the draft of the reply on the screen.
+    fn save_draft(&self, app: &mut App) {
+        let (Some(store), Some(agent), Some(session)) =
+            (&self.store, self.state.agent, self.session.as_ref().map(SessionRef::id))
+        else {
+            return;
+        };
+        let Some(draft) = app.draft(agent, &session) else { return };
+        app.set_save_error(store.save(&draft).err().map(|error| error.to_string()));
+    }
+
     fn apply(&mut self, effect: Effect, app: &mut App) {
         match effect {
             Effect::None | Effect::Quit => {}
+            Effect::SaveDraft => self.save_draft(app),
             Effect::Reload => self.reload(app),
             Effect::PickSession(index) => {
                 let (screen, replies) = self.open(index);
                 show(app, screen, replies);
+                self.restore_drafts(app);
             }
             Effect::ToggleZoom => {
                 if let Err(message) = self.toggle_zoom() {
@@ -242,6 +296,7 @@ impl<R: Runner> Viewer<'_, R> {
             Ok((screen, replies)) => {
                 app.cache.clear();
                 show(app, screen, replies);
+                self.restore_drafts(app);
             }
             Err(error) if showing => app.set_status(error.to_string()),
             Err(error) => app.set_error(error.to_string()),
@@ -283,6 +338,7 @@ mod tests {
 
     use super::{Canvas, EventSource, run_loop};
     use crate::agent::Agent;
+    use crate::config::Config;
     use crate::replies::Reply;
     use crate::safety::Safety;
     use crate::ui::{AgentState, App, Effect, Screen, draw};
@@ -326,7 +382,7 @@ mod tests {
             safety: Safety::Clear { state: Some("idle".into()) },
         };
         let reply = Reply { id: "r1".into(), text: "# Title\n\nSome text.".into(), at: None };
-        App::new(state, Screen::Viewer, vec![reply])
+        App::new(state, Screen::Viewer, vec![reply], &Config::default())
     }
 
     fn script(items: Vec<io::Result<Option<Event>>>) -> Script {

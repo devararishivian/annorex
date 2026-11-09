@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use annorex::agent::Agent;
+use annorex::config::Config;
 use annorex::replies::{Candidate, Reply, SessionRef};
 use annorex::safety::Safety;
 use annorex::ui::{AgentState, App, Effect, Screen, draw};
@@ -34,7 +35,7 @@ fn replies() -> Vec<Reply> {
 }
 
 fn viewer() -> App {
-    let mut app = App::new(state(Agent::ClaudeCode, "idle"), Screen::Viewer, replies());
+    let mut app = App::new(state(Agent::ClaudeCode, "idle"), Screen::Viewer, replies(), &Config::default());
     // The snapshots must not depend on the time zone of the machine.
     app.set_time_zone(jiff::tz::TimeZone::UTC);
     app
@@ -242,6 +243,7 @@ fn error_screen_retries_on_r() {
         state(Agent::Pi, "idle"),
         Screen::Error("the agent has no reply yet; press r to read the transcript again".into()),
         Vec::new(),
+        &Config::default(),
     );
     let screen = render(&mut app, 80, 24);
     assert!(screen.contains("the agent has no reply yet"), "{screen}");
@@ -262,6 +264,7 @@ fn picker_enter_picks_session() {
         state(Agent::Pi, "idle"),
         Screen::Picker(vec![candidate("/a.jsonl", "first session"), candidate("/b.jsonl", "second session")]),
         Vec::new(),
+        &Config::default(),
     );
     let screen = render(&mut app, 80, 24);
     assert!(screen.contains("first session") && screen.contains("second session"), "{screen}");
@@ -337,7 +340,8 @@ fn picker_keeps_the_selected_session_visible() {
             last_line: format!("session number {n:02}"),
         })
         .collect();
-    let mut app = App::new(state(Agent::Pi, "idle"), Screen::Picker(candidates), Vec::new());
+    let mut app =
+        App::new(state(Agent::Pi, "idle"), Screen::Picker(candidates), Vec::new(), &Config::default());
     for n in 1..30 {
         press(&mut app, "j");
         let screen = render(&mut app, 80, 24);
@@ -351,7 +355,7 @@ fn picker_keeps_the_selected_session_visible() {
 fn not_an_agent_shows_in_the_pane() {
     let message = "the focused pane is not running Claude Code, Pi, or OpenCode";
     let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
-    let mut app = App::new(state, Screen::Error(message.into()), Vec::new());
+    let mut app = App::new(state, Screen::Error(message.into()), Vec::new(), &Config::default());
     let screen = render(&mut app, 100, 12);
     let header = screen.lines().next().expect("header");
     assert!(header.contains("no agent"), "{header}");
@@ -368,6 +372,7 @@ fn wide_state_keeps_reply_position() {
         },
         Screen::Viewer,
         replies(),
+        &Config::default(),
     );
     let screen = render(&mut app, 50, 12);
     let header = screen.lines().next().expect("header");
@@ -389,7 +394,7 @@ fn candidate(name: &str) -> Candidate {
 #[test]
 fn new_picker_starts_at_the_first_session() {
     let five: Vec<Candidate> = (0..5).map(|n| candidate(&format!("s{n}"))).collect();
-    let mut app = App::new(state(Agent::Pi, "idle"), Screen::Picker(five), Vec::new());
+    let mut app = App::new(state(Agent::Pi, "idle"), Screen::Picker(five), Vec::new(), &Config::default());
     press(&mut app, "jjjj");
     app.set_picker(vec![candidate("a"), candidate("b")]);
     assert_eq!(press(&mut app, "\n"), Effect::PickSession(0));
@@ -412,7 +417,7 @@ fn match_split_by_wrap_is_highlighted() {
     use ratatui::style::Color;
     let text = "alpha beta gamma delta epsilon pi the text of end";
     let state = state(Agent::ClaudeCode, "idle");
-    let mut app = App::new(state, Screen::Viewer, vec![reply("r1", text)]);
+    let mut app = App::new(state, Screen::Viewer, vec![reply("r1", text)], &Config::default());
     press(&mut app, "/the text\n");
     let mut terminal = Terminal::new(TestBackend::new(40, 12)).expect("terminal");
     terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
@@ -428,7 +433,12 @@ fn match_split_by_wrap_is_highlighted() {
 }
 
 fn small(text: &str) -> App {
-    let mut app = App::new(state(Agent::ClaudeCode, "idle"), Screen::Viewer, vec![reply("r1", text)]);
+    let mut app = App::new(
+        state(Agent::ClaudeCode, "idle"),
+        Screen::Viewer,
+        vec![reply("r1", text)],
+        &Config::default(),
+    );
     app.set_time_zone(jiff::tz::TimeZone::UTC);
     app
 }

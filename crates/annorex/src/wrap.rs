@@ -21,6 +21,23 @@ impl VisualLine {
         self.spans.iter().map(|span| span.text.as_str()).collect()
     }
 
+    /// The source offset of each character of the row. `None` for text that has no source.
+    pub fn offsets(&self) -> Vec<Option<usize>> {
+        let mut out = Vec::new();
+        for span in &self.spans {
+            match &span.source {
+                Some(SpanSource { range, exact: true }) => {
+                    out.extend(span.text.char_indices().map(|(index, _)| Some(range.start + index)));
+                }
+                Some(SpanSource { range, exact: false }) => {
+                    out.extend(span.text.chars().map(|_| Some(range.start)));
+                }
+                None => out.extend(span.text.chars().map(|_| None)),
+            }
+        }
+        out
+    }
+
     /// The index of the character of this row that shows the stop at source `offset`.
     pub fn cell_of(&self, offset: usize) -> Option<usize> {
         let mut position = 0;

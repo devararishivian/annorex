@@ -1,10 +1,19 @@
 //! The state of the viewer and its keys.
 
+use std::collections::HashMap;
+use std::ops::Range;
+
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use super::editor::{Editor, EditorResult};
 use crate::agent::Agent;
+use crate::config::Config;
 use crate::doc::Doc;
+use crate::draft::{Draft, DraftKey};
+use crate::keys::Action;
+use crate::payload::sanitize;
 use crate::replies::{Candidate, Reply};
+use crate::review::{Annotation, Kind, Review};
 use crate::safety::Safety;
 use crate::wrap::WrapCache;
 
@@ -50,6 +59,8 @@ pub enum Effect {
     Reload,
     ToggleZoom,
     PickSession(usize),
+    /// The review or the editor of the current reply changed. The caller saves the draft.
+    SaveDraft,
 }
 
 /// Where the keys go.
@@ -57,6 +68,20 @@ pub enum Effect {
 pub(crate) enum Focus {
     Doc,
     Panel,
+}
+
+/// What the side panel lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PanelView {
+    Replies,
+    Annotations,
+}
+
+/// The text that the user marked with `v` or `V`. The anchor is where the marking started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Selection {
+    Chars { anchor: usize },
+    Lines { anchor: usize },
 }
 
 /// The state of the viewer.
@@ -87,10 +112,29 @@ pub struct App {
     pub(crate) overlay: bool,
     /// The time zone of the times in the reply list. The default is the system zone.
     pub(crate) zone: jiff::tz::TimeZone,
+    pub(crate) config: Config,
+    /// The annotations of each reply, by reply id.
+    pub(crate) reviews: HashMap<String, Review>,
+    /// The time of the last send of each reply that has one. A change removes the entry.
+    pub(crate) sent: HashMap<String, String>,
+    pub(crate) selection: Option<Selection>,
+    pub(crate) editor: Option<Editor>,
+    /// The annotation that the editor changes. `None` for a new annotation.
+    pub(crate) editing_id: Option<u64>,
+    /// Editors of replies that are not on the screen.
+    parked: HashMap<String, crate::draft::Editing>,
+    pub(crate) panel_view: PanelView,
+    pub(crate) annotation_index: usize,
+    /// The annotation that waits for `y` or `n`.
+    pub(crate) confirm: Option<u64>,
+    /// The id of the reply in `doc`.
+    shown_id: Option<String>,
+    /// Why the last save of the draft failed.
+    pub(crate) save_error: Option<String>,
 }
 
 impl App {
-    pub fn new(state: AgentState, screen: Screen, replies: Vec<Reply>) -> Self {
+    pub fn new(state: AgentState, screen: Screen, replies: Vec<Reply>, config: &Config) -> Self {
         let mut app = Self {
             state,
             screen,
@@ -110,6 +154,18 @@ impl App {
             page: 20,
             overlay: false,
             zone: jiff::tz::TimeZone::system(),
+            config: config.clone(),
+            reviews: HashMap::new(),
+            sent: HashMap::new(),
+            selection: None,
+            editor: None,
+            editing_id: None,
+            parked: HashMap::new(),
+            panel_view: PanelView::Replies,
+            annotation_index: 0,
+            confirm: None,
+            shown_id: None,
+            save_error: None,
         };
         if !replies.is_empty() {
             app.replies = replies;
@@ -209,6 +265,7 @@ impl App {
 
     fn show_reply(&mut self, index: usize) {
         let Some(reply) = self.replies.get(index) else { return };
+        let id = reply.id.clone();
         self.selected = index;
         self.panel_index = index;
         self.doc = Doc::parse(&reply.text);
@@ -216,6 +273,103 @@ impl App {
         self.top = 0;
         let first = self.doc.lines.iter().position(|line| !line.is_blank());
         self.cursor = first.and_then(|index| self.line_start(index)).unwrap_or(0);
+        if self.shown_id.as_deref() != Some(id.as_str()) {
+            // Another reply: its editor was parked, and a selection or a question do not carry over.
+            if let (Some(editor), Some(old)) = (self.editor.take(), self.shown_id.take()) {
+                self.parked.insert(old, editor.to_editing());
+            }
+            self.editing_id = None;
+            self.selection = None;
+            self.confirm = None;
+            self.annotation_index = 0;
+            self.shown_id = Some(id.clone());
+            if let Some(editing) = self.parked.remove(&id) {
+                self.editor = Some(Editor::from_editing(editing));
+            }
+        }
+    }
+
+    /// The review of the reply on the screen.
+    pub fn review(&self) -> Option<&Review> {
+        self.reviews.get(self.shown_id.as_deref()?)
+    }
+
+    /// The open editor.
+    pub fn editor(&self) -> Option<&Editor> {
+        self.editor.as_ref()
+    }
+
+    /// The message of the footer.
+    pub fn status(&self) -> Option<&str> {
+        self.status.as_deref()
+    }
+
+    /// True when the app already has a review for the reply `id`.
+    pub fn has_review(&self, id: &str) -> bool {
+        self.reviews.contains_key(id)
+    }
+
+    /// The ids of all replies, newest first.
+    pub fn reply_ids(&self) -> Vec<String> {
+        self.replies.iter().map(|reply| reply.id.clone()).collect()
+    }
+
+    /// Show the result of the last save of the draft in the footer. `None` clears it.
+    pub fn set_save_error(&mut self, error: Option<String>) {
+        self.save_error = error;
+    }
+
+    /// The draft of the reply on the screen: the review, the open editor, and the send time.
+    pub fn draft(&self, agent: Agent, session: &str) -> Option<Draft> {
+        let id = self.shown_id.clone()?;
+        let key = DraftKey { agent, session: session.to_owned(), document: id.clone() };
+        let mut draft = Draft::new(key, "last reply");
+        draft.review = self.reviews.get(&id).cloned().unwrap_or_default();
+        draft.editing = self.editor.as_ref().map(Editor::to_editing);
+        draft.sent_at = self.sent.get(&id).cloned();
+        Some(draft)
+    }
+
+    /// Put a saved draft back: the review (checked against the reply), the send time, and the
+    /// editor that was open.
+    pub fn restore(&mut self, reply_id: &str, draft: Draft) {
+        let Draft { mut review, editing, sent_at, .. } = draft;
+        if let Some(reply) = self.replies.iter().find(|reply| reply.id == reply_id) {
+            review.reanchor(&sanitize(&reply.text));
+        }
+        self.reviews.insert(reply_id.to_owned(), review);
+        match sent_at {
+            Some(at) => self.sent.insert(reply_id.to_owned(), at),
+            None => self.sent.remove(reply_id),
+        };
+        if let Some(editing) = editing {
+            if self.shown_id.as_deref() == Some(reply_id) {
+                self.editor = Some(Editor::from_editing(editing));
+                self.editing_id = None;
+            } else {
+                self.parked.insert(reply_id.to_owned(), editing);
+            }
+        }
+    }
+
+    /// Record a send or a paste of the reply on the screen.
+    pub fn mark_sent(&mut self, at: String) {
+        if let Some(id) = self.shown_id.clone() {
+            self.sent.insert(id, at);
+        }
+    }
+
+    /// The numbers (1 is the newest) of the replies with annotations that no send has covered.
+    pub fn unsent_replies(&self) -> Vec<usize> {
+        self.replies
+            .iter()
+            .enumerate()
+            .filter(|(_, reply)| {
+                self.reviews.get(&reply.id).is_some_and(|review| !review.is_empty())
+                    && !self.sent.contains_key(&reply.id)
+            })
+            .map(|(index, _)| index + 1)
+            .collect()
     }
 
     /// Handle one key.
@@ -227,6 +381,12 @@ impl App {
             return Effect::Quit;
         }
         self.status = None;
+        if self.editor.is_some() {
+            return self.editor_key(key);
+        }
+        if let Some(id) = self.confirm {
+            return self.confirm_key(key, id);
+        }
         if self.find_input.is_some() {
             self.find_key(key);
             return Effect::None;
@@ -260,72 +420,288 @@ impl App {
         }
     }
 
-    fn doc_key(&mut self, key: KeyEvent) -> Effect {
-        let half = (self.page / 2).max(1);
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    /// The action of a key. The arrow keys always move, whatever the config says.
+    fn action_of(&self, key: KeyEvent) -> Option<Action> {
         match key.code {
-            KeyCode::Char('q') => return Effect::Quit,
-            KeyCode::Char('r') => return Effect::Reload,
-            KeyCode::Char('z') => return Effect::ToggleZoom,
-            KeyCode::Char('j') | KeyCode::Down => self.move_cursor(1),
-            KeyCode::Char('k') | KeyCode::Up => self.move_cursor(-1),
-            KeyCode::Char('d') if ctrl => self.move_cursor(signed(half)),
-            KeyCode::Char('u') if ctrl => self.move_cursor(-signed(half)),
+            KeyCode::Down => Some(Action::Down),
+            KeyCode::Up => Some(Action::Up),
+            KeyCode::Left => Some(Action::Left),
+            KeyCode::Right => Some(Action::Right),
+            _ => self.config.keys.action(key),
+        }
+    }
+
+    #[allow(clippy::too_many_lines, reason = "one match over the actions of the document")]
+    fn doc_key(&mut self, key: KeyEvent) -> Effect {
+        let half = signed((self.page / 2).max(1));
+        match key.code {
             KeyCode::PageDown => self.move_cursor(signed(self.page.max(1))),
             KeyCode::PageUp => self.move_cursor(-signed(self.page.max(1))),
-            KeyCode::Char('h') | KeyCode::Left => self.step(false),
-            KeyCode::Char('l') | KeyCode::Right => self.step(true),
-            KeyCode::Char('w') => self.word(true),
-            KeyCode::Char('b') => self.word(false),
-            KeyCode::Char('0') => self.line_edge(false),
-            KeyCode::Char('$') => self.line_edge(true),
-            KeyCode::Char('g') | KeyCode::Home => self.set_cursor_line(0),
-            KeyCode::Char('G') | KeyCode::End => self.set_cursor_line(self.doc.lines.len().saturating_sub(1)),
-            KeyCode::Char('/') => self.find_input = Some(String::new()),
-            KeyCode::Char('n') => self.find_next(true, false),
-            KeyCode::Char('N') => self.find_next(false, false),
-            KeyCode::Char('p') => {
-                self.panel_open = !self.panel_open;
-                if self.panel_open {
-                    self.focus = Focus::Panel;
-                    self.panel_index = self.selected;
-                }
-            }
+            KeyCode::Home => self.set_cursor_line(0),
+            KeyCode::End => self.set_cursor_line(self.doc.lines.len().saturating_sub(1)),
             KeyCode::Tab if self.panel_open => self.focus = Focus::Panel,
-            _ => {}
+            KeyCode::Esc => self.selection = None,
+            _ => match self.action_of(key) {
+                Some(Action::Quit) => return Effect::Quit,
+                Some(Action::Reload) => return Effect::Reload,
+                Some(Action::Zoom) => return Effect::ToggleZoom,
+                Some(Action::Down) => self.move_cursor(1),
+                Some(Action::Up) => self.move_cursor(-1),
+                Some(Action::Left) => self.step(false),
+                Some(Action::Right) => self.step(true),
+                Some(Action::WordNext) => self.word(true),
+                Some(Action::WordPrev) => self.word(false),
+                Some(Action::LineStart) => self.line_edge(false),
+                Some(Action::LineEnd) => self.line_edge(true),
+                Some(Action::HalfPageDown) => self.move_cursor(half),
+                Some(Action::HalfPageUp) => self.move_cursor(-half),
+                Some(Action::Top) => self.set_cursor_line(0),
+                Some(Action::Bottom) => self.set_cursor_line(self.doc.lines.len().saturating_sub(1)),
+                Some(Action::Find) => self.find_input = Some(String::new()),
+                Some(Action::FindNext) => self.find_next(true, false),
+                Some(Action::FindPrev) => self.find_next(false, false),
+                Some(Action::Replies) => self.toggle_panel(PanelView::Replies),
+                Some(Action::Annotations) => self.toggle_panel(PanelView::Annotations),
+                Some(Action::Select) => self.toggle_selection(false),
+                Some(Action::SelectLines) => self.toggle_selection(true),
+                Some(Action::Comment) => return self.begin_new(Kind::Comment),
+                Some(Action::Delete) => return self.begin_new(Kind::Delete),
+                Some(Action::Replace) => return self.begin_new(Kind::Replace),
+                Some(Action::Label) => return self.begin_label(),
+                _ => {}
+            },
         }
         Effect::None
     }
 
+    fn toggle_panel(&mut self, view: PanelView) {
+        if self.panel_open && self.panel_view == view {
+            self.panel_open = false;
+            self.focus = Focus::Doc;
+            return;
+        }
+        self.panel_open = true;
+        self.panel_view = view;
+        self.focus = Focus::Panel;
+        match view {
+            PanelView::Replies => self.panel_index = self.selected,
+            PanelView::Annotations => self.annotation_index = 0,
+        }
+    }
+
+    fn close_panel_if_overlay(&mut self) {
+        self.focus = Focus::Doc;
+        if self.overlay {
+            self.panel_open = false;
+        }
+    }
+
     fn panel_key(&mut self, key: KeyEvent) -> Effect {
         match key.code {
-            KeyCode::Char('q') => return Effect::Quit,
-            KeyCode::Char('r') => return Effect::Reload,
-            KeyCode::Char('z') => return Effect::ToggleZoom,
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.panel_index = (self.panel_index + 1).min(self.replies.len().saturating_sub(1));
-            }
-            KeyCode::Char('k') | KeyCode::Up => self.panel_index = self.panel_index.saturating_sub(1),
-            KeyCode::Enter => {
-                self.show_reply(self.panel_index);
-                self.focus = Focus::Doc;
-                if self.overlay {
-                    self.panel_open = false;
+            KeyCode::Enter => return self.panel_enter(),
+            KeyCode::Esc | KeyCode::Tab => self.close_panel_if_overlay(),
+            _ => match self.action_of(key) {
+                Some(Action::Quit) => return Effect::Quit,
+                Some(Action::Reload) => return Effect::Reload,
+                Some(Action::Zoom) => return Effect::ToggleZoom,
+                Some(Action::Down) => self.panel_move(1),
+                Some(Action::Up) => self.panel_move(-1),
+                Some(Action::Replies) => self.toggle_panel(PanelView::Replies),
+                Some(Action::Annotations) => self.toggle_panel(PanelView::Annotations),
+                Some(Action::Edit) if self.panel_view == PanelView::Annotations => {
+                    if let Some(id) = self.listed_annotation() {
+                        self.panel_open = false;
+                        self.focus = Focus::Doc;
+                        return self.begin_edit(id);
+                    }
                 }
-            }
-            KeyCode::Char('p') => {
-                self.panel_open = false;
-                self.focus = Focus::Doc;
-            }
-            KeyCode::Esc | KeyCode::Tab => {
-                self.focus = Focus::Doc;
-                if self.overlay {
-                    self.panel_open = false;
+                Some(Action::Remove) if self.panel_view == PanelView::Annotations => {
+                    self.confirm = self.listed_annotation();
                 }
-            }
-            _ => {}
+                _ => {}
+            },
         }
         Effect::None
+    }
+
+    fn panel_move(&mut self, delta: isize) {
+        match self.panel_view {
+            PanelView::Replies => {
+                let last = self.replies.len().saturating_sub(1);
+                self.panel_index = self.panel_index.saturating_add_signed(delta).min(last);
+            }
+            PanelView::Annotations => {
+                let last = self.review().map_or(0, |review| review.annotations.len()).saturating_sub(1);
+                self.annotation_index = self.annotation_index.saturating_add_signed(delta).min(last);
+            }
+        }
+    }
+
+    /// The id of the annotation under the cursor of the annotation list.
+    fn listed_annotation(&self) -> Option<u64> {
+        self.review()?.in_order().get(self.annotation_index).map(|annotation| annotation.id)
+    }
+
+    fn panel_enter(&mut self) -> Effect {
+        match self.panel_view {
+            PanelView::Replies => {
+                self.show_reply(self.panel_index);
+                self.close_panel_if_overlay();
+            }
+            PanelView::Annotations => {
+                let range = self.listed_annotation().and_then(|id| {
+                    self.review()?
+                        .annotations
+                        .iter()
+                        .find(|a| a.id == id)
+                        .map(|a| (a.range.start, a.detached))
+                });
+                match range {
+                    Some((_, true)) => {
+                        self.status = Some("the text of this annotation was not found".to_owned());
+                    }
+                    Some((start, false)) => {
+                        self.cursor = start;
+                        self.snap_cursor();
+                        self.panel_open = false;
+                        self.focus = Focus::Doc;
+                    }
+                    None => {}
+                }
+            }
+        }
+        Effect::None
+    }
+
+    fn confirm_key(&mut self, key: KeyEvent, id: u64) -> Effect {
+        self.confirm = None;
+        if key.code != KeyCode::Char('y') {
+            return Effect::None;
+        }
+        let Some(reply) = self.shown_id.clone() else { return Effect::None };
+        if let Some(review) = self.reviews.get_mut(&reply) {
+            review.remove(id);
+        }
+        self.sent.remove(&reply);
+        self.annotation_index =
+            self.annotation_index.min(self.review().map_or(0, |r| r.annotations.len()).saturating_sub(1));
+        Effect::SaveDraft
+    }
+
+    /// `v` and `V`: start a selection, or end it when the same kind is on.
+    fn toggle_selection(&mut self, lines: bool) {
+        let anchor = self.cursor;
+        self.selection = match (self.selection, lines) {
+            (Some(Selection::Chars { .. }), false) | (Some(Selection::Lines { .. }), true) => None,
+            (_, false) => Some(Selection::Chars { anchor }),
+            (_, true) => Some(Selection::Lines { anchor }),
+        };
+    }
+
+    /// The bytes of the selection, or `None` without a selection.
+    pub(crate) fn selection_range(&self) -> Option<Range<usize>> {
+        match self.selection? {
+            Selection::Chars { anchor } => {
+                let (low, high) = (anchor.min(self.cursor), anchor.max(self.cursor));
+                Some(low..self.doc.char_end(high))
+            }
+            Selection::Lines { anchor } => {
+                let (a, b) = (self.doc.locate(anchor).0, self.cursor_line());
+                let (first, last) = (a.min(b), a.max(b));
+                Some(self.doc.lines.get(first)?.source.start..self.doc.lines.get(last)?.source.end)
+            }
+        }
+    }
+
+    /// The range of an annotation: the selection, else the `DocLine` of the cursor.
+    fn action_range(&self) -> Option<Range<usize>> {
+        self.selection_range()
+            .or_else(|| self.doc.lines.get(self.cursor_line()).map(|line| line.source.clone()))
+    }
+
+    fn begin_new(&mut self, kind: Kind) -> Effect {
+        if self.shown_id.is_none() {
+            return Effect::None;
+        }
+        let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
+            self.status = Some("there is no text here to annotate".to_owned());
+            return Effect::None;
+        };
+        self.editor = Some(Editor::new(kind, range));
+        self.editing_id = None;
+        Effect::SaveDraft
+    }
+
+    /// `L`: the editor of the annotation at the cursor, else a new comment.
+    fn begin_label(&mut self) -> Effect {
+        let id = self.review().and_then(|review| review.at(self.cursor).first().map(|a| a.id));
+        match id {
+            Some(id) => self.begin_edit(id),
+            None => self.begin_new(Kind::Comment),
+        }
+    }
+
+    fn begin_edit(&mut self, id: u64) -> Effect {
+        let Some(annotation) =
+            self.review().and_then(|review| review.annotations.iter().find(|a| a.id == id))
+        else {
+            return Effect::None;
+        };
+        let text = if annotation.kind == Kind::Replace {
+            annotation.replacement.clone().unwrap_or_default()
+        } else {
+            annotation.note.clone()
+        };
+        self.editor = Some(Editor {
+            kind: annotation.kind,
+            range: annotation.range.clone(),
+            text,
+            label: annotation.label.clone(),
+        });
+        self.editing_id = Some(id);
+        Effect::SaveDraft
+    }
+
+    fn editor_key(&mut self, key: KeyEvent) -> Effect {
+        let Some(editor) = &mut self.editor else { return Effect::None };
+        match editor.handle_key(key, &self.config.labels) {
+            EditorResult::Editing => Effect::SaveDraft,
+            EditorResult::Cancel => {
+                self.editor = None;
+                self.editing_id = None;
+                Effect::SaveDraft
+            }
+            EditorResult::Save => {
+                if let Some(problem) = editor.problem() {
+                    self.status = Some(problem.to_owned());
+                    return Effect::None;
+                }
+                self.commit_editor();
+                Effect::SaveDraft
+            }
+        }
+    }
+
+    /// Put the editor into the review: a new annotation, or the change of an old one.
+    fn commit_editor(&mut self) {
+        let (Some(Editor { kind, range, text, label }), Some(reply)) =
+            (self.editor.take(), self.shown_id.clone())
+        else {
+            return;
+        };
+        let review = self.reviews.entry(reply.clone()).or_default();
+        let existing = self.editing_id.take().filter(|id| review.annotations.iter().any(|a| a.id == *id));
+        let id = existing.unwrap_or_else(|| review.add(&self.doc.source, kind, range));
+        review.update(id, |annotation: &mut Annotation| {
+            annotation.label = label;
+            if annotation.kind == Kind::Replace {
+                annotation.replacement = Some(text);
+            } else {
+                annotation.note = text;
+            }
+        });
+        self.sent.remove(&reply);
+        self.selection = None;
     }
 
     fn find_key(&mut self, key: KeyEvent) {
@@ -449,7 +825,7 @@ pub(crate) fn contains_ignore_case(text: &str, query: &str) -> bool {
 }
 
 /// The character ranges of each match of `query` in `text`, without overlap.
-pub(crate) fn match_ranges(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
+pub(crate) fn match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
     let fold = |c: char| c.to_lowercase().next().unwrap_or(c);
     let text: Vec<char> = text.chars().map(fold).collect();
     let query: Vec<char> = query.chars().map(fold).collect();

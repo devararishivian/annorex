@@ -1,0 +1,28 @@
+---
+source: crates/annorex/tests/annotate.rs
+expression: "render(&mut app, 80, 24)"
+---
+Annorex · last reply · claude (idle)                                   reply 1/1
+1 We change the login page.
+
+3 - one
+4 - two
+
+
+
+
+
+
+
+
+
+
+
+
+
+┌ comment · l.1 ───────────────────────────────────────────────────────────────┐
+│Comment on: "the l"                                                           │
+│label: question                                                               │
+│Which page?▏                                                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+enter save  ctrl+j new line  tab label  esc cancel

@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 use crate::agent::{Agent, BusyEffect, detect};
 use crate::config::{Config, resolve_placement};
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
+use crate::draft::{DraftStore, drafts_dir};
 use crate::install::{InstallError, config_dir, install};
 use crate::open::{OpenError, Placement, open_last};
 use crate::payload::sanitize;
@@ -288,8 +289,10 @@ fn last(
     target: &str,
     session: Option<String>,
 ) -> Result<i32, Failure> {
+    let config = load_config(env)?;
+    let store = drafts_dir(env).map(|dir| DraftStore { dir });
     let rex = Rex::discover_with(env, session)?;
-    run_last(&rex, target).map_err(|error| Failure {
+    run_last(&rex, target, &config, store).map_err(|error| Failure {
         code: EXIT_FAILURE,
         message: format!("cannot use the terminal: {error}"),
     })?;

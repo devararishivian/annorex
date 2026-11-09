@@ -50,7 +50,7 @@ const ZWJ: char = '\u{200d}';
 
 /// True when `c` does not start a new glyph: it joins to the character before it.
 pub(crate) fn joins(previous: Option<char>, c: char) -> bool {
-    previous == Some(ZWJ) || c == ZWJ || c.width().unwrap_or(0) == 0
+    previous == Some(ZWJ) || c == ZWJ || c.width() == Some(0)
 }
 
 /// One displayed line, before wrapping.
