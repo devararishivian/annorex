@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod cli;
 pub mod deliver;
+pub mod install;
 pub mod payload;
 pub mod rex;
 pub mod safety;

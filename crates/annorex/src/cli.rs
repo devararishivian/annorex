@@ -1,12 +1,14 @@
-//! The command line: `annorex probe` and `annorex deliver`.
+//! The command line: `annorex probe`, `annorex deliver`, and `annorex rex`.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
 use crate::agent::{Agent, BusyEffect, detect};
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
+use crate::install::{InstallError, config_dir, install};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
@@ -15,6 +17,8 @@ use crate::safety::{Safety, check};
 pub const EXIT_OK: i32 = 0;
 /// Exit code: Annorex refused to send (no agent, a dialog, no bracketed paste).
 pub const EXIT_REFUSED: i32 = 3;
+/// Exit code: another failure, for example a file that Annorex cannot write.
+pub const EXIT_FAILURE: i32 = 1;
 /// Exit code: a Rex call failed.
 pub const EXIT_REX: i32 = 4;
 /// Exit code: a usage error (`EX_USAGE`).
@@ -54,6 +58,21 @@ enum Command {
         #[arg(long)]
         paste_only: bool,
     },
+    /// Set up the Rex integration.
+    Rex {
+        #[command(subcommand)]
+        command: RexCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RexCommand {
+    /// Write the Lua module `annorex.lua` beside the `init.lua` of Rex. It never changes `init.lua`.
+    Install {
+        /// The directory. The default is the directory of the `init.lua` that Rex reads.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
 }
 
 /// Run the command line. Returns the exit code.
@@ -82,6 +101,7 @@ pub fn run(
             let mode = if paste_only { DeliveryMode::PasteOnly } else { DeliveryMode::Send };
             send(&env, &target, session, mode, stdin, out)
         }
+        Command::Rex { command: RexCommand::Install { dir } } => rex_install(&env, dir, out),
     };
     match result {
         Ok(code) => code,
@@ -209,4 +229,49 @@ fn send(
     };
     writeln!(out, "{word}").map_err(|error| io_failure(&error))?;
     Ok(EXIT_OK)
+}
+
+fn rex_install(
+    env: &impl Fn(&str) -> Option<OsString>,
+    dir: Option<PathBuf>,
+    out: &mut impl Write,
+) -> Result<i32, Failure> {
+    let dir = dir.or_else(|| config_dir(env)).ok_or_else(|| Failure {
+        code: EXIT_USAGE,
+        message:
+            "cannot find the Rex config directory: give --dir, or set REX_CONFIG, XDG_CONFIG_HOME, or HOME"
+                .to_owned(),
+    })?;
+    let installed = install(&dir).map_err(|error| Failure {
+        code: if matches!(error, InstallError::Foreign { .. }) { EXIT_REFUSED } else { EXIT_FAILURE },
+        message: error.to_string(),
+    })?;
+    let verb = if installed.replaced { "Updated" } else { "Wrote" };
+    let mut lines = vec![
+        format!("{verb} {}", installed.path.display()),
+        String::new(),
+        "Add these lines to init.lua:".to_owned(),
+        String::new(),
+        "  require(\"annorex\").setup{}".to_owned(),
+        "  rex.bind(\"cmd+shift+a\", \"annorex_last\")".to_owned(),
+    ];
+    if let Ok(exe) = std::env::current_exe()
+        && !on_path(&exe, env("PATH"))
+    {
+        lines.push(String::new());
+        lines.push("If Rex cannot find annorex on its PATH, use this line for the setup:".to_owned());
+        lines.push(String::new());
+        lines.push(format!("  require(\"annorex\").setup{{ bin = \"{}\" }}", exe.display()));
+    }
+    lines.push(String::new());
+    lines.push("Then run: rex config reload".to_owned());
+    writeln!(out, "{}", lines.join("\n")).map_err(|error| io_failure(&error))?;
+    Ok(EXIT_OK)
+}
+
+/// True when the directory of `exe` is a directory of `path`.
+fn on_path(exe: &Path, path: Option<OsString>) -> bool {
+    let canonical = |dir: &Path| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let Some(parent) = exe.parent().map(canonical) else { return false };
+    path.is_some_and(|path| std::env::split_paths(&path).any(|dir| canonical(&dir) == parent))
 }
