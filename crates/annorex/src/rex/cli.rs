@@ -7,7 +7,7 @@ use std::process::{Command, Output, Stdio};
 
 use serde::de::DeserializeOwned;
 
-use super::types::{Modes, ProcessInfo, StatusList};
+use super::types::{Modes, ProcessInfo, SessionList, SessionView, Size, StatusList};
 
 /// Runs one command. Tests replace it with a fake.
 pub trait Runner {
@@ -17,6 +17,12 @@ pub trait Runner {
 /// Runs the command as a child process.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemRunner;
+
+impl<R: Runner + ?Sized> Runner for &R {
+    fn run(&self, argv: &[OsString], stdin: Option<&[u8]>) -> std::io::Result<Output> {
+        (**self).run(argv, stdin)
+    }
+}
 
 impl Runner for SystemRunner {
     fn run(&self, argv: &[OsString], stdin: Option<&[u8]>) -> std::io::Result<Output> {
@@ -40,7 +46,13 @@ impl Runner for SystemRunner {
         };
         let output = child.wait_with_output()?;
         if let Some(writer) = writer {
-            writer.join().map_err(|_| std::io::Error::other("stdin writer thread failed"))??;
+            let written = writer.join().map_err(|_| std::io::Error::other("stdin writer thread failed"))?;
+            // A child that fails can exit before it reads all of its input. Then its exit status and
+            // its stderr explain the failure better than the broken pipe.
+            match written {
+                Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe && !output.status.success() => {}
+                other => other?,
+            }
         }
         Ok(output)
     }
@@ -53,12 +65,18 @@ pub enum RexError {
     BinaryNotFound { tried: Vec<PathBuf> },
     #[error("no Rex session: give --session or run inside Rex (REX_SESSION)")]
     NoSession,
-    #[error("rex block call {method} failed (exit {}): {stderr}", code.map_or_else(|| "signal".to_owned(), |c| c.to_string()))]
+    #[error("{} {method} failed (exit {}): {stderr}", call_of(method), code.map_or_else(|| "signal".to_owned(), |c| c.to_string()))]
     Failed { method: String, code: Option<i32>, stderr: String },
-    #[error("rex block call {method} gave JSON that Annorex cannot read: {source}")]
+    #[error("{} {method} gave JSON that Annorex cannot read: {source}", call_of(method))]
     BadJson { method: String, source: serde_json::Error },
     #[error("cannot run rex: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// The `rex` command of a method. API methods have a dot (`session.view`). Block methods do not
+/// (`process`).
+fn call_of(method: &str) -> &'static str {
+    if method.contains('.') { "rex api call" } else { "rex block call" }
 }
 
 fn display_paths(paths: &[PathBuf]) -> String {
@@ -131,9 +149,36 @@ impl<R: Runner> Rex<R> {
         .into_iter()
         .map(ToOwned::to_owned)
         .collect();
+        self.run_json(&command, method, args)
+    }
+
+    /// Call an API method of the session, for example `session.view`. `args` goes on standard
+    /// input.
+    pub fn api_call(&self, method: &str, args: &serde_json::Value) -> Result<serde_json::Value, RexError> {
+        let command: Vec<OsString> = [
+            self.bin.as_os_str(),
+            "api".as_ref(),
+            "call".as_ref(),
+            "-s".as_ref(),
+            self.session.as_ref(),
+            method.as_ref(),
+            "-".as_ref(),
+        ]
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect();
+        self.run_json(&command, method, args)
+    }
+
+    fn run_json(
+        &self,
+        command: &[OsString],
+        method: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, RexError> {
         let input = serde_json::to_vec(args)
             .map_err(|source| RexError::BadJson { method: method.to_owned(), source })?;
-        let output = self.runner.run(&command, Some(&input))?;
+        let output = self.runner.run(command, Some(&input))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stderr = stderr.trim();
@@ -163,6 +208,51 @@ impl<R: Runner> Rex<R> {
 
     pub fn modes(&self, block: &str) -> Result<Modes, RexError> {
         self.typed(block, "modes")
+    }
+
+    pub fn size(&self, block: &str) -> Result<Size, RexError> {
+        self.typed(block, "size")
+    }
+
+    fn api_typed<T: DeserializeOwned>(&self, method: &str, args: &serde_json::Value) -> Result<T, RexError> {
+        let value = self.api_call(method, args)?;
+        serde_json::from_value(value)
+            .map_err(|source| RexError::BadJson { method: method.to_owned(), source })
+    }
+
+    /// The windows and blocks of the session.
+    pub fn view(&self) -> Result<SessionView, RexError> {
+        self.api_typed("session.view", &serde_json::json!({}))
+    }
+
+    /// The ids of all sessions on the server.
+    pub fn sessions(&self) -> Result<Vec<String>, RexError> {
+        self.api_typed::<SessionList>("session.list", &serde_json::json!({})).map(|list| list.ids())
+    }
+
+    /// The same binary and runner for another session.
+    pub fn with_session(&self, session: &str) -> Rex<&R> {
+        Rex { bin: self.bin.clone(), session: session.to_owned(), runner: &self.runner }
+    }
+
+    /// Create a split with `session.new_split`. Gives the ids of the new blocks.
+    pub fn new_split(&self, request: &serde_json::Value) -> Result<Vec<String>, RexError> {
+        #[derive(serde::Deserialize)]
+        struct Split {
+            #[serde(default)]
+            block_ids: Option<Vec<Option<String>>>,
+        }
+        let split: Split = self.api_typed("session.new_split", request)?;
+        Ok(split.block_ids.unwrap_or_default().into_iter().flatten().collect())
+    }
+
+    pub fn focus_block(&self, block: &str) -> Result<(), RexError> {
+        self.api_call("session.focus_block", &serde_json::json!({ "block_id": block })).map(drop)
+    }
+
+    /// Zoom the block, or restore the layout when it is zoomed.
+    pub fn zoom_toggle(&self, block: &str) -> Result<(), RexError> {
+        self.api_call("session.zoom_block", &serde_json::json!({ "block_id": block })).map(drop)
     }
 
     /// Write `data` to the terminal input of `block`, as if the user typed it.
@@ -312,6 +402,95 @@ mod tests {
     fn discover_without_session_is_no_session() {
         let env = |key: &str| (key == "REX_SESSION").then(|| OsString::from(""));
         assert!(matches!(Rex::discover_with(env, None), Err(RexError::NoSession)));
+    }
+
+    #[test]
+    fn api_call_puts_args_on_stdin() {
+        let rex = rex(FakeRunner { stdout: b"{\"windows\":[]}".to_vec(), ..FakeRunner::default() });
+        let args = serde_json::json!({"a": 1});
+        rex.api_call("session.view", &args).expect("call");
+        let calls = rex.runner.calls.borrow();
+        assert_eq!(
+            strings(&calls[0].0),
+            ["/opt/rex/bin/rex", "api", "call", "-s", "session:s1", "session.view", "-"]
+        );
+        let stdin: serde_json::Value =
+            serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
+        assert_eq!(stdin, args);
+    }
+
+    #[test]
+    fn api_failure_names_api_call() {
+        let rex =
+            rex(FakeRunner { code: 1, stderr: b"Error: not_found\n".to_vec(), ..FakeRunner::default() });
+        let error = rex.api_call("session.view", &serde_json::json!({})).expect_err("fails");
+        let text = error.to_string();
+        assert!(text.contains("rex api call session.view failed"), "{text}");
+        assert!(text.ends_with(": not_found"), "{text}");
+        let error = rex.block_call("block:b1", "size", &serde_json::json!({})).expect_err("fails");
+        assert!(error.to_string().contains("rex block call size failed"), "{error}");
+    }
+
+    #[test]
+    fn with_session_changes_only_the_session() {
+        let rex = rex(FakeRunner { stdout: b"{}".to_vec(), ..FakeRunner::default() });
+        let other = rex.with_session("session:s2");
+        assert_eq!(other.session(), "session:s2");
+        assert_eq!(other.bin, rex.bin);
+        other.api_call("session.view", &serde_json::json!({})).expect("call");
+        let calls = rex.runner.calls.borrow();
+        assert_eq!(strings(&calls[0].0)[4], "session:s2");
+        assert_eq!(rex.session(), "session:s1");
+    }
+
+    #[test]
+    fn new_split_returns_the_block_ids() {
+        let rex = rex(FakeRunner {
+            stdout:
+                br#"{"anchor_id":"block:a","block_ids":["block:n"],"split_ids":["split:x"],"revision":3}"#
+                    .to_vec(),
+            ..FakeRunner::default()
+        });
+        let ids = rex.new_split(&serde_json::json!({"anchor_id": "block:a"})).expect("split");
+        assert_eq!(ids, ["block:n"]);
+        assert_eq!(strings(&rex.runner.calls.borrow()[0].0)[5], "session.new_split");
+    }
+
+    #[test]
+    fn focus_and_zoom_send_the_block() {
+        let rex = rex(FakeRunner {
+            stdout: br#"{"revision":1,"block_id":"block:z","zoomed":true}"#.to_vec(),
+            ..FakeRunner::default()
+        });
+        rex.focus_block("block:f").expect("focus");
+        rex.zoom_toggle("block:z").expect("zoom");
+        let calls = rex.runner.calls.borrow();
+        assert_eq!(strings(&calls[0].0)[5], "session.focus_block");
+        let focus: serde_json::Value =
+            serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
+        assert_eq!(focus, serde_json::json!({"block_id": "block:f"}));
+        assert_eq!(strings(&calls[1].0)[5], "session.zoom_block");
+        let zoom: serde_json::Value =
+            serde_json::from_slice(calls[1].1.as_deref().expect("stdin")).expect("json");
+        assert_eq!(zoom, serde_json::json!({"block_id": "block:z"}), "no zoom key: toggle");
+    }
+
+    #[test]
+    fn size_calls_the_block_method() {
+        let rex =
+            rex(FakeRunner { stdout: br#"{"columns":80,"rows":24}"#.to_vec(), ..FakeRunner::default() });
+        let size = rex.size("block:b1").expect("size");
+        assert_eq!((size.columns, size.rows), (80, 24));
+        assert_eq!(strings(&rex.runner.calls.borrow()[0].0)[7], "size");
+    }
+
+    #[test]
+    fn broken_pipe_reports_the_rex_error() {
+        let data = vec![b'x'; 1 << 20];
+        let argv = [OsString::from("/bin/sh"), OsString::from("-c"), OsString::from("echo nope >&2; exit 3")];
+        let output = SystemRunner.run(&argv, Some(&data)).expect("the exit status wins over the broken pipe");
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(String::from_utf8_lossy(&output.stderr).trim(), "nope");
     }
 
     #[test]

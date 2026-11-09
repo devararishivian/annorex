@@ -1,0 +1,15 @@
+{
+  "columns": 120,
+  "rows": 40,
+  "cell_width_px": 14,
+  "cell_height_px": 28,
+  "owner": "client:01a1b000-0000-7000-8000-000000000007",
+  "desired": [
+    {
+      "client_id": "client:01a1b000-0000-7000-8000-000000000007",
+      "columns": 120,
+      "rows": 40,
+      "updated_at": "2026-11-09T16:21:49.6683+07:00"
+    }
+  ]
+}

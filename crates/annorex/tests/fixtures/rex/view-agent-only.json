@@ -1,0 +1,44 @@
+{
+  "revision": 141,
+  "session_id": "session:01a1b000-0000-7000-8000-000000000001",
+  "label": "work",
+  "active_window_id": "window:01a1b000-0000-7000-8000-000000000003",
+  "windows": [
+    {
+      "window_id": "window:01a1b000-0000-7000-8000-000000000003",
+      "label": "agent",
+      "focused_block_id": "block:01a1b000-0000-7000-8000-000000000004",
+      "layers": [
+        {
+          "layer_id": "layer:01a1b000-0000-7000-8000-000000000005",
+          "kind": "tiled",
+          "bounds": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "layout": {
+            "rect": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "block_id": "block:01a1b000-0000-7000-8000-000000000004"
+          },
+          "blocks": [
+            {
+              "block_id": "block:01a1b000-0000-7000-8000-000000000004",
+              "label": "claude",
+              "creator_name": "com.superlogical.terminal",
+              "flavor": "com.superlogical.terminal.shell",
+              "host_id": "01a1b000-0000-7000-8000-000000000006",
+              "owner": "client:01a1b000-0000-7000-8000-000000000007"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

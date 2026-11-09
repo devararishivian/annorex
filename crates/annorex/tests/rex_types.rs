@@ -2,7 +2,7 @@
 
 #![allow(clippy::expect_used, reason = "tests assert by panicking")]
 
-use annorex::rex::{Mode, Modes, ProcessInfo, StatusList};
+use annorex::rex::{Mode, Modes, ProcessInfo, SessionList, SessionView, Size, StatusList};
 use serde::de::DeserializeOwned;
 
 fn fixture<T: DeserializeOwned>(name: &str) -> T {
@@ -99,4 +99,47 @@ fn ansi_mode_with_number_2004_is_not_bracketed_paste() {
 fn modes_without_a_list_have_no_bracketed_paste() {
     let modes = Modes { screen: "primary".to_owned(), modes: None };
     assert!(!modes.bracketed_paste());
+}
+
+#[test]
+fn size_wide_gives_218_columns() {
+    let size: Size = fixture("size-wide");
+    assert_eq!((size.columns, size.rows), (218, 69));
+    let narrow: Size = fixture("size-narrow");
+    assert_eq!((narrow.columns, narrow.rows), (120, 40));
+}
+
+#[test]
+fn size_larger_than_u16_saturates() {
+    let size: Size = serde_json::from_str(r#"{"columns":70000,"rows":5}"#).expect("parses");
+    assert_eq!((size.columns, size.rows), (u16::MAX, 5));
+}
+
+#[test]
+fn view_with_annorex_finds_the_label() {
+    let view: SessionView = fixture("view-with-annorex");
+    let found = view.find_label("annorex:block:01a1b000-0000-7000-8000-000000000004").expect("annorex pane");
+    assert_eq!(found.block_id, "block:01a1b000-0000-7000-8000-000000000099");
+    assert_eq!(found.creator_name.as_deref(), Some("com.superlogical.terminal"));
+    assert_eq!(view.blocks().count(), 2);
+}
+
+#[test]
+fn view_agent_only_has_no_annorex_label() {
+    let view: SessionView = fixture("view-agent-only");
+    assert!(view.blocks().all(|block| !block.label.starts_with("annorex:")));
+    assert_eq!(view.blocks().count(), 1);
+}
+
+#[test]
+fn session_list_gives_ids_in_order() {
+    let list: SessionList = fixture("session-list");
+    assert_eq!(
+        list.ids(),
+        [
+            "session:01a1b000-0000-7000-8000-000000000013",
+            "session:01a1b000-0000-7000-8000-000000000014",
+            "session:01a1b000-0000-7000-8000-000000000001",
+        ]
+    );
 }
