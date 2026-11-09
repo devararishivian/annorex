@@ -11,11 +11,11 @@ use crate::config::{Config, resolve_placement};
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
 use crate::draft::{DraftStore, drafts_dir};
 use crate::install::{InstallError, config_dir, install};
-use crate::open::{OpenError, Placement, open_last};
+use crate::open::{OpenError, Placement, View, open_view};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
-use crate::tui::run_last;
+use crate::tui::{run_files, run_last};
 
 /// Exit code: sent, pasted, or probe complete.
 pub const EXIT_OK: i32 = 0;
@@ -71,6 +71,18 @@ enum Command {
         #[arg(long)]
         session: Option<String>,
     },
+    /// Review the files of the work directory of the agent in a pane. `annorex rex open files` runs
+    /// it in a new pane.
+    Files {
+        /// The agent block (pane), for example `block:...`.
+        #[arg(long)]
+        target: String,
+        /// The Rex session of the target. The default is `$REX_SESSION`.
+        #[arg(long)]
+        session: Option<String>,
+        /// Files to open at the start, relative to the work directory of the agent.
+        paths: Vec<PathBuf>,
+    },
     /// Set up the Rex integration.
     Rex {
         #[command(subcommand)]
@@ -107,6 +119,20 @@ enum OpenView {
         #[arg(long, value_enum)]
         placement: Option<Placement>,
     },
+    /// The viewer of the files. If it is open for the target, focus it.
+    Files {
+        /// The agent block (pane), for example `block:...`.
+        #[arg(long)]
+        target: String,
+        /// The Rex session of the target. The default is `$REX_SESSION`.
+        #[arg(long)]
+        session: Option<String>,
+        /// Where the viewer opens. The default is the config file, else `auto`.
+        #[arg(long, value_enum)]
+        placement: Option<Placement>,
+        /// Files to open at the start.
+        paths: Vec<PathBuf>,
+    },
 }
 
 /// Run the command line. Returns the exit code.
@@ -136,10 +162,17 @@ pub fn run(
             send(&env, &target, session, mode, stdin, out, err)
         }
         Command::Last { target, session } => last(&env, &target, session),
+        Command::Files { target, session, paths } => files(&env, &target, session, paths),
         Command::Rex { command: RexCommand::Install { dir } } => rex_install(&env, dir, out),
         Command::Rex {
             command: RexCommand::Open { view: OpenView::Last { target, session, placement } },
-        } => rex_open_last(&env, &target, session, placement, out),
+        } => rex_open(&env, &View::Last, &target, session, placement, out),
+        Command::Rex {
+            command: RexCommand::Open { view: OpenView::Files { target, session, placement, paths } },
+        } => {
+            let paths: Vec<String> = paths.iter().map(|path| path.to_string_lossy().into_owned()).collect();
+            rex_open(&env, &View::Files(&paths), &target, session, placement, out)
+        }
     };
     match result {
         Ok(code) => code,
@@ -299,6 +332,22 @@ fn last(
     Ok(EXIT_OK)
 }
 
+fn files(
+    env: &impl Fn(&str) -> Option<OsString>,
+    target: &str,
+    session: Option<String>,
+    paths: Vec<PathBuf>,
+) -> Result<i32, Failure> {
+    let config = load_config(env)?;
+    let store = drafts_dir(env).map(|dir| DraftStore { dir });
+    let rex = Rex::discover_with(env, session)?;
+    run_files(&rex, target, paths, &config, store).map_err(|error| Failure {
+        code: EXIT_FAILURE,
+        message: format!("cannot use the terminal: {error}"),
+    })?;
+    Ok(EXIT_OK)
+}
+
 fn rex_install(
     env: &impl Fn(&str) -> Option<OsString>,
     dir: Option<PathBuf>,
@@ -322,6 +371,7 @@ fn rex_install(
         String::new(),
         "  require(\"annorex\").setup{}".to_owned(),
         "  rex.bind(\"cmd+shift+a\", \"annorex_last\")".to_owned(),
+        "  rex.bind(\"cmd+shift+f\", \"annorex_files\")".to_owned(),
     ];
     if let Ok(exe) = std::env::current_exe()
         && !on_path(&exe, env("PATH"))
@@ -344,8 +394,9 @@ fn on_path(exe: &Path, path: Option<OsString>) -> bool {
     path.is_some_and(|path| std::env::split_paths(&path).any(|dir| canonical(&dir) == parent))
 }
 
-fn rex_open_last(
+fn rex_open(
     env: &impl Fn(&str) -> Option<OsString>,
+    view: &View<'_>,
     target: &str,
     session: Option<String>,
     placement: Option<Placement>,
@@ -358,11 +409,12 @@ fn rex_open_last(
         code: EXIT_FAILURE,
         message: format!("cannot find the path of the annorex binary: {error}"),
     })?;
-    let opened = open_last(&rex, target, rex.session(), &exe, placement).map_err(|error| match error {
-        OpenError::Rex(rex) => Failure::from(rex),
-        OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
-        OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
-    })?;
+    let opened =
+        open_view(&rex, view, target, rex.session(), &exe, placement).map_err(|error| match error {
+            OpenError::Rex(rex) => Failure::from(rex),
+            OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
+            OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
+        })?;
     let json = serde_json::to_string(&opened)
         .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
     writeln!(out, "{json}").map_err(|error| io_failure(&error))?;

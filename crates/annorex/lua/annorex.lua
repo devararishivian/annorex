@@ -1,9 +1,10 @@
--- Annorex for Rex: review the replies of a coding agent in a pane next to it.
+-- Annorex for Rex: review the replies and the files of a coding agent in a pane next to it.
 --
 -- `annorex rex install` writes this file beside Rex's init.lua. Then add to init.lua:
 --
 --   require("annorex").setup{}
 --   rex.bind("cmd+shift+a", "annorex_last")
+--   rex.bind("cmd+shift+f", "annorex_files")
 --
 -- and run `rex config reload`.
 --
@@ -11,7 +12,8 @@
 --   bin        The annorex binary. Default "annorex" (found on the PATH of the Rex server).
 --   placement  "auto", "right", or "below". Default: unset. Then config.toml decides, else "auto".
 --
--- This module only starts `annorex rex open last`. The binary does all other work.
+-- This module only starts `annorex rex open last` and `annorex rex open files`. The binary does all
+-- other work.
 
 local M = {}
 
@@ -34,10 +36,10 @@ local function fail(message)
   error("Annorex: " .. tostring(message), 0)
 end
 
-local function open_last(ctx)
+local function open_view(ctx, view)
   if ctx.block_id == nil or ctx.session_id == nil then fail("no focused pane") end
   local argv = {
-    M.options.bin, "rex", "open", "last",
+    M.options.bin, "rex", "open", view,
     "--target", ctx.block_id,
     "--session", ctx.session_id,
   }
@@ -55,6 +57,9 @@ local function open_last(ctx)
   return nil
 end
 
+local function open_last(ctx) return open_view(ctx, "last") end
+local function open_files(ctx) return open_view(ctx, "files") end
+
 function M.setup(opts)
   for key, value in pairs(opts or {}) do
     if KNOWN[key] then
@@ -71,6 +76,14 @@ function M.setup(opts)
     category = "Annorex",
     keywords = "annorex review reply agent claude pi opencode",
     run = function(ctx) return open_last(ctx) end,
+  }
+  rex.action{
+    name = "annorex_files",
+    title = "Annorex: review files",
+    description = "Open the files of the work directory of the agent in the focused pane, next to it.",
+    category = "Annorex",
+    keywords = "annorex review files tree agent claude pi opencode",
+    run = function(ctx) return open_files(ctx) end,
   }
   return M
 end

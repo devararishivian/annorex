@@ -1,6 +1,7 @@
 //! The terminal loop of the viewer and the `annorex last` command.
 
 use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -16,7 +17,8 @@ use crate::clipboard::{SystemClipboard, copy_review};
 use crate::config::Config;
 use crate::deliver::{DeliveryMode, RealSleeper};
 use crate::draft::{DraftError, DraftKey, DraftStore};
-use crate::open::pane_label;
+use crate::files;
+use crate::open::{pane_label, pane_label_files};
 use crate::replies::{
     Candidate, Reply, SessionRef, Source, candidates, load_replies, matching_panes, needs_picker,
     process_table,
@@ -131,6 +133,7 @@ pub fn run_last(
         candidates: Vec::new(),
         store,
         enter_delay: config.enter_delay,
+        files: None,
     };
     let (screen, replies) = viewer.start_or_error();
     let mut app = App::new(viewer.state.clone(), screen, replies, config);
@@ -139,6 +142,55 @@ pub fn run_last(
     }
     viewer.restore_drafts(&mut app);
 
+    let (sender, updates) = mpsc::channel();
+    let watcher = Rex::new(rex.bin.clone(), rex.session.clone(), SystemRunner);
+    let pane = target.to_owned();
+    std::thread::spawn(move || watch_status(&watcher, &pane, &sender));
+
+    let mut terminal = start_terminal(init_terminal, restore_terminal)?;
+    let result = run_loop(
+        &mut app,
+        &mut CrosstermEvents,
+        &mut terminal,
+        &stop,
+        &updates,
+        &mut |effect, app: &mut App| viewer.apply(effect, app),
+    );
+    restore_terminal();
+    result
+}
+
+/// `annorex files`: review the files of the work directory of the agent in `target`. `paths` open
+/// at the start. Every problem shows in the pane, so the user can read it.
+pub fn run_files(
+    rex: &Rex<SystemRunner>,
+    target: &str,
+    paths: Vec<PathBuf>,
+    config: &Config,
+    store: Option<DraftStore>,
+) -> io::Result<()> {
+    let stop = Arc::new(AtomicBool::new(false));
+    for signal in [SIGHUP, SIGTERM, SIGINT] {
+        signal_hook::flag::register(signal, Arc::clone(&stop))?;
+    }
+    let mut viewer = Viewer {
+        rex,
+        target,
+        state: AgentState { agent: None, safety: Safety::Clear { state: None } },
+        session: None,
+        candidates: Vec::new(),
+        store,
+        enter_delay: config.enter_delay,
+        files: Some(FilesView { config: config.clone(), paths, session: None }),
+    };
+    let mut app = match viewer.start_files() {
+        Ok(root) => viewer.files_app(&root),
+        Err(message) => App::new(viewer.state.clone(), Screen::Error(message), Vec::new(), config),
+    };
+    app.set_state(viewer.state.clone());
+    if viewer.store.is_none() {
+        app.set_save_error(Some("no home directory, so no place for drafts".to_owned()));
+    }
     let (sender, updates) = mpsc::channel();
     let watcher = Rex::new(rex.bin.clone(), rex.session.clone(), SystemRunner);
     let pane = target.to_owned();
@@ -200,6 +252,18 @@ struct Viewer<'a, R: Runner> {
     store: Option<DraftStore>,
     /// The wait between the paste and the Enter key.
     enter_delay: Duration,
+    /// Set in the files viewer.
+    files: Option<FilesView>,
+}
+
+/// What the files viewer needs besides the session viewer.
+struct FilesView {
+    config: Config,
+    /// The files to open at the start.
+    paths: Vec<PathBuf>,
+    /// The key of the drafts: the work directory of the agent. Notes on files belong to the
+    /// directory, not to one session of the agent.
+    session: Option<String>,
 }
 
 impl<R: Runner> Viewer<'_, R> {
@@ -252,11 +316,19 @@ impl<R: Runner> Viewer<'_, R> {
         }
     }
 
+    /// The session part of a draft key: the work directory in the files viewer, else the session.
+    fn draft_session(&self) -> Option<String> {
+        match &self.files {
+            Some(files) => files.session.clone(),
+            None => self.session.as_ref().map(SessionRef::id),
+        }
+    }
+
     /// The key of the draft of a reply in the session on the screen.
     fn draft_key(&self, reply_id: &str) -> Option<DraftKey> {
         Some(DraftKey {
             agent: self.state.agent?,
-            session: self.session.as_ref()?.id(),
+            session: self.draft_session()?,
             document: reply_id.to_owned(),
         })
     }
@@ -279,13 +351,86 @@ impl<R: Runner> Viewer<'_, R> {
         }
     }
 
+    /// Load the draft of one document.
+    fn restore_one(&self, app: &mut App, id: &str) {
+        let (Some(store), Some(key)) = (&self.store, self.draft_key(id)) else { return };
+        match store.load(&key) {
+            Ok(Some(draft)) => app.restore(id, draft),
+            Ok(None) => {}
+            Err(error @ DraftError::Unreadable { .. }) => app.set_status(error.to_string()),
+            Err(error) => app.set_save_error(Some(error.to_string())),
+        }
+    }
+
+    /// Find the agent and the work directory of the files viewer.
+    fn start_files(&mut self) -> Result<PathBuf, String> {
+        self.state = read_state(self.rex, self.target).map_err(|error| error.to_string())?;
+        let Some(agent) = self.state.agent else { return Err(NOT_AGENT.to_owned()) };
+        let process = self.rex.process(self.target).map_err(|error| error.to_string())?;
+        let source = Source::from_process(agent, &process)
+            .ok_or_else(|| "Rex does not report the directory of the agent process".to_owned())?;
+        if let Some(files) = &mut self.files {
+            files.session = Some(format!("files:{}", source.cwd.display()));
+        }
+        Ok(source.cwd)
+    }
+
+    /// The viewer of the files of `root`: the files of the command line open, the tree starts when
+    /// none did, and the marks show the files with unsent drafts.
+    fn files_app(&mut self, root: &Path) -> App {
+        let (config, paths) = self.files.as_ref().map_or_else(
+            || (Config::default(), Vec::new()),
+            |files| (files.config.clone(), files.paths.clone()),
+        );
+        let mut app = App::new_files(self.state.clone(), root.to_path_buf(), &config);
+        app.start_scan();
+        app.start_watch();
+        let mut problems: Vec<String> = Vec::new();
+        for input in paths {
+            match files::resolve(root, &input).and_then(|relative| files::load(root, &relative)) {
+                Ok(loaded) => {
+                    app.open_file(loaded);
+                }
+                Err(error) => problems.push(error.to_string()),
+            }
+        }
+        self.restore_drafts(&mut app);
+        self.refresh_marks(&mut app);
+        if app.reply_ids().is_empty() {
+            app.open_tree();
+        }
+        if !problems.is_empty() {
+            app.set_status(problems.join("; "));
+        }
+        app
+    }
+
+    /// Tell the app which files have a draft with notes that no send took.
+    fn refresh_marks(&self, app: &mut App) {
+        if let (Some(store), Some(agent), Some(session)) =
+            (&self.store, self.state.agent, self.draft_session())
+        {
+            app.set_draft_marks(&store.unsent(agent, &session));
+        }
+    }
+
+    /// `r` on the error screen of the files viewer: look for the agent again.
+    fn restart_files(&mut self, app: &mut App) {
+        match self.start_files() {
+            Ok(root) => *app = self.files_app(&root),
+            Err(message) => app.set_error(message),
+        }
+        app.set_state(self.state.clone());
+    }
+
     /// Give the export of the reply on the screen to the agent, and save the draft when the notes
     /// count as sent.
     fn send(&self, app: &mut App, mode: DeliveryMode) {
         let export = app.export();
         let result = send_review(self.rex, &RealSleeper, self.target, &export, mode, self.enter_delay);
         if apply_result(app, result, &crate::draft::now()) {
-            self.save_draft(app);
+            self.save_drafts(app);
+            self.refresh_marks(app);
         }
     }
 
@@ -298,13 +443,23 @@ impl<R: Runner> Viewer<'_, R> {
                 app.set_save_error(Some(error.to_string()));
             }
         }
+        self.refresh_marks(app);
         app.quit_if_pending();
     }
 
-    /// Save the drafts of the reply on the screen, or of all open files.
+    /// Save the draft of the reply or the file on the screen.
     fn save_draft(&self, app: &mut App) {
-        let (Some(store), Some(agent), Some(session)) =
-            (&self.store, self.state.agent, self.session.as_ref().map(SessionRef::id))
+        let (Some(store), Some(agent), Some(session)) = (&self.store, self.state.agent, self.draft_session())
+        else {
+            return;
+        };
+        let error = app.draft(agent, &session).and_then(|draft| store.save(&draft).err());
+        app.set_save_error(error.map(|error| error.to_string()));
+    }
+
+    /// Save the drafts of all open files: after a send, every file changed its sent state.
+    fn save_drafts(&self, app: &mut App) {
+        let (Some(store), Some(agent), Some(session)) = (&self.store, self.state.agent, self.draft_session())
         else {
             return;
         };
@@ -323,6 +478,12 @@ impl<R: Runner> Viewer<'_, R> {
             }
             Effect::Copy => copy_review(app, &mut SystemClipboard::new()),
             Effect::Discard => self.discard(app),
+            Effect::FileOpened => {
+                if let Some(id) = app.shown_reply_id().map(str::to_owned) {
+                    self.restore_one(app, &id);
+                }
+                self.refresh_marks(app);
+            }
             Effect::Reload => self.reload(app),
             Effect::PickSession(index) => {
                 let (screen, replies) = self.open(index);
@@ -340,6 +501,10 @@ impl<R: Runner> Viewer<'_, R> {
     /// Read the replies again. Claude Code finds its session again by pid, because the session
     /// file can change while the agent runs. Pi and `OpenCode` keep the session that the user saw.
     fn reload(&mut self, app: &mut App) {
+        if self.files.is_some() {
+            self.restart_files(app);
+            return;
+        }
         let showing = matches!(app.screen, Screen::Viewer);
         let result = match &self.session {
             Some(session) if self.state.agent != Some(Agent::ClaudeCode) => Ok(match load_replies(session) {
@@ -363,7 +528,8 @@ impl<R: Runner> Viewer<'_, R> {
     }
 
     fn toggle_zoom(&self) -> Result<(), String> {
-        let label = pane_label(self.target);
+        let label =
+            if self.files.is_some() { pane_label_files(self.target) } else { pane_label(self.target) };
         let view = self.rex.view().map_err(|error| format!("cannot zoom: {error}"))?;
         let block = view
             .find_label(&label)

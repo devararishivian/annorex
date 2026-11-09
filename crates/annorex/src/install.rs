@@ -157,7 +157,8 @@ mod tests {
         let code = MODULE_SOURCE.lines().filter(|line| !line.trim_start().starts_with("--"));
         assert!(code.clone().all(|line| !line.contains("rex.bind(")), "the module must not bind keys");
         assert!(code.clone().any(|line| line.contains("rex.action{")));
-        assert!(MODULE_SOURCE.contains("\"rex\", \"open\", \"last\""));
+        assert!(MODULE_SOURCE.contains("\"rex\", \"open\", view"));
+        assert!(MODULE_SOURCE.contains("open_view(ctx, \"last\")"));
     }
 
     #[test]
@@ -171,5 +172,28 @@ mod tests {
         let flag = code.find("\"--placement\"").expect("the flag");
         assert!(guard < flag, "the flag must come after the guard");
         assert!(!code.contains("placement = \"auto\""), "the module must not set a default placement");
+    }
+
+    #[test]
+    fn lua_module_registers_both_actions() {
+        assert!(MODULE_SOURCE.contains("name = \"annorex_last\""));
+        assert!(MODULE_SOURCE.contains("name = \"annorex_files\""));
+        assert!(MODULE_SOURCE.contains("title = \"Annorex: review files\""));
+        assert!(MODULE_SOURCE.contains("open_view(ctx, \"files\")"));
+        assert!(MODULE_SOURCE.contains("rex.bind(\"cmd+shift+f\", \"annorex_files\")"));
+        let code = MODULE_SOURCE.lines().filter(|line| !line.trim_start().starts_with("--"));
+        assert!(code.clone().all(|line| !line.contains("rex.bind(")), "the module must not bind keys");
+    }
+
+    #[test]
+    fn install_replaces_the_old_module_version() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("annorex.lua");
+        let old = format!("{MODULE_MARKER} (annorex 0.1.0); run it again.\nname = \"annorex_last\"\n");
+        std::fs::write(&path, old).expect("old module");
+        let installed = install(dir.path()).expect("install");
+        assert!(installed.replaced);
+        let text = std::fs::read_to_string(&path).expect("module");
+        assert!(text.contains("annorex_files"), "the new module has the files action");
     }
 }

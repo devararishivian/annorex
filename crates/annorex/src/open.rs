@@ -30,6 +30,29 @@ pub fn pane_label(target: &str) -> String {
     format!("annorex:{target}")
 }
 
+/// The label of the files viewer pane for one agent pane.
+pub fn pane_label_files(target: &str) -> String {
+    format!("annorex-files:{target}")
+}
+
+/// Which viewer to open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View<'a> {
+    /// The replies of the agent.
+    Last,
+    /// The files of the work directory. The paths open at the start.
+    Files(&'a [String]),
+}
+
+impl View<'_> {
+    fn label(&self, target: &str) -> String {
+        match self {
+            View::Last => pane_label(target),
+            View::Files(_) => pane_label_files(target),
+        }
+    }
+}
+
 /// The split direction: `horizontal` is side by side, `vertical` is one above the other.
 pub fn direction(placement: Placement, columns: u16) -> &'static str {
     let side_by_side = match placement {
@@ -48,8 +71,30 @@ pub fn split_request(
     cwd: Option<&Path>,
     direction: &str,
 ) -> serde_json::Value {
-    let command =
-        [exe.to_string_lossy().as_ref(), "last", "--target", target, "--session", session].map(str::to_owned);
+    split_request_for(&View::Last, target, session, exe, cwd, direction)
+}
+
+/// The `session.new_split` request for a viewer of `view`. File paths follow `--`, so a name
+/// that starts with `-` is not read as an option.
+pub fn split_request_for(
+    view: &View<'_>,
+    target: &str,
+    session: &str,
+    exe: &Path,
+    cwd: Option<&Path>,
+    direction: &str,
+) -> serde_json::Value {
+    let word = if matches!(view, View::Last) { "last" } else { "files" };
+    let mut command: Vec<String> =
+        [exe.to_string_lossy().as_ref(), word, "--target", target, "--session", session]
+            .map(str::to_owned)
+            .into();
+    if let View::Files(paths) = view
+        && !paths.is_empty()
+    {
+        command.push("--".to_owned());
+        command.extend(paths.iter().cloned());
+    }
     let mut options = serde_json::Map::new();
     options.insert("command".to_owned(), serde_json::json!(command));
     if let Some(cwd) = cwd {
@@ -62,7 +107,7 @@ pub fn split_request(
         "ratio": 0.5,
         "focus": true,
         "layout": {
-            "block": { "flavor": TERMINAL_FLAVOR, "label": pane_label(target), "options": options },
+            "block": { "flavor": TERMINAL_FLAVOR, "label": view.label(target), "options": options },
         },
     })
 }
@@ -123,18 +168,43 @@ pub fn open_last(
     exe: &Path,
     placement: Placement,
 ) -> Result<Opened, OpenError> {
+    open_view(api, &View::Last, target, session, exe, placement)
+}
+
+/// Open the files viewer for the agent in `target`, with `paths` open. If a files viewer for
+/// `target` is open, focus it. Then the paths are not used.
+pub fn open_files(
+    api: &impl OpenApi,
+    target: &str,
+    session: &str,
+    exe: &Path,
+    placement: Placement,
+    paths: &[String],
+) -> Result<Opened, OpenError> {
+    open_view(api, &View::Files(paths), target, session, exe, placement)
+}
+
+/// Open the viewer of `view` for the agent in `target`, or focus the one that is open.
+pub fn open_view(
+    api: &impl OpenApi,
+    view: &View<'_>,
+    target: &str,
+    session: &str,
+    exe: &Path,
+    placement: Placement,
+) -> Result<Opened, OpenError> {
     let process = api.process(target)?;
     let status = api.program_status(target)?;
     if detect(&process, &status).is_none() {
         return Err(OpenError::NotAgent);
     }
-    if let Some(existing) = api.view()?.find_label(&pane_label(target)) {
+    if let Some(existing) = api.view()?.find_label(&view.label(target)) {
         api.focus_block(&existing.block_id)?;
         return Ok(Opened { block_id: existing.block_id.clone(), focused_existing: true });
     }
     let size = api.size(target)?;
     let cwd = process.foreground.as_ref().and_then(|fg| fg.cwd.as_deref());
-    let request = split_request(target, session, exe, cwd, direction(placement, size.columns));
+    let request = split_request_for(view, target, session, exe, cwd, direction(placement, size.columns));
     let block_id = api.new_split(&request)?.into_iter().next().ok_or(OpenError::NoNewBlock)?;
     Ok(Opened { block_id, focused_existing: false })
 }
@@ -290,5 +360,85 @@ mod tests {
         assert_eq!(TARGET.len(), 42);
         assert_eq!(pane_label(TARGET).len(), 50);
         assert!(pane_label(TARGET).len() <= 128);
+    }
+
+    const WITH_ANNOREX_FILES: &str = include_str!("../tests/fixtures/rex/view-with-annorex-files.json");
+
+    fn files_command(fake: &Fake) -> Vec<String> {
+        let request = fake.split.borrow().clone().expect("split");
+        serde_json::from_value(request["layout"]["block"]["options"]["command"].clone()).expect("command")
+    }
+
+    #[test]
+    fn split_request_for_files_has_the_files_command() {
+        let request = split_request_for(&View::Files(&[]), TARGET, "session:s", &exe(), None, "vertical");
+        let block = &request["layout"]["block"];
+        assert_eq!(block["label"], format!("annorex-files:{TARGET}"));
+        assert_eq!(
+            block["options"]["command"],
+            serde_json::json!([
+                "/usr/local/bin/annorex",
+                "files",
+                "--target",
+                TARGET,
+                "--session",
+                "session:s"
+            ])
+        );
+    }
+
+    #[test]
+    fn open_files_passes_the_paths_to_the_split_command() {
+        let fake = Fake::claude(AGENT_ONLY, 218);
+        let paths = ["README.md".to_owned(), "-odd name.md".to_owned()];
+        open_files(&fake, TARGET, "session:s", &exe(), Placement::Auto, &paths).expect("open");
+        assert_eq!(
+            files_command(&fake),
+            [
+                "/usr/local/bin/annorex",
+                "files",
+                "--target",
+                TARGET,
+                "--session",
+                "session:s",
+                "--",
+                "README.md",
+                "-odd name.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn open_files_uses_its_own_label_and_focuses_the_open_pane() {
+        // A reply viewer for the pane does not count as the files viewer.
+        let fake = Fake::claude(WITH_ANNOREX, 218);
+        let opened = open_files(&fake, TARGET, "session:s", &exe(), Placement::Auto, &[]).expect("open");
+        assert!(!opened.focused_existing, "the reply viewer is another pane");
+        let fake = Fake::claude(WITH_ANNOREX_FILES, 218);
+        let opened = open_files(&fake, TARGET, "session:s", &exe(), Placement::Auto, &[]).expect("open");
+        assert!(opened.focused_existing);
+        assert_eq!(
+            fake.called(),
+            ["process", "program_status", "view", "focus_block block:01a1b000-0000-7000-8000-000000000099"]
+        );
+    }
+
+    #[test]
+    fn files_command_refuses_a_pane_without_an_agent() {
+        let fake = Fake {
+            process: include_str!("../tests/fixtures/rex/process-shell.json"),
+            status: include_str!("../tests/fixtures/rex/status-empty.json"),
+            ..Fake::claude(AGENT_ONLY, 218)
+        };
+        let error =
+            open_files(&fake, TARGET, "session:s", &exe(), Placement::Auto, &[]).expect_err("no agent");
+        assert!(matches!(error, OpenError::NotAgent));
+        assert_eq!(fake.called(), ["process", "program_status"]);
+    }
+
+    #[test]
+    fn files_label_fits_rex_limit() {
+        assert!(pane_label_files(TARGET).len() <= 128);
+        assert_ne!(pane_label_files(TARGET), pane_label(TARGET));
     }
 }

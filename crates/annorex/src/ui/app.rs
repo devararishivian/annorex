@@ -74,6 +74,8 @@ pub enum Effect {
     Copy,
     /// The review of the reply on the screen is gone. The caller removes the draft file.
     Discard,
+    /// A new file is on the screen. The caller restores its saved draft.
+    FileOpened,
 }
 
 /// What the viewer shows: the replies of the agent, or files of the work directory.
@@ -350,13 +352,25 @@ impl App {
     }
 
     /// Read a file of the work directory and show it. A failure goes to the footer.
-    fn open_path(&mut self, relative: &Path) {
-        let Some(root) = self.root.clone() else { return };
+    fn open_path(&mut self, relative: &Path) -> Effect {
+        let Some(root) = self.root.clone() else { return Effect::None };
         match crate::files::load(&root, relative) {
             Ok(loaded) => {
+                let before = self.replies.len();
                 self.open_file(loaded);
+                if self.replies.len() > before { Effect::FileOpened } else { Effect::None }
             }
-            Err(error) => self.status = Some(error.to_string()),
+            Err(error) => {
+                self.status = Some(error.to_string());
+                Effect::None
+            }
+        }
+    }
+
+    /// Show the file tree. The viewer starts with it when no file is open.
+    pub fn open_tree(&mut self) {
+        if !(self.panel_open && self.panel_view == PanelView::Tree) {
+            self.toggle_panel(PanelView::Tree);
         }
     }
 
@@ -972,7 +986,7 @@ impl App {
             KeyCode::Enter => {
                 if let Some(path) = self.finder.selected().map(PathBuf::from) {
                     self.close_panel();
-                    self.open_path(&path);
+                    return self.open_path(&path);
                 }
             }
             KeyCode::Down => self.finder.move_by(1),
@@ -1008,7 +1022,7 @@ impl App {
         } else {
             let path = entry.path.clone();
             self.close_panel();
-            self.open_path(&path);
+            return self.open_path(&path);
         }
         Effect::None
     }

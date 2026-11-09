@@ -74,6 +74,7 @@ fn rex_install_prints_setup_lines() {
     assert!(out.contains(&format!("{path}/annorex.lua")), "{out}");
     assert!(out.contains("require(\"annorex\").setup{}"), "{out}");
     assert!(out.contains("rex.bind(\"cmd+shift+a\", \"annorex_last\")"), "{out}");
+    assert!(out.contains("rex.bind(\"cmd+shift+f\", \"annorex_files\")"), "{out}");
     assert!(out.contains("rex config reload"), "{out}");
     // The test binary is not in a PATH directory, so the bin option is shown too.
     assert!(out.contains("setup{ bin = \""), "{out}");
@@ -134,4 +135,36 @@ fn bad_config_exits_64() {
         assert_eq!(output.status.code(), Some(64), "{args:?}: {}", text(&output.stderr));
         assert!(text(&output.stderr).contains("colour"), "{}", text(&output.stderr));
     }
+}
+
+#[test]
+fn files_command_parses_paths_and_target() {
+    // The command line is valid, so the run goes on and fails at the Rex discovery (exit 4).
+    let env = [("REX_BIN_DIR", "/nonexistent"), ("PATH", ""), ("REX_SESSION", "session:x")];
+    let output = annorex(&["files", "--target", "block:b1", "README.md", "docs/a.md"], &env, "");
+    assert_eq!(output.status.code(), Some(4), "{}", text(&output.stderr));
+    let output = annorex(&["files", "--target", "block:b1", "--session", "session:x"], &env, "");
+    assert_eq!(output.status.code(), Some(4), "{}", text(&output.stderr));
+}
+
+#[test]
+fn files_without_target_or_session_exits_64() {
+    let output = annorex(&["files"], &[("REX_SESSION", "session:x")], "");
+    assert_eq!(output.status.code(), Some(64));
+    let output = annorex(&["files", "--target", "block:b1"], &[("PATH", "")], "");
+    assert_eq!(output.status.code(), Some(64));
+    assert!(text(&output.stderr).contains("session"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn rex_open_files_without_session_exits_64() {
+    let output = annorex(&["rex", "open", "files", "--target", "block:b1", "a.md"], &[("PATH", "")], "");
+    assert_eq!(output.status.code(), Some(64));
+    assert!(text(&output.stderr).contains("session"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn help_lists_files() {
+    let help = text(&annorex(&["--help"], &[], "").stdout);
+    assert!(help.contains("files"), "{help}");
 }
