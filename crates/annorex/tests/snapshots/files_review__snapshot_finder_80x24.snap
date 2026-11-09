@@ -1,0 +1,28 @@
+---
+source: crates/annorex/tests/files_review.rs
+expression: "render(&mut app, 80, 24)"
+---
+Annorex · files · claude (idle)                                     no file open
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Find file ─────────────────────────────────────────────────────────────────────
+> rs
+  src/lib.rs
+  src/main.rs
+
+
+
+
+type to filter  enter open  ctrl+n/ctrl+p move  esc close

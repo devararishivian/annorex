@@ -45,12 +45,14 @@ pub enum Action {
     PrevFile,
     NextFile,
     CloseFile,
+    Tree,
+    FindFile,
     Quit,
 }
 
 impl Action {
     /// Every action, in the order of the documentation.
-    pub const ALL: [Action; 36] = [
+    pub const ALL: [Action; 38] = [
         Action::Left,
         Action::Right,
         Action::Down,
@@ -86,6 +88,8 @@ impl Action {
         Action::PrevFile,
         Action::NextFile,
         Action::CloseFile,
+        Action::Tree,
+        Action::FindFile,
         Action::Quit,
     ];
 
@@ -127,6 +131,8 @@ impl Action {
             Action::PrevFile => "prev_file",
             Action::NextFile => "next_file",
             Action::CloseFile => "close_file",
+            Action::Tree => "tree",
+            Action::FindFile => "find_file",
             Action::Quit => "quit",
         }
     }
@@ -169,6 +175,8 @@ impl Action {
             Action::PrevFile => "[",
             Action::NextFile => "]",
             Action::CloseFile => "W",
+            Action::Tree => "T",
+            Action::FindFile => "ctrl+p",
             Action::Quit => "q",
         }
     }

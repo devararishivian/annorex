@@ -1,18 +1,19 @@
 //! The state of the viewer and its keys.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::editor::{Editor, EditorResult};
+use super::tree::{Finder, Tree};
 use crate::agent::Agent;
 use crate::config::Config;
 use crate::deliver::DeliveryMode;
 use crate::doc::{Doc, DocKind};
 use crate::draft::{Draft, DraftKey, Editing};
-use crate::files::{LoadedFile, Stamp};
+use crate::files::{LoadedFile, Scan, Stamp};
 use crate::keys::Action;
 use crate::payload::sanitize;
 use crate::replies::{Candidate, Reply};
@@ -123,6 +124,8 @@ pub(crate) enum Focus {
 pub(crate) enum PanelView {
     Replies,
     Annotations,
+    Tree,
+    Finder,
 }
 
 /// The text that the user marked with `v` or `V`. The anchor is where the marking started.
@@ -193,6 +196,10 @@ pub struct App {
     pub(crate) files: HashMap<String, OpenFile>,
     /// The ids of the documents whose review the last discard removed. The caller removes the drafts.
     discarded: Vec<String>,
+    pub(crate) tree: Tree,
+    pub(crate) finder: Finder,
+    marks: HashSet<String>,
+    scan_rx: Option<std::sync::mpsc::Receiver<Scan>>,
 }
 
 impl App {
@@ -234,6 +241,10 @@ impl App {
             root: None,
             files: HashMap::new(),
             discarded: Vec::new(),
+            tree: Tree::default(),
+            finder: Finder::default(),
+            marks: HashSet::new(),
+            scan_rx: None,
         };
         if !replies.is_empty() {
             app.replies = replies;
@@ -279,6 +290,65 @@ impl App {
     /// The path of the file on the screen, relative to the root.
     pub fn shown_file(&self) -> Option<&Path> {
         self.files.get(self.shown_id.as_deref()?).map(|file| file.relative.as_path())
+    }
+
+    /// Put the result of a scan of the work directory in the tree.
+    pub fn set_scan(&mut self, scan: Scan) {
+        self.tree.load(scan);
+    }
+
+    /// Scan the work directory on a thread. [`App::poll_scan`] takes the result.
+    pub fn start_scan(&mut self) {
+        let Some(root) = self.root.clone() else { return };
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.scan_rx = Some(receiver);
+        std::thread::spawn(move || {
+            // The viewer can end before the scan: then nobody reads the result.
+            let _ = sender.send(crate::files::scan(&root));
+        });
+    }
+
+    /// Take the result of the scan when it is ready. True when the tree changed.
+    pub fn poll_scan(&mut self) -> bool {
+        let Some(receiver) = &self.scan_rx else { return false };
+        match receiver.try_recv() {
+            Ok(scan) => {
+                self.scan_rx = None;
+                self.tree.load(scan);
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.scan_rx = None;
+                self.tree.load(Scan { entries: Vec::new(), truncated: false });
+                true
+            }
+        }
+    }
+
+    /// The ids of the documents with a saved draft that no send covered. Their files show `●`.
+    pub fn set_draft_marks(&mut self, ids: &[String]) {
+        self.marks = ids.iter().cloned().collect();
+    }
+
+    /// True when the file has notes that no send took: in the open file, or in a draft on disk.
+    pub(crate) fn is_marked(&self, relative: &Path) -> bool {
+        let id = file_id(relative);
+        match self.reviews.get(&id) {
+            Some(review) => review.has_unsent(),
+            None => self.marks.contains(&id),
+        }
+    }
+
+    /// Read a file of the work directory and show it. A failure goes to the footer.
+    fn open_path(&mut self, relative: &Path) {
+        let Some(root) = self.root.clone() else { return };
+        match crate::files::load(&root, relative) {
+            Ok(loaded) => {
+                self.open_file(loaded);
+            }
+            Err(error) => self.status = Some(error.to_string()),
+        }
     }
 
     /// `[` and `]`: show the previous or the next open file.
@@ -737,6 +807,8 @@ impl App {
                 Some(Action::PrevFile) if self.mode == Mode::Files => self.step_file(false),
                 Some(Action::NextFile) if self.mode == Mode::Files => self.step_file(true),
                 Some(Action::CloseFile) if self.mode == Mode::Files => self.begin_close(),
+                Some(Action::Tree) if self.mode == Mode::Files => self.toggle_panel(PanelView::Tree),
+                Some(Action::FindFile) if self.mode == Mode::Files => self.toggle_panel(PanelView::Finder),
                 Some(Action::Select) => self.toggle_selection(false),
                 Some(Action::SelectLines) => self.toggle_selection(true),
                 Some(Action::Comment) => return self.begin_new(Kind::Comment),
@@ -771,6 +843,8 @@ impl App {
         match view {
             PanelView::Replies => self.panel_index = self.selected,
             PanelView::Annotations => self.annotation_index = 0,
+            PanelView::Tree => self.tree.stop_filter(),
+            PanelView::Finder => self.finder = Finder::new(self.tree.file_paths()),
         }
     }
 
@@ -781,11 +855,79 @@ impl App {
         }
     }
 
-    fn panel_key(&mut self, key: KeyEvent) -> Effect {
+    /// Close the tree or the finder, also when the panel is not an overlay.
+    fn close_panel(&mut self) {
+        self.panel_open = false;
+        self.focus = Focus::Doc;
+    }
+
+    /// The finder is a text field: letters go into the query.
+    fn finder_key(&mut self, key: KeyEvent) -> Effect {
+        let control = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
+            KeyCode::Esc => self.close_panel(),
+            KeyCode::Enter => {
+                if let Some(path) = self.finder.selected().map(PathBuf::from) {
+                    self.close_panel();
+                    self.open_path(&path);
+                }
+            }
+            KeyCode::Down => self.finder.move_by(1),
+            KeyCode::Up => self.finder.move_by(-1),
+            KeyCode::Char('n') if control => self.finder.move_by(1),
+            KeyCode::Char('p') if control => self.finder.move_by(-1),
+            KeyCode::Backspace => self.finder.backspace(),
+            KeyCode::Char(c) if !control => self.finder.type_char(c),
+            _ => {}
+        }
+        Effect::None
+    }
+
+    /// The filter of the tree is a text field too, until esc or enter.
+    fn tree_filter_key(&mut self, key: KeyEvent) -> Effect {
+        match key.code {
+            KeyCode::Esc => self.tree.stop_filter(),
+            KeyCode::Enter => return self.tree_enter(),
+            KeyCode::Down => self.tree.move_by(1),
+            KeyCode::Up => self.tree.move_by(-1),
+            KeyCode::Backspace => self.tree.backspace(),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => self.tree.type_char(c),
+            _ => {}
+        }
+        Effect::None
+    }
+
+    /// `enter` in the tree: open a file, or open or close a directory.
+    fn tree_enter(&mut self) -> Effect {
+        let Some(entry) = self.tree.selected() else { return Effect::None };
+        if entry.is_dir {
+            self.tree.toggle();
+        } else {
+            let path = entry.path.clone();
+            self.close_panel();
+            self.open_path(&path);
+        }
+        Effect::None
+    }
+
+    fn panel_key(&mut self, key: KeyEvent) -> Effect {
+        if self.panel_view == PanelView::Finder {
+            return self.finder_key(key);
+        }
+        if self.panel_view == PanelView::Tree && self.tree.filter().is_some() {
+            return self.tree_filter_key(key);
+        }
+        match key.code {
+            KeyCode::Enter if self.panel_view == PanelView::Tree => return self.tree_enter(),
+            KeyCode::Esc if self.panel_view == PanelView::Tree => self.close_panel(),
             KeyCode::Enter => return self.panel_enter(),
             KeyCode::Esc | KeyCode::Tab => self.close_panel_if_overlay(),
             _ => match self.action_of(key) {
+                Some(Action::Tree) if self.mode == Mode::Files => self.toggle_panel(PanelView::Tree),
+                Some(Action::FindFile) if self.mode == Mode::Files => self.toggle_panel(PanelView::Finder),
+                Some(Action::Left) if self.panel_view == PanelView::Tree => self.tree.collapse(),
+                Some(Action::Right) if self.panel_view == PanelView::Tree => self.tree.expand(),
+                Some(Action::Find) if self.panel_view == PanelView::Tree => self.tree.start_filter(),
                 Some(Action::Quit) => return self.request_quit(),
                 Some(Action::Reload) => return Effect::Reload,
                 Some(Action::Zoom) => return Effect::ToggleZoom,
@@ -819,6 +961,8 @@ impl App {
                 let last = self.review().map_or(0, |review| review.annotations.len()).saturating_sub(1);
                 self.annotation_index = self.annotation_index.saturating_add_signed(delta).min(last);
             }
+            PanelView::Tree => self.tree.move_by(delta),
+            PanelView::Finder => self.finder.move_by(delta),
         }
     }
 
@@ -854,6 +998,8 @@ impl App {
                     None => {}
                 }
             }
+            PanelView::Tree => return self.tree_enter(),
+            PanelView::Finder => {}
         }
         Effect::None
     }

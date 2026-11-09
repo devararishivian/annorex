@@ -1,0 +1,44 @@
+---
+source: crates/annorex/tests/files_review.rs
+expression: "render(&mut app, 120, 40)"
+---
+Annorex · files · claude (idle)                                                                             no file open
+                                                                                │ Tree
+                                                                                │  ▾ src/
+                                                                                │      lib.rs
+                                                                                │      main.rs
+                                                                                │  ● README.md
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+j/k move  enter open  h/l close/open  / filter  esc close  q quit

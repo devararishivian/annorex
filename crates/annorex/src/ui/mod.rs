@@ -3,6 +3,7 @@
 mod app;
 mod draw;
 mod editor;
+mod tree;
 
 pub use app::{AgentState, App, Effect, Mode, Screen, file_id};
 pub use draw::draw;

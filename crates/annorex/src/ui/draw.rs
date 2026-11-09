@@ -12,6 +12,7 @@ use unicode_width::UnicodeWidthStr;
 use super::app::{App, Confirm, Focus, Mode, PanelView, Screen, match_ranges};
 use crate::agent::Agent;
 use crate::doc::{DocSpan, SpanStyle};
+use crate::files::TREE_LIMIT;
 use crate::keys::{Action, KeyMap};
 use crate::layout::{Layout, compute};
 use crate::replies::Candidate;
@@ -35,6 +36,54 @@ fn viewer_keys(keys: &KeyMap) -> String {
         k(Action::Find),
         k(Action::Quit)
     )
+}
+
+/// The key hints in the file viewer.
+fn files_keys(keys: &KeyMap) -> String {
+    let k = |action| keys.label(action);
+    format!(
+        "{}/{} move  {} select  {}/{}/{} annotate  {} files  {} tree  {} find file  {}/{} switch  {} quit",
+        k(Action::Down),
+        k(Action::Up),
+        k(Action::Select),
+        k(Action::Comment),
+        k(Action::Delete),
+        k(Action::Replace),
+        k(Action::Replies),
+        k(Action::Tree),
+        k(Action::FindFile),
+        k(Action::PrevFile),
+        k(Action::NextFile),
+        k(Action::Quit)
+    )
+}
+
+fn tree_keys(keys: &KeyMap) -> String {
+    let k = |action| keys.label(action);
+    format!(
+        "{}/{} move  enter open  {}/{} close/open  {} filter  esc close  {} quit",
+        k(Action::Down),
+        k(Action::Up),
+        k(Action::Left),
+        k(Action::Right),
+        k(Action::Find),
+        k(Action::Quit)
+    )
+}
+
+const FINDER_KEYS: &str = "type to filter  enter open  ctrl+n/ctrl+p move  esc close";
+
+/// A number with a comma between the thousands: `20,000`.
+fn thousands(number: usize) -> String {
+    let digits = number.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 fn panel_keys(keys: &KeyMap) -> String {
@@ -190,6 +239,43 @@ fn title_of(app: &App) -> &'static str {
     if app.mode() == Mode::Files { "files" } else { "last reply" }
 }
 
+/// The question in the footer for a pending confirmation.
+fn prompt_text(app: &App, what: Confirm) -> String {
+    match what {
+        Confirm::Annotation(id) => {
+            let number = app.review().and_then(|review| review.in_order().iter().position(|a| a.id == id));
+            format!("Delete annotation {}? y/n", number.map_or(0, |index| index + 1))
+        }
+        Confirm::Discard if app.review().is_none_or(Review::is_empty) => {
+            "Remove the draft file that Annorex cannot read? y/n".to_owned()
+        }
+        Confirm::Discard if app.mode() == Mode::Files => "Discard the notes of this file? y/n".to_owned(),
+        Confirm::Discard => "Discard the notes of this reply? y/n".to_owned(),
+        Confirm::CloseFile => {
+            let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
+            format!("Close {path}? It has unsent notes. y/n")
+        }
+        Confirm::Quit if app.mode() == Mode::Files => {
+            let count = app.unsent_file_count();
+            let files = if count == 1 { "file" } else { "files" };
+            match &app.save_error {
+                Some(error) => format!(
+                    "Unsent notes in {count} {files}. The drafts cannot be saved: {error}. s send · d discard · esc back"
+                ),
+                None => format!(
+                    "Unsent notes in {count} {files}. s send · k keep the drafts · d discard · esc back"
+                ),
+            }
+        }
+        Confirm::Quit => match &app.save_error {
+            Some(error) => {
+                format!("Unsent notes. The draft cannot be saved: {error}. s send · d discard · esc back")
+            }
+            None => "Unsent notes. s send · k keep the draft · d discard · esc back".to_owned(),
+        },
+    }
+}
+
 fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
     let (selected, count) = app.reply_position();
     let files = app.mode() == Mode::Files;
@@ -238,50 +324,32 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         match app.panel_view {
             PanelView::Replies => draw_reply_list(frame, app, panel, borders),
             PanelView::Annotations => draw_annotation_list(frame, app, panel, borders),
+            PanelView::Tree => draw_tree(frame, app, panel, borders),
+            PanelView::Finder => draw_finder(frame, app, panel, borders),
         }
     }
     draw_editor(frame, app, doc_area);
-    let prompt = app.confirm.map(|what| match what {
-        Confirm::Annotation(id) => {
-            let number = app.review().and_then(|review| review.in_order().iter().position(|a| a.id == id));
-            format!("Delete annotation {}? y/n", number.map_or(0, |index| index + 1))
-        }
-        Confirm::Discard if app.review().is_none_or(Review::is_empty) => {
-            "Remove the draft file that Annorex cannot read? y/n".to_owned()
-        }
-        Confirm::Discard if app.mode() == Mode::Files => "Discard the notes of this file? y/n".to_owned(),
-        Confirm::Discard => "Discard the notes of this reply? y/n".to_owned(),
-        Confirm::CloseFile => {
-            let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
-            format!("Close {path}? It has unsent notes. y/n")
-        }
-        Confirm::Quit if app.mode() == Mode::Files => {
-            let count = app.unsent_file_count();
-            let files = if count == 1 { "file" } else { "files" };
-            match &app.save_error {
-                Some(error) => format!(
-                    "Unsent notes in {count} {files}. The drafts cannot be saved: {error}. s send · d discard · esc back"
-                ),
-                None => format!("Unsent notes in {count} {files}. s send · k keep the drafts · d discard · esc back"),
-            }
-        }
-        Confirm::Quit => match &app.save_error {
-            Some(error) => {
-                format!("Unsent notes. The draft cannot be saved: {error}. s send · d discard · esc back")
-            }
-            None => "Unsent notes. s send · k keep the draft · d discard · esc back".to_owned(),
-        },
-    });
+    let prompt = app.confirm.map(|what| prompt_text(app, what));
     let message = prompt
         .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")))
         .or_else(|| app.status.clone())
-        .or_else(|| app.save_error.as_ref().map(|error| format!("draft not saved: {error}")));
+        .or_else(|| app.save_error.as_ref().map(|error| format!("draft not saved: {error}")))
+        .or_else(|| {
+            (app.panel_open && app.panel_view == PanelView::Tree && app.tree.is_truncated())
+                .then(|| format!("The tree shows the first {} entries.", thousands(TREE_LIMIT)))
+        });
     let keys = if app.editor.is_some() {
         EDITOR_KEYS.to_owned()
     } else if app.focus == Focus::Panel && app.panel_view == PanelView::Annotations {
         annotation_keys(&app.config.keys)
+    } else if app.focus == Focus::Panel && app.panel_view == PanelView::Tree {
+        tree_keys(&app.config.keys)
+    } else if app.focus == Focus::Panel && app.panel_view == PanelView::Finder {
+        FINDER_KEYS.to_owned()
     } else if app.focus == Focus::Panel {
         panel_keys(&app.config.keys)
+    } else if files {
+        files_keys(&app.config.keys)
     } else {
         viewer_keys(&app.config.keys)
     };
@@ -481,6 +549,101 @@ fn row_spans(
         }
     }
     out
+}
+
+/// The lines of a list panel: the first line is a header, and the rest scrolls with the cursor.
+fn draw_list(frame: &mut Frame, inner: Rect, header: Option<String>, rows: &[String], cursor: usize) {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    if let Some(header) = header {
+        lines.push(Line::styled(fit(&header, inner.width), Style::new().add_modifier(Modifier::BOLD)));
+    }
+    let height = usize::from(inner.height).saturating_sub(lines.len());
+    let offset = cursor.saturating_sub(height.saturating_sub(1));
+    for (index, text) in rows.iter().enumerate().skip(offset).take(height) {
+        let style =
+            if index == cursor { Style::new().add_modifier(Modifier::REVERSED) } else { Style::new() };
+        lines.push(Line::styled(fit(text, inner.width), style));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_tree(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
+    let block = Block::new().borders(borders).title(" Tree ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    if !app.tree.is_loaded() {
+        frame.render_widget(Paragraph::new(fit("Scanning…", inner.width)), inner);
+        return;
+    }
+    let filtering = app.tree.filter().is_some_and(|text| !text.is_empty());
+    let rows: Vec<String> = app
+        .tree
+        .visible()
+        .iter()
+        .map(|row| {
+            let path = &row.entry.path;
+            let indent = "  ".repeat(row.depth);
+            if row.entry.is_dir {
+                let arrow = if app.tree.is_expanded(path) { "▾" } else { "▸" };
+                let name =
+                    path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                format!("  {indent}{arrow} {name}/")
+            } else {
+                let dot = if app.is_marked(path) { "●" } else { " " };
+                let name = if filtering {
+                    path.display().to_string()
+                } else {
+                    path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+                };
+                format!("  {indent}{dot} {name}")
+            }
+        })
+        .collect();
+    let header = app.tree.filter().map(|text| format!("/{text}"));
+    if rows.is_empty() {
+        let note = if header.is_some() { "no match" } else { "no files" };
+        let mut lines = Vec::new();
+        if let Some(header) = header {
+            lines.push(Line::styled(fit(&header, inner.width), Style::new().add_modifier(Modifier::BOLD)));
+        }
+        lines.push(Line::raw(fit(note, inner.width)));
+        frame.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+    draw_list(frame, inner, header, &rows, app.tree.index);
+}
+
+fn draw_finder(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
+    let block = Block::new().borders(borders).title(" Find file ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let rows: Vec<String> = app
+        .finder
+        .results()
+        .map(|path| {
+            let dot = if app.is_marked(std::path::Path::new(path)) { "●" } else { " " };
+            format!("{dot} {path}")
+        })
+        .collect();
+    let header = Some(format!("> {}", app.finder.query));
+    if rows.is_empty() {
+        let lines = vec![
+            Line::styled(
+                fit(&format!("> {}", app.finder.query), inner.width),
+                Style::new().add_modifier(Modifier::BOLD),
+            ),
+            Line::raw(fit("no match", inner.width)),
+        ];
+        frame.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+    draw_list(frame, inner, header, &rows, app.finder.index);
 }
 
 fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {

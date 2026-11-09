@@ -215,3 +215,170 @@ fn snapshot_files_bottom_80x24() {
     press(&mut app, "p");
     insta::assert_snapshot!(render(&mut app, 80, 24));
 }
+
+/// A work directory with `README.md`, `src/main.rs`, and `src/lib.rs`, and an app that scanned it.
+fn tree_app(config: &Config) -> (tempfile::TempDir, App) {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::create_dir(dir.path().join("src")).expect("src");
+    std::fs::write(dir.path().join("README.md"), "# Readme\n").expect("readme");
+    std::fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").expect("main");
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn lib() {}\n").expect("lib");
+    let mut app = App::new_files(state(), dir.path().to_path_buf(), config);
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    app.set_scan(annorex::files::scan(dir.path()));
+    (dir, app)
+}
+
+fn ctrl(app: &mut App, c: char) {
+    press_key(app, KeyCode::Char(c), KeyModifiers::CONTROL);
+}
+
+#[test]
+fn tree_lists_expands_and_opens() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Tree") && screen.contains("src") && screen.contains("README.md"), "{screen}");
+    assert!(!screen.contains("main.rs"), "a directory starts closed: {screen}");
+    press(&mut app, "\n"); // src is first: directories come before files
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("main.rs") && screen.contains("lib.rs"), "{screen}");
+    press(&mut app, "h");
+    assert!(!render(&mut app, 120, 20).contains("main.rs"), "h closes the directory");
+    press(&mut app, "l");
+    press(&mut app, "jj\n"); // lib.rs, main.rs
+    assert_eq!(app.shown_file().and_then(|path| path.to_str()), Some("src/main.rs"));
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("fn main() {}"), "{screen}");
+}
+
+#[test]
+fn tree_shows_truncated_notice() {
+    let (dir, mut app) = tree_app(&Config::default());
+    app.set_scan(annorex::files::scan_with(dir.path(), 2));
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    let footer = screen.lines().last().expect("footer");
+    assert!(footer.contains("The tree shows the first 20,000 entries."), "{footer}");
+}
+
+#[test]
+fn tree_shows_scanning_before_the_scan_ends() {
+    let mut app = files_app();
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Scanning…"), "{screen}");
+}
+
+#[test]
+fn tree_filter_ranks_full_paths() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    press(&mut app, "T/lib");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("src/lib.rs") && !screen.contains("README.md"), "{screen}");
+    press(&mut app, "\n");
+    assert_eq!(app.shown_file().and_then(|path| path.to_str()), Some("src/lib.rs"));
+}
+
+#[test]
+fn finder_filters_while_typing_and_opens_the_best_match() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    ctrl(&mut app, 'p');
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("README.md") && screen.contains("src/main.rs"), "{screen}");
+    press(&mut app, "main");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("src/main.rs") && !screen.contains("README.md"), "{screen}");
+    assert!(screen.contains("> main"), "the query shows: {screen}");
+    press(&mut app, "\n");
+    assert_eq!(app.shown_file().and_then(|path| path.to_str()), Some("src/main.rs"));
+    // Arrows and ctrl+n / ctrl+p move; esc closes.
+    ctrl(&mut app, 'p');
+    press(&mut app, "s");
+    ctrl(&mut app, 'n');
+    press_key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Up, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Backspace, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(!render(&mut app, 120, 20).contains("Find file"), "esc closes the finder");
+}
+
+#[test]
+fn finder_with_no_match_shows_none() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    ctrl(&mut app, 'p');
+    press(&mut app, "zzzq");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("no match"), "{screen}");
+    press(&mut app, "\n");
+    assert_eq!(app.shown_file(), None);
+}
+
+#[test]
+fn marks_show_files_with_unsent_drafts() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.set_draft_marks(&["file:README.md".to_owned()]);
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("● README.md"), "{screen}");
+    assert!(!screen.contains("● src"), "{screen}");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    ctrl(&mut app, 'p');
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("● README.md") && !screen.contains("● src/main.rs"), "{screen}");
+}
+
+#[test]
+fn open_files_with_unsent_notes_are_marked_too() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    ctrl(&mut app, 'p');
+    press(&mut app, "main\n");
+    press(&mut app, "cnote\n");
+    press(&mut app, "T");
+    press(&mut app, "\n"); // expand src
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("● main.rs") && !screen.contains("● lib.rs"), "{screen}");
+}
+
+#[test]
+fn rebound_keys_open_the_tree_and_the_finder() {
+    let dir = tempfile::tempdir().expect("dir");
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[keys]\ntree = \"t\"\nfind_file = \"ctrl+o\"\n").expect("config");
+    let config = Config::load(&file).expect("config");
+    let (_work, mut app) = tree_app(&config);
+    press(&mut app, "t");
+    assert!(render(&mut app, 120, 20).contains("Tree"));
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    ctrl(&mut app, 'o');
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Find file") && screen.contains("README.md"), "{screen}");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "T");
+    assert!(!render(&mut app, 120, 20).contains("Tree"), "the old key does nothing");
+    let footer = render(&mut app, 120, 20).lines().last().expect("footer").to_owned();
+    assert!(footer.contains("t tree") && footer.contains("ctrl+o find file"), "{footer}");
+}
+
+#[test]
+fn snapshot_tree_side_120x40() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.set_draft_marks(&["file:README.md".to_owned()]);
+    press(&mut app, "T\n");
+    insta::assert_snapshot!(render(&mut app, 120, 40));
+}
+
+#[test]
+fn snapshot_finder_80x24() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    ctrl(&mut app, 'p');
+    press(&mut app, "rs");
+    insta::assert_snapshot!(render(&mut app, 80, 24));
+}
+
+#[test]
+fn snapshot_tree_overlay_50x20() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    press(&mut app, "T\n");
+    insta::assert_snapshot!(render(&mut app, 50, 20));
+}
