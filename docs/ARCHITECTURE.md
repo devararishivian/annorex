@@ -24,17 +24,17 @@ Annorex has two parts:
 
 ## Planned components
 
-| Component          | Function                                                                                                                                                                                        |
-|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Rex adapter        | Runs `rex` commands. Gives typed results for the process, program status, terminal modes, and size of a pane. Reads the Rex event stream.                                                       |
-| Agent detection    | Identifies Claude Code, Pi, or OpenCode from the program status of the pane. If no status is available, uses the process name.                                                                  |
-| Idle gate          | Permits a send only when all conditions are true: the status is idle, the status is stable, the live process owns the status, and (for Claude Code and OpenCode) no background work is pending. |
-| Payload            | Removes escape characters and control characters. Puts the text in one bracketed paste.                                                                                                         |
-| Delivery           | Pastes the text, sends Enter, and confirms that the agent starts work. It never sends again automatically.                                                                                      |
-| Transcript readers | Find the session of an agent and read its recent replies. Adapted from plannotator-tui (MIT).                                                                                                   |
-| Document model     | Shows Markdown or plain text. Keeps a map from each displayed line to its source line and character position.                                                                                   |
-| Review             | Keeps annotations on character ranges. Saves drafts after each change. Exports the notes as Markdown.                                                                                           |
-| UI                 | ratatui screens. The layout is calculated again after each resize.                                                                                                                              |
+| Component          | Function                                                                                                                                             |
+|--------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Rex adapter        | Runs `rex` commands. Gives typed results for the process, program status, terminal modes, and size of a pane.                                        |
+| Agent detection    | Identifies Claude Code, Pi, or OpenCode from the program status of the pane. If no status is available, uses the process name.                       |
+| Dialog check       | Refuses a send when the program status of the agent is "blocked" (a permission, question, or authentication dialog). A busy agent can get a message. |
+| Payload            | Removes escape characters and control characters. Puts the text in one bracketed paste.                                                              |
+| Delivery           | Checks for a dialog again, pastes the text, and sends Enter. It never sends again automatically.                                                     |
+| Transcript readers | Find the session of an agent and read its recent replies. Adapted from plannotator-tui (MIT).                                                        |
+| Document model     | Shows Markdown or plain text. Keeps a map from each displayed line to its source line and character position.                                        |
+| Review             | Keeps annotations on character ranges. Saves drafts after each change. Exports the notes as Markdown.                                                |
+| UI                 | ratatui screens. The layout is calculated again after each resize.                                                                                   |
 
 ## Planned crates
 

@@ -12,15 +12,13 @@ text that an agent wrote. Then Annorex sends your notes back to the agent.
   select an earlier reply.
 - **Review files.** You can open one or more files that the agent wrote. Annorex sends all notes in one message.
 - **Annotate exact text.** Select the words. Then add a comment, mark the text for removal, or give a replacement.
-- **Send safely.** Annorex sends only when the agent is idle. It does not send when the agent is busy or shows a
-  permission prompt. It confirms that the message arrived.
+- **Send safely.** Annorex removes escape characters from your notes before it sends them. It does not send when the
+  agent shows a dialog, such as a permission prompt. When the agent is busy, Claude Code queues the notes, and Pi and
+  OpenCode use them to steer the current task.
 - **Keep your notes.** Annorex saves your notes after each change. A refused send does not delete them.
 - **Fit any pane size.** The interface changes its layout when you resize or move Rex panes.
 
 Planned agents: **Claude Code**, **Pi**, and **OpenCode**, in Rex on macOS.
-
-Planned limit: for Pi, Annorex monitors only the main agent loop. Annorex does not monitor subagents that Pi extensions
-start.
 
 ## How Annorex connects to Rex
 
