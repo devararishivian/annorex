@@ -1,8 +1,8 @@
 # Architecture
 
-> **Current state: viewer built.** The Rex adapter, agent detection, dialog check, payload, delivery, transcript
-> readers, Lua module, install, pane placement, reply loading, document model, wrapping, layout, UI, and terminal loop
-> are **built**. Annotations, export, the send from the viewer, and the file review are **planned**.
+> **Current state: annotate and send built.** The Rex adapter, agent detection, dialog check, payload, delivery,
+> transcript readers, Lua module, install, pane placement, reply loading, document model, wrapping, layout, UI,
+> terminal loop, config, keys, review, drafts, send, and clipboard are **built**. The file review is **planned**.
 
 ## Overview
 
@@ -44,7 +44,13 @@ Annorex has two parts:
 | UI                 | Built   | ratatui screens: the reply, the reply list, find, the session picker, and errors. A resize keeps the top line.                                                                       |
 | Terminal loop      | Built   | `annorex last`. Waits a maximum of 250 ms for an event, applies all queued events, and draws one time. Stops on `q`, on SIGHUP, SIGTERM, or SIGINT, or when the terminal input ends. Reads the agent state every 2 seconds on a thread. |
 | Commands           | Built   | `annorex probe`, `annorex deliver`, `annorex last`, `annorex rex install`, and `annorex rex open last`.                                                                             |
-| Review             | Planned | Keeps annotations on character ranges. Saves drafts after each change. Exports the notes as Markdown and sends them.                                                                 |
+| Config             | Built   | Reads `config.toml` (placement, `enter_delay_ms`, labels, keys). A bad file gives exit code 64.                                                                                      |
+| Keys               | Built   | Maps each key to an action. Fixed keys cannot be bound. Rejects a key that two actions use.                                                                                          |
+| Review             | Built   | Keeps annotations (comment, remove, replace) on source byte ranges. Exports the notes as Markdown with a fence longer than any backtick run in the quote.                            |
+| Drafts             | Built   | Saves one JSON file for each reply after each change, in an atomic write. Keeps an unreadable file. Moves a quote again when the text moved. Marks it "text not found" if it is gone. |
+| Send               | Built   | `S`, `M`, and `P` call delivery with the export. A dialog gives "Not sent" and keeps the draft. Sets `sent_at` after a send.                                                         |
+| Clipboard          | Built   | `Y` writes an OSC 52 sequence and runs `pbcopy`. Reports when only the terminal part worked.                                                                                         |
+| File review        | Planned | Opens files that the agent wrote and puts their notes in the same message.                                                                                                           |
 
 ## Crates
 

@@ -3,14 +3,18 @@
 Annorex is a review tool for coding agents in the [Rex](https://www.superlogical.com/rex) terminal. You annotate the
 text that an agent wrote. Then Annorex sends your notes back to the agent.
 
-> **Status: viewer available.** Annorex shows the replies of an agent in a pane next to it. The commands
-> `annorex probe` and `annorex deliver` work. Annotations and the send from the viewer are not available yet. The
-> "Planned features" section describes them.
+> **Status: annotate and send available.** Annorex shows the replies of an agent in a pane next to it. You can
+> annotate a reply and send the notes back to the agent. The commands `annorex probe` and `annorex deliver` work. The
+> review of files is not available yet. The "Planned features" section describes it.
 
 ## Available now
 
 - **The reply viewer.** A Rex action opens Annorex in a pane next to the agent. Annorex shows the newest reply of the
   agent as formatted Markdown. You can select one of the 25 newest replies. The layout follows the size of the pane.
+- **Annotations.** Select text in a reply. Add a comment, mark the text for removal, or give a replacement.
+- **Send, paste, and copy.** Annorex exports your notes as Markdown. It sends them to the agent, pastes them without
+  Enter, or copies them.
+- **Drafts.** Annorex saves your notes to disk after each change.
 - `annorex probe` shows the agent in a pane, its state, and whether Annorex can send to it.
 - `annorex deliver` sends text from standard input to the agent in a pane. It removes escape characters and control
   characters, pastes the text as one bracketed paste, and presses Enter.
@@ -51,20 +55,35 @@ open for that pane, the action focuses it.
 The header shows the agent and its state, for example `claude (idle)` or `opencode (waiting for permission)`. Annorex
 reads the state again every 2 seconds.
 
-| Key                     | Function                                     |
-|-------------------------|----------------------------------------------|
-| `j` / `k`, arrows       | Move down or up one line                     |
-| `ctrl+d` / `ctrl+u`     | Move down or up half a page                  |
-| `PageDown` / `PageUp`   | Move down or up one page                     |
-| `g` / `G`               | Go to the start or the end                   |
-| `/`                     | Find text (the case is ignored)              |
-| `n` / `N`               | Go to the next or the previous match         |
-| `p`                     | Open or close the reply list                 |
-| `enter` (in the list)   | Show the selected reply                      |
-| `esc` (in the list)     | Go back to the reply                         |
-| `r`                     | Read the transcript again                    |
-| `z`                     | Zoom the viewer pane, or restore the layout  |
-| `q`, `ctrl+c`           | Close the viewer                             |
+| Key                     | Function                                                         |
+|-------------------------|------------------------------------------------------------------|
+| `j` / `k`, arrows       | Move down or up one line                                         |
+| `h` / `l`               | Move left or right one character                                 |
+| `w` / `b`               | Move to the next or the previous word                            |
+| `0` / `$`               | Move to the start or the end of the line                         |
+| `ctrl+d` / `ctrl+u`     | Move down or up half a page                                      |
+| `PageDown` / `PageUp`   | Move down or up one page                                         |
+| `g` / `G`               | Go to the start or the end                                       |
+| `v` / `V`               | Start a selection of characters or of lines                      |
+| `c` / `d` / `s`         | Annotate: comment, remove, or replace                            |
+| `L`                     | Edit the annotation at the cursor, or add a comment              |
+| `a`                     | Open or close the annotation list                                |
+| `S`                     | Send the notes to the agent                                      |
+| `M`                     | Write a general note, then send                                  |
+| `P`                     | Paste the notes into the agent input box, without Enter          |
+| `Y`                     | Copy the notes                                                   |
+| `X`                     | Discard the notes of this reply (asks first)                     |
+| `/`                     | Find text (the case is ignored)                                  |
+| `n` / `N`               | Go to the next or the previous match                             |
+| `p`                     | Open or close the reply list                                     |
+| `enter` (in the list)   | Show the selected reply, or go to the annotation                 |
+| `e` / `x` (annotation list) | Edit or delete the annotation                                |
+| `esc`                   | Cancel the selection, the editor, or the list                    |
+| `r`                     | Read the transcript again                                        |
+| `z`                     | Zoom the viewer pane, or restore the layout                      |
+| `q`, `ctrl+c`           | Close the viewer                                                 |
+
+In the editor, `enter` saves the annotation. `ctrl+j` or `alt+enter` adds a new line. `tab` changes the label.
 
 The layout changes with the size of the pane:
 
@@ -75,6 +94,47 @@ The layout changes with the size of the pane:
 
 Pi and OpenCode can have more than one session in the same directory. If Annorex cannot find the session of the agent
 with certainty, it shows the sessions, newest first. Select one with `enter`.
+
+### Annotate and send
+
+1. Move to the text. Press `v` and move to select characters, or press `V` to select lines. Without a selection, the
+   action uses the line of the cursor.
+2. Press `c` to comment, `d` to mark the text for removal, or `s` to replace it. Type the note. Press `enter`.
+3. Press `S` to send. The header shows `[Send N ▸]`, with N the number of annotations. After a send, it shows
+   `[Sent HH:MM]`.
+
+The export is Markdown. It starts with `# Annotations on last reply`. Each annotation has a number, the line numbers,
+the quoted source text, and your note as a quote.
+
+`S` refuses to send when the agent shows a dialog, such as a permission prompt. Your notes stay in the draft. If the
+agent opens a dialog after the paste, Annorex does not press Enter. Answer the dialog, then press Enter in the agent
+pane. When the agent is busy, Claude Code queues the message. Pi and OpenCode use it to steer the current task.
+
+`Y` copies the notes with an OSC 52 sequence and with `pbcopy`. If only the OSC 52 part works, the footer says so.
+
+`q` with unsent notes asks what to do: send (`s`), keep the draft (`k`), discard (`d`), or go back (`esc`).
+
+### Drafts
+
+Annorex saves one draft for each reply in `$XDG_STATE_HOME/annorex/drafts`. The default is
+`~/.local/state/annorex/drafts`. The directory has mode `0700` and the files have mode `0600`. The draft keeps the open
+editor, so a restart does not lose half a note. If a draft file is unreadable, Annorex keeps it and shows a message.
+
+### The config file
+
+Annorex reads `$XDG_CONFIG_HOME/annorex/config.toml`, or `~/.config/annorex/config.toml`. All settings are optional.
+
+```toml
+placement = "right"        # "auto", "right", or "below"
+enter_delay_ms = 300       # 50 to 5000: the wait between the paste and Enter
+labels = ["nit"]           # more labels, after question, looks good, and must fix
+
+[keys]
+comment = "y"              # an action name and a key
+```
+
+A bad config file stops Annorex with exit code 64 and a message. The keys `enter`, `esc`, `tab`, the arrows, the page
+keys, `home`, `end`, and `ctrl+c` are fixed. The `--placement` option of the command line has priority over the file.
 
 ### Use the commands
 
@@ -119,14 +179,12 @@ Exit codes:
 - Claude Code asks whether to trust a folder when it starts in a new folder. Claude Code does not report this dialog to
   Rex. Annorex cannot see it. Do not send while this dialog is open.
 - The reply list shows the time of each reply in UTC.
+- If the input box of the agent has text when you send, the notes join that text. Annorex cannot see the input box.
+- The hints in the footer do not follow keys that you rebind.
 
 ## Planned features
 
 - **Review files.** You can open one or more files that the agent wrote. Annorex sends all notes in one message.
-- **Annotate exact text.** Select the words. Then add a comment, mark the text for removal, or give a replacement.
-- **Send from the viewer.** Annorex removes escape characters from your notes before it sends them. It does not send
-  when the agent shows a dialog, such as a permission prompt.
-- **Keep your notes.** Annorex saves your notes after each change. A refused send does not delete them.
 
 Supported agents: **Claude Code**, **Pi**, and **OpenCode**, in Rex on macOS.
 
