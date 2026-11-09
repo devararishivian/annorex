@@ -306,6 +306,8 @@ impl App {
     /// Put the result of a scan of the work directory in the tree.
     pub fn set_scan(&mut self, scan: Scan) {
         self.tree.load(scan);
+        // A finder that opened before the scan ended has no paths yet.
+        self.finder.set_paths(self.tree.file_paths());
     }
 
     /// Scan the work directory on a thread. [`App::poll_scan`] takes the result.
@@ -325,13 +327,13 @@ impl App {
         match receiver.try_recv() {
             Ok(scan) => {
                 self.scan_rx = None;
-                self.tree.load(scan);
+                self.set_scan(scan);
                 true
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => false,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.scan_rx = None;
-                self.tree.load(Scan { entries: Vec::new(), truncated: false });
+                self.set_scan(Scan { entries: Vec::new(), truncated: false });
                 true
             }
         }
@@ -374,6 +376,12 @@ impl App {
         }
     }
 
+    /// Show the tree with a directory open and the cursor on it.
+    pub fn reveal_dir(&mut self, relative: &Path) {
+        self.tree.reveal(relative);
+        self.open_tree();
+    }
+
     /// Tell the watch thread which files are open and what they looked like when read.
     fn sync_watch(&self) {
         let Some(known) = &self.known else { return };
@@ -411,8 +419,20 @@ impl App {
     /// A file changed on disk. The text on the screen stays until the user reads the file again.
     pub fn file_changed(&mut self, change: &Change) {
         let id = file_id(&change.path);
-        if self.files.contains_key(&id) {
-            self.changes.insert(id, change.kind);
+        let Some(file) = self.files.get(&id) else { return };
+        // The message can be old: the user can read the file again before it arrives. Look at the file now.
+        let current = self.root.as_deref().map(|root| crate::files::stamp(root, &change.path));
+        match current {
+            Some(Some(now)) if now == file.stamp => {}
+            Some(None) => {
+                self.changes.insert(id, ChangeKind::Deleted);
+            }
+            Some(Some(_)) => {
+                self.changes.insert(id, ChangeKind::Modified);
+            }
+            None => {
+                self.changes.insert(id, change.kind);
+            }
         }
     }
 
@@ -804,7 +824,19 @@ impl App {
     }
 
     /// The time of the last send of the reply on the screen, if no change came after it.
+    /// In the files viewer: the newest send time of the open files, when no file has an unsent note.
     pub fn shown_sent(&self) -> Option<&str> {
+        if self.mode == Mode::Files {
+            if self.unsent_file_count() > 0 {
+                return None;
+            }
+            return self
+                .replies
+                .iter()
+                .filter_map(|reply| self.sent.get(&reply.id))
+                .max()
+                .map(String::as_str);
+        }
         self.sent.get(self.shown_id.as_deref()?).map(String::as_str)
     }
 
@@ -1252,7 +1284,13 @@ impl App {
 
     /// Why there is nothing to send.
     fn nothing_to_send(&self) -> String {
-        if self.review().is_some_and(|review| !review.is_empty()) {
+        let any_notes = match self.mode {
+            Mode::Replies => self.review().is_some_and(|review| !review.is_empty()),
+            Mode::Files => {
+                self.replies.iter().filter_map(|r| self.reviews.get(&r.id)).any(|review| !review.is_empty())
+            }
+        };
+        if any_notes {
             "Nothing new to send. Press Y to copy all notes.".to_owned()
         } else {
             "Nothing to send: no annotations yet.".to_owned()

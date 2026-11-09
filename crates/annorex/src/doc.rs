@@ -119,7 +119,7 @@ impl Doc {
     }
 
     /// Show a text as it is: one `DocLine` for each source line, with the exact source of each
-    /// character. A tab shows as spaces up to a width of 4. It is one stop that covers the tab.
+    /// character. A tab shows as spaces up to the next multiple of 4 columns. It is one stop that covers the tab.
     pub fn plain(source: &str) -> Self {
         let source = sanitize(source);
         let line_starts = line_starts(&source);
@@ -133,16 +133,20 @@ impl Doc {
             let text = source.get(start..end).unwrap_or_default();
             let mut spans = Vec::new();
             let mut offset = start;
+            let mut column = 0;
             for (position, piece) in text.split('\t').enumerate() {
                 if position > 0 {
+                    let width = TAB.len() - column % TAB.len();
+                    column += width;
                     spans.push(DocSpan {
-                        text: TAB.to_owned(),
+                        text: " ".repeat(width),
                         style: SpanStyle::default(),
                         source: Some(SpanSource { range: offset..offset + 1, exact: false }),
                     });
                     offset += 1;
                 }
                 if !piece.is_empty() {
+                    column += piece.width();
                     spans.push(DocSpan {
                         text: piece.to_owned(),
                         style: SpanStyle::default(),
@@ -606,6 +610,13 @@ mod tests {
         assert_eq!(doc.char_end(4), 5);
         assert_eq!(doc.stops(1)[1], 5, "the next stop is `i` after the tab");
         assert_eq!(doc.line_of(5), 2);
+    }
+
+    #[test]
+    fn a_tab_in_plain_text_goes_to_the_next_multiple_of_four() {
+        let doc = Doc::plain("a\tb\nabcd\te\n日\tx\n");
+        let plains: Vec<String> = doc.lines.iter().map(DocLine::plain).collect();
+        assert_eq!(plains, ["a   b", "abcd    e", "日  x"]);
     }
 
     #[test]

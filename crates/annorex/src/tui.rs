@@ -387,10 +387,15 @@ impl<R: Runner> Viewer<'_, R> {
         app.start_watch();
         let mut problems: Vec<String> = Vec::new();
         for input in paths {
-            match files::resolve(root, &input).and_then(|relative| files::load(root, &relative)) {
-                Ok(loaded) => {
-                    app.open_file(loaded);
-                }
+            match files::resolve(root, &input) {
+                // A directory opens the tree there.
+                Ok(relative) if root.join(&relative).is_dir() => app.reveal_dir(&relative),
+                Ok(relative) => match files::load(root, &relative) {
+                    Ok(loaded) => {
+                        app.open_file(loaded);
+                    }
+                    Err(error) => problems.push(error.to_string()),
+                },
                 Err(error) => problems.push(error.to_string()),
             }
         }

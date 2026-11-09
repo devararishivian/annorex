@@ -498,3 +498,59 @@ fn closing_a_file_is_refused_when_the_draft_cannot_be_saved() {
     assert_eq!(app.shown_file().and_then(|p| p.to_str()), Some("a.md"), "the file stays open");
     assert!(app.review().is_some_and(|r| !r.annotations.is_empty()), "the notes stay");
 }
+
+#[test]
+fn stale_watch_message_does_not_bring_the_banner_back_after_r() {
+    let (dir, mut app) = real_app("a.txt", "alpha beta\n");
+    std::fs::write(dir.path().join("a.txt"), "new text\nalpha beta\n").expect("change");
+    app.file_changed(&change("a.txt", ChangeKind::Modified));
+    press(&mut app, "r");
+    // The thread sent this message before the user read the file again.
+    app.file_changed(&change("a.txt", ChangeKind::Modified));
+    let screen = render(&mut app, 80, 12);
+    assert!(!screen.contains("changed on disk"), "{screen}");
+}
+
+#[test]
+fn finder_opened_before_the_scan_fills_when_the_scan_ends() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::write(dir.path().join("README.md"), "# Readme\n").expect("readme");
+    let mut app = App::new_files(state(), dir.path().to_path_buf(), &Config::default());
+    ctrl(&mut app, 'p');
+    assert!(render(&mut app, 80, 12).contains("Scanning…"), "the finder says that the scan is running");
+    app.set_scan(annorex::files::scan(dir.path()));
+    let screen = render(&mut app, 80, 12);
+    assert!(screen.contains("README.md") && !screen.contains("Scanning…"), "{screen}");
+}
+
+#[test]
+fn header_and_nothing_to_send_look_at_all_open_files() {
+    let mut app = two_files(); // a.md on the screen
+    press(&mut app, "cnote\n");
+    app.mark_sent("2026-11-09T10:00:00Z".to_owned());
+    assert!(render(&mut app, 100, 12).contains("[Sent 10:00]"));
+    // Show b.txt, which has no notes: the notes of a.md were sent, so the header still says so.
+    press(&mut app, "[");
+    assert!(render(&mut app, 100, 12).contains("[Sent 10:00]"), "sent state is for all files");
+    press(&mut app, "S");
+    assert_eq!(app.status(), Some("Nothing new to send. Press Y to copy all notes."));
+    // A new note in b.txt makes the header a send button again.
+    press(&mut app, "cmore\n");
+    let screen = render(&mut app, 100, 12);
+    assert!(screen.contains("[Send 2") && !screen.contains("[Sent"), "{screen}");
+}
+
+#[test]
+fn a_directory_on_the_command_line_opens_the_tree_there() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::create_dir(dir.path().join("src")).expect("src");
+    std::fs::write(dir.path().join("README.md"), "# Readme\n").expect("readme");
+    std::fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").expect("main");
+    let mut app = App::new_files(state(), dir.path().to_path_buf(), &Config::default());
+    app.reveal_dir(std::path::Path::new("src"));
+    app.set_scan(annorex::files::scan(dir.path()));
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Tree") && screen.contains("main.rs"), "the directory is open: {screen}");
+    press(&mut app, "\n"); // the cursor is on the directory: Enter closes it
+    assert!(!render(&mut app, 120, 20).contains("main.rs"));
+}

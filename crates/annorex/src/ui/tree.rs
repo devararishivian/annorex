@@ -24,6 +24,8 @@ pub(crate) struct Tree {
     expanded: HashSet<PathBuf>,
     pub(crate) index: usize,
     filter: Option<String>,
+    /// A directory to show with the cursor on it, when the scan has it.
+    reveal: Option<PathBuf>,
 }
 
 impl Tree {
@@ -33,6 +35,29 @@ impl Tree {
         self.truncated = scan.truncated;
         self.loaded = true;
         self.index = self.index.min(self.visible().len().saturating_sub(1));
+        self.place_cursor();
+    }
+
+    /// Open a directory and its parents, and put the cursor on it. The cursor moves when the scan ends
+    /// if it has not ended.
+    pub(crate) fn reveal(&mut self, directory: &Path) {
+        if directory.as_os_str().is_empty() {
+            return;
+        }
+        for parent in directory.ancestors().filter(|parent| !parent.as_os_str().is_empty()) {
+            self.expanded.insert(parent.to_path_buf());
+        }
+        self.reveal = Some(directory.to_path_buf());
+        if self.loaded {
+            self.place_cursor();
+        }
+    }
+
+    fn place_cursor(&mut self) {
+        let Some(target) = self.reveal.take() else { return };
+        if let Some(index) = self.visible().iter().position(|row| row.entry.path == target) {
+            self.index = index;
+        }
     }
 
     /// False until a scan ended.
@@ -167,6 +192,12 @@ impl Finder {
         let mut finder = Self { query: String::new(), paths, results: Vec::new(), index: 0 };
         finder.refresh();
         finder
+    }
+
+    /// Give the finder a new list of paths. The query stays.
+    pub(crate) fn set_paths(&mut self, paths: Vec<String>) {
+        self.paths = paths;
+        self.refresh();
     }
 
     fn refresh(&mut self) {

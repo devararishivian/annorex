@@ -246,7 +246,7 @@ impl DraftStore {
             .filter(|draft| {
                 draft.key.agent == agent
                     && draft.key.session == session
-                    && !draft.review.is_empty()
+                    && draft.review.has_unsent()
                     && draft.sent_at.is_none()
             })
             .map(|draft| draft.key.document)
@@ -488,6 +488,18 @@ mod tests {
             DraftStore { dir: PathBuf::from("/nonexistent/x") }.unsent(Agent::Pi, "s"),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn unsent_follows_the_notes_not_the_time_of_the_draft() {
+        let (_dir, store) = store();
+        let source = "hello world and more";
+        // All notes were sent, then one was deleted: the draft has no time, and no unsent note.
+        let mut draft = draft_with_comment("all-sent", source);
+        draft.review.mark_sent("2026-11-09T10:00:00Z");
+        store.save(&draft).expect("save");
+        store.save(&draft_with_comment("unsent", source)).expect("save");
+        assert_eq!(store.unsent(Agent::ClaudeCode, "s1"), ["unsent"]);
     }
 
     #[test]

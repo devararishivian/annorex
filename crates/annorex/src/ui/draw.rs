@@ -647,7 +647,7 @@ fn draw_finder(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
                 fit(&format!("> {}", app.finder.query), inner.width),
                 Style::new().add_modifier(Modifier::BOLD),
             ),
-            Line::raw(fit("no match", inner.width)),
+            Line::raw(fit(if app.tree.is_loaded() { "no match" } else { "Scanning…" }, inner.width)),
         ];
         frame.render_widget(Paragraph::new(lines), inner);
         return;
