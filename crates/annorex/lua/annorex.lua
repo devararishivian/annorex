@@ -42,7 +42,9 @@ local function open_last(ctx)
   }, { timeout = 25 })
   if result == nil then fail(err) end
   if not result.ok then
-    fail(first_line(result.stderr) or first_line(result.stdout) or "annorex rex open failed")
+    local line = first_line(result.stderr) or first_line(result.stdout) or "annorex rex open failed"
+    -- The binary starts its errors with "annorex: ". fail() adds "Annorex: " again.
+    fail((line:gsub("^annorex: ", "")))
   end
   return nil
 end
