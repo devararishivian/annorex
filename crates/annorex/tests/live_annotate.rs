@@ -23,7 +23,6 @@
 mod common;
 
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -37,12 +36,12 @@ use annorex::safety::Safety;
 use annorex::ui::{AgentState, App, Screen};
 use annorex_hosts::roots::Roots;
 use common::{
-    ARRIVAL_TIMEOUT, Cleanup, LiveAgent, accept_claude_trust, capture, deliver, human_messages, live_enabled,
-    log, start_agents, unwrap_paste, wait_for_state, wait_until,
+    ARRIVAL_TIMEOUT, Cleanup, LiveAgent, accept_claude_trust, capture, deliver, drafts, has_block,
+    human_messages, keys, live_enabled, log, start_agents, unwrap_paste, wait_for_state, wait_until,
+    write_wrapper,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-const BIN: &str = env!("CARGO_BIN_EXE_annorex");
 const NOTE: &str = "ANNOREX-M2-NOTE";
 const NOTE_TWO: &str = "ANNOREX-M2-NOTE-TWO";
 
@@ -87,21 +86,6 @@ fn expected_export(agent: Agent, reply: &str, note: &str) -> String {
     app.export().trim().to_owned()
 }
 
-/// A shell script that runs the built binary with private state and config directories. With
-/// `path`, the viewer sees only that directory in `PATH` (the clipboard experiment).
-fn write_wrapper(dir: &Path, name: &str, state: &Path, config: &Path, path: Option<&Path>) -> PathBuf {
-    let path_line = path.map_or_else(String::new, |path| format!("export PATH='{}'\n", path.display()));
-    let script = format!(
-        "#!/bin/sh\nexport XDG_STATE_HOME='{}' XDG_CONFIG_HOME='{}'\n{path_line}exec '{BIN}' \"$@\"\n",
-        state.display(),
-        config.display()
-    );
-    let file = dir.join(name);
-    std::fs::write(&file, script).expect("wrapper");
-    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-    file
-}
-
 /// Open the viewer of `block` in a split. The test starts the viewer itself, so that the viewer
 /// process gets the environment of the wrapper. The Lua action of M1 has its own live test.
 fn open_viewer(session: &str, block: &str, wrapper: &Path) -> Output {
@@ -120,29 +104,6 @@ fn viewers(rex: &Rex<SystemRunner>, target: &str) -> Vec<String> {
             view.blocks().filter(|block| block.label == label).map(|block| block.block_id.clone()).collect()
         })
         .unwrap_or_default()
-}
-
-fn has_block(rex: &Rex<SystemRunner>, block: &str) -> bool {
-    rex.view().is_ok_and(|view| view.blocks().any(|info| info.block_id == block))
-}
-
-/// Write keys to the viewer and wait for it to read them.
-fn keys(rex: &Rex<SystemRunner>, block: &str, text: &str) {
-    rex.write(block, text).expect("write keys");
-    std::thread::sleep(Duration::from_millis(500));
-}
-
-/// The draft files of one agent in the private state directory.
-fn drafts(state: &Path, agent: Agent) -> Vec<serde_json::Value> {
-    let dir = state.join("annorex").join("drafts");
-    let prefix = format!("{}-", agent.status_app());
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
-    entries
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
-        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
-        .filter_map(|text| serde_json::from_str(&text).ok())
-        .collect()
 }
 
 fn pbpaste() -> Vec<u8> {

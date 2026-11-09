@@ -13,6 +13,7 @@
     reason = "each live test uses a part of the helpers; a live test reports by printing and asserts by panicking"
 )]
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -276,4 +277,50 @@ pub(crate) fn unwrap_paste(text: &str) -> &str {
     let inner = &rest[open_end + 2..];
     let Some(close) = inner.rfind("</pasted_content") else { return trimmed };
     inner[..close].trim()
+}
+
+const BIN: &str = env!("CARGO_BIN_EXE_annorex");
+
+/// A shell script that runs the built binary with private state and config directories. With
+/// `path`, the viewer sees only that directory in `PATH` (the clipboard experiment).
+pub(crate) fn write_wrapper(
+    dir: &Path,
+    name: &str,
+    state: &Path,
+    config: &Path,
+    path: Option<&Path>,
+) -> PathBuf {
+    let path_line = path.map_or_else(String::new, |path| format!("export PATH='{}'\n", path.display()));
+    let script = format!(
+        "#!/bin/sh\nexport XDG_STATE_HOME='{}' XDG_CONFIG_HOME='{}'\n{path_line}exec '{BIN}' \"$@\"\n",
+        state.display(),
+        config.display()
+    );
+    let file = dir.join(name);
+    std::fs::write(&file, script).expect("wrapper");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    file
+}
+
+pub(crate) fn has_block(rex: &Rex<SystemRunner>, block: &str) -> bool {
+    rex.view().is_ok_and(|view| view.blocks().any(|info| info.block_id == block))
+}
+
+/// Write keys to the viewer and wait for it to read them.
+pub(crate) fn keys(rex: &Rex<SystemRunner>, block: &str, text: &str) {
+    rex.write(block, text).expect("write keys");
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+/// The draft files of one agent in the private state directory.
+pub(crate) fn drafts(state: &Path, agent: Agent) -> Vec<serde_json::Value> {
+    let dir = state.join("annorex").join("drafts");
+    let prefix = format!("{}-", agent.status_app());
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .filter_map(|text| serde_json::from_str(&text).ok())
+        .collect()
 }
