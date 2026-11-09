@@ -1,0 +1,65 @@
+//! The `annorex` binary: commands, usage errors, and exit codes.
+
+#![allow(clippy::expect_used, reason = "tests assert by panicking")]
+
+use std::io::Write as _;
+use std::process::{Command, Output, Stdio};
+
+fn annorex(args: &[&str], env: &[(&str, &str)], stdin: &str) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_annorex"));
+    command.args(args).env_clear().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().expect("annorex starts");
+    child.stdin.take().expect("stdin").write_all(stdin.as_bytes()).expect("stdin written");
+    child.wait_with_output().expect("annorex ends")
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[test]
+fn help_lists_probe_and_deliver() {
+    let output = annorex(&["--help"], &[], "");
+    assert_eq!(output.status.code(), Some(0));
+    let help = text(&output.stdout);
+    assert!(help.contains("probe"), "{help}");
+    assert!(help.contains("deliver"), "{help}");
+}
+
+#[test]
+fn missing_rex_binary_exits_4_and_names_paths() {
+    let env = [("REX_BIN_DIR", "/nonexistent"), ("PATH", ""), ("REX_SESSION", "session:x")];
+    let output = annorex(&["probe", "--target", "block:b1"], &env, "");
+    assert_eq!(output.status.code(), Some(4));
+    assert!(text(&output.stderr).contains("/nonexistent/rex"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn missing_session_exits_64() {
+    let output = annorex(&["probe", "--target", "block:b1"], &[("PATH", "")], "");
+    assert_eq!(output.status.code(), Some(64));
+    assert!(text(&output.stderr).contains("session"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn deliver_with_empty_stdin_exits_64() {
+    let env = [("REX_BIN_DIR", "/nonexistent"), ("PATH", ""), ("REX_SESSION", "session:x")];
+    let output = annorex(&["deliver", "--target", "block:b1"], &env, "");
+    assert_eq!(output.status.code(), Some(64));
+    assert!(text(&output.stderr).contains("empty"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn unknown_argument_exits_64() {
+    let output = annorex(&["probe", "--nope"], &[], "");
+    assert_eq!(output.status.code(), Some(64));
+}
+
+#[test]
+fn missing_target_exits_64() {
+    let output = annorex(&["deliver"], &[("REX_SESSION", "session:x")], "note");
+    assert_eq!(output.status.code(), Some(64));
+}
