@@ -50,6 +50,18 @@ pub enum SessionRef {
     OpenCode { db: PathBuf, found: Found },
 }
 
+impl SessionRef {
+    /// The id of the session: the file stem for Claude Code and Pi, the session id for `OpenCode`.
+    pub fn id(&self) -> String {
+        match self {
+            Self::Claude(path) | Self::Pi(path) => {
+                path.file_stem().map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
+            }
+            Self::OpenCode { found, .. } => found.id.clone(),
+        }
+    }
+}
+
 /// A session that can hold the replies of the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
@@ -232,6 +244,14 @@ mod tests {
     use std::process::{ExitStatus, Output};
 
     use super::*;
+
+    #[test]
+    fn session_id_is_the_file_stem_or_the_opencode_id() {
+        assert_eq!(SessionRef::Claude(PathBuf::from("/p/abc-123.jsonl")).id(), "abc-123");
+        assert_eq!(SessionRef::Pi(PathBuf::from("/p/2026_x.jsonl")).id(), "2026_x");
+        let found = Found { id: "ses_9".to_owned(), schema: opencode::Schema::V1, updated: 1 };
+        assert_eq!(SessionRef::OpenCode { db: PathBuf::from("/db"), found }.id(), "ses_9");
+    }
 
     fn candidate(updated: SystemTime) -> Candidate {
         Candidate { session: SessionRef::Pi(PathBuf::from("/s.jsonl")), updated, last_line: String::new() }

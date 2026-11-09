@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod deliver;
 pub mod doc;
+pub mod draft;
 pub mod install;
 pub mod keys;
 pub mod layout;

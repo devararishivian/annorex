@@ -2,8 +2,10 @@
 
 use std::ops::Range;
 
+use serde::{Deserialize, Serialize};
+
 /// What an annotation asks for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
     Comment,
     Delete,
@@ -11,7 +13,7 @@ pub enum Kind {
 }
 
 /// One note on a range of the source of a document.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Annotation {
     pub id: u64,
     pub kind: Kind,
@@ -39,7 +41,8 @@ impl Annotation {
 }
 
 /// The annotations of one document and the general note.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Review {
     pub annotations: Vec<Annotation>,
     /// The general note of "send with a note".
@@ -97,6 +100,24 @@ impl Review {
     pub fn is_empty(&self) -> bool {
         self.annotations.is_empty()
     }
+
+    /// Check each annotation against the document after a load. When `source[range]` is not the
+    /// quote, move the range to the first match of the quote. With no match, set `detached`.
+    pub fn reanchor(&mut self, source: &str) {
+        for annotation in &mut self.annotations {
+            if source.get(annotation.range.clone()) == Some(annotation.quote.as_str()) {
+                annotation.detached = false;
+            } else if let Some(start) = Some(&annotation.quote)
+                .filter(|quote| !quote.is_empty())
+                .and_then(|quote| source.find(quote.as_str()))
+            {
+                annotation.range = start..start + annotation.quote.len();
+                annotation.detached = false;
+            } else {
+                annotation.detached = true;
+            }
+        }
+    }
 }
 
 /// The annotations of one file, or of the last reply, for the export.
@@ -127,7 +148,7 @@ fn quoted(word: &str, text: &str) -> String {
 
 fn block(number: usize, section: &Section<'_>, annotation: &Annotation) -> String {
     let place = if annotation.detached {
-        "line unknown".to_owned()
+        "text not found".to_owned()
     } else {
         let first = (section.line_of)(annotation.range.start);
         let last = (section.line_of)(annotation.range.end.saturating_sub(1).max(annotation.range.start));
@@ -394,7 +415,7 @@ mod tests {
             a.note = "n".to_owned();
         });
         let text = export_one("", "other text\n", &review);
-        assert!(text.contains("## Annotation 1 (line unknown)\nComment on: \"alpha\""), "{text}");
+        assert!(text.contains("## Annotation 1 (text not found)\nComment on: \"alpha\""), "{text}");
     }
 
     #[test]

@@ -5,10 +5,13 @@ use annorex_hosts::Host;
 use crate::rex::{ProcessInfo, StatusList};
 
 /// A supported coding agent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Agent {
+    #[serde(rename = "claude-code")]
     ClaudeCode,
+    #[serde(rename = "pi")]
     Pi,
+    #[serde(rename = "opencode")]
     OpenCode,
 }
 
