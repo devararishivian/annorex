@@ -170,6 +170,10 @@ annorex files --target block:... README.md docs/guide.md
 annorex rex open files --target block:... --placement right README.md
 ```
 
+A path can name a directory. Then the tree opens there. If a file viewer is already open for the agent,
+`annorex rex open files` only moves the focus to it and does not open the paths. Open them in that viewer with `ctrl+p`
+or `T`.
+
 Limits: Annorex does not open a file larger than 1 MiB or a file with a NUL byte in its first 8192 bytes. The tree
 shows the first 20,000 entries and says so when there are more. If you open more than 50 files, Annorex asks you to
 close one first.
