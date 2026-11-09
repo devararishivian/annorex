@@ -34,7 +34,7 @@ impl Agent {
     }
 
     /// The `argv0` of the agent's foreground process.
-    fn argv0(self) -> &'static str {
+    pub fn argv0(self) -> &'static str {
         match self {
             Self::ClaudeCode => "claude",
             Self::Pi => "pi",

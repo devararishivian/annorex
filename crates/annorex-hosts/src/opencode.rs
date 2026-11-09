@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: none in logic; the header line only.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: added `sessions_for_cwd` (all top-level sessions of one directory).
 //! `OpenCode`: sessions, messages and parts live in `SQLite` (`opencode.db` under the XDG data
 //! dir), one row per message and one per part, with the payload as JSON in `data`.
 //!
@@ -89,6 +89,38 @@ pub fn find_session(db: &Path, cwd: &Path) -> Result<Found, HostError> {
     exact
         .or(ancestor)
         .ok_or_else(|| HostError::NoTranscript(format!("no OpenCode session for {cwd} in {}", db.display())))
+}
+
+/// All top-level, unarchived sessions started exactly in `cwd`, across both schemas, newest
+/// `time_updated` first. Annorex uses the list to see whether the session of a pane is ambiguous.
+pub fn sessions_for_cwd(db: &Path, cwd: &Path) -> Result<Vec<Found>, HostError> {
+    let connection = open_read_only(db, WHAT)?;
+    let cwd = normalize(&cwd.to_string_lossy());
+    let mut found = Vec::new();
+    for (schema, table) in [(Schema::V2, "session_v2"), (Schema::V1, "session")] {
+        if !has_table(&connection, table)? {
+            continue;
+        }
+        let mut statement = connection
+            .prepare(&format!(
+                "SELECT id, directory, time_updated FROM {table} \
+                 WHERE parent_id IS NULL AND time_archived IS NULL"
+            ))
+            .map_err(|e| sql_error(WHAT, &e))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+            })
+            .map_err(|e| sql_error(WHAT, &e))?;
+        for row in rows {
+            let (id, directory, updated) = row.map_err(|e| sql_error(WHAT, &e))?;
+            if normalize(&directory) == cwd {
+                found.push(Found { id, schema, updated });
+            }
+        }
+    }
+    found.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| b.id.cmp(&a.id)));
+    Ok(found)
 }
 
 /// Which schema holds `session_id`, for sessions addressed by id rather than found by cwd.

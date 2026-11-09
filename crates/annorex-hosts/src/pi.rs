@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: none in logic; the header line only.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: added `sessions_for_cwd` (all sessions of one directory that have a reply).
 //! Pi (pi-mono coding agent): `<sessions>/--<encoded cwd>--/<timestamp>_<uuid>.jsonl`.
 //!
 //! One file per session. The first line is a `session` header carrying the `cwd`; every
@@ -118,6 +118,20 @@ pub(crate) fn newest_with_messages(mut files: Vec<PathBuf>) -> Option<PathBuf> {
         .into_iter()
         .map(|(_, path)| path)
         .find(|p| std::fs::read_to_string(p).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1))))
+}
+
+/// All sessions in the encoded directory of `cwd` that hold at least one reply, newest
+/// modification first. Annorex uses the list to see whether the session of a pane is ambiguous.
+pub fn sessions_for_cwd(sessions_dir: &Path, cwd: &Path) -> Vec<(PathBuf, std::time::SystemTime)> {
+    let mut found: Vec<(PathBuf, std::time::SystemTime)> = jsonl_files(&sessions_dir.join(encoded_dir(cwd)))
+        .into_iter()
+        .filter(|path| {
+            std::fs::read_to_string(path).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1)))
+        })
+        .filter_map(|path| modified(&path).map(|time| (path, time)))
+        .collect();
+    found.sort_by(|(a, a_time), (b, b_time)| b_time.cmp(a_time).then_with(|| b.cmp(a)));
+    found
 }
 
 fn modified(path: &Path) -> Option<std::time::SystemTime> {

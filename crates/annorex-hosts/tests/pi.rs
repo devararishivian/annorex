@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: renamed the crate; the host detection test is now a label test, because detect_host is removed.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: renamed the crate; the host detection test is now a label test, because detect_host is removed; added a test for sessions_for_cwd.
 //! Pi sessions: the active branch, what counts as a message, and finding a session by cwd.
 //! Semantics match Plannotator's `apps/pi-extension/assistant-message.ts`.
 
@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use annorex_hosts::pi::{encoded_dir, find_transcript, parse_messages};
+use annorex_hosts::pi::{encoded_dir, find_transcript, parse_messages, sessions_for_cwd};
 use annorex_hosts::{Host, Role};
 
 fn fixture(name: &str) -> String {
@@ -186,4 +186,26 @@ fn an_unknown_cwd_falls_back_to_the_newest_session_anywhere() {
 #[test]
 fn the_pi_host_label_is_pi() {
     assert_eq!(Host::Pi.label(), "pi");
+}
+
+#[test]
+fn pi_sessions_for_cwd_newest_first() {
+    let root = temp("sessions-for-cwd");
+    let bucket = root.join(encoded_dir(Path::new("/work/app")));
+    std::fs::create_dir_all(&bucket).expect("bucket");
+    let full = fixture("pi.jsonl");
+    let header = full.lines().next().expect("header line").to_owned() + "\n";
+    for (name, text, seconds) in
+        [("a.jsonl", &full, 1_000), ("b.jsonl", &full, 2_000), ("c.jsonl", &header, 3_000)]
+    {
+        let path = bucket.join(name);
+        std::fs::write(&path, text).expect("session");
+        touch(&path, seconds);
+    }
+    let found = sessions_for_cwd(&root, Path::new("/work/app"));
+    let names: Vec<_> = found.iter().map(|(path, _)| path.file_name().expect("name").to_owned()).collect();
+    assert_eq!(names, ["b.jsonl", "a.jsonl"], "newest first; c.jsonl has no reply");
+    assert_eq!(found[0].1, std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000));
+    assert_eq!(sessions_for_cwd(&root, Path::new("/work/none")), []);
+    std::fs::remove_dir_all(&root).expect("cleanup");
 }

@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: renamed the crate.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: renamed the crate; added a test for sessions_for_cwd.
 //! `OpenCode` messages out of a generated `opencode.db` (the 1.18 schema subset), read-only.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, reason = "tests assert by panicking")]
@@ -302,5 +302,21 @@ fn a_missing_database_is_reported_not_created() {
         other => panic!("expected NoTranscript, got {other:?}"),
     }
     assert!(!db.exists(), "a read must not create the database");
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn opencode_sessions_for_cwd_exact_directory_only() {
+    let dir = temp_dir("for-cwd");
+    let db = dir.join("opencode.db");
+    let writer = populate(&db);
+    let ids = |cwd: &str| -> Vec<String> {
+        opencode::sessions_for_cwd(&db, Path::new(cwd)).expect("sessions").into_iter().map(|f| f.id).collect()
+    };
+    assert_eq!(ids("/work/app"), ["ses_main", "ses_older"], "no child, no archived, newest first");
+    assert_eq!(ids("/work/app/"), ["ses_main", "ses_older"], "trailing slash");
+    assert_eq!(ids("/work/app/src"), Vec::<String>::new(), "a session in a parent directory is not listed");
+    assert_eq!(ids("/elsewhere"), Vec::<String>::new());
+    drop(writer);
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
