@@ -276,7 +276,10 @@ fn draw_picker(frame: &mut Frame, area: Rect, candidates: &[Candidate], index: u
         )),
         Line::raw(""),
     ];
-    for (position, candidate) in candidates.iter().enumerate() {
+    // The rows under the two lines of text. Scroll so that the selected row stays visible.
+    let rows = usize::from(area.height).saturating_sub(lines.len()).max(1);
+    let offset = index.saturating_sub(rows - 1);
+    for (position, candidate) in candidates.iter().enumerate().skip(offset).take(rows) {
         let marker = if position == index { "▸" } else { " " };
         let text = format!("{marker} {} · {}", age(now, candidate.updated), candidate.last_line);
         let style =

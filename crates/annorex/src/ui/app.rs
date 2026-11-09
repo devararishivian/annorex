@@ -139,8 +139,12 @@ impl App {
 
     /// New replies after a read. The selected reply stays when it is still there.
     pub fn set_replies(&mut self, replies: Vec<Reply>) {
+        // Keep an older reply that the user chose. On the newest reply, go to a new newest reply, but
+        // keep the position when no new reply came.
         let current = self.replies.get(self.selected).map(|reply| reply.id.clone());
-        let keep = current.and_then(|id| replies.iter().position(|reply| reply.id == id));
+        let keep = current
+            .and_then(|id| replies.iter().position(|reply| reply.id == id))
+            .filter(|&index| self.selected > 0 || index == 0);
         let (top, cursor) = (self.top, self.cursor);
         self.replies = replies;
         self.screen = Screen::Viewer;

@@ -298,3 +298,44 @@ fn snapshot_panel_overlay_50x20() {
     press(&mut app, "p");
     insta::assert_snapshot!(render(&mut app, 50, 20));
 }
+
+#[test]
+fn reload_shows_a_new_newest_reply() {
+    let mut app = viewer();
+    let mut newer = replies();
+    newer.insert(0, reply("r0", "## Newest answer\n\nThe new text."));
+    app.set_replies(newer);
+    let screen = render(&mut app, 120, 40);
+    assert!(screen.lines().next().expect("header").ends_with("reply 1/4"), "{screen}");
+    assert!(screen.contains("Newest answer"), "{screen}");
+}
+
+#[test]
+fn reload_without_new_reply_keeps_the_position() {
+    let mut app = viewer();
+    let index = first_text_line_at_or_after(&app, 30);
+    let expected = app.doc().lines[index].line;
+    app.jump_to_line(index);
+    render(&mut app, 120, 40);
+    app.set_replies(replies());
+    assert_eq!(first_gutter_number(&render(&mut app, 120, 40)), Some(expected));
+}
+
+#[test]
+fn picker_keeps_the_selected_session_visible() {
+    let candidates: Vec<Candidate> = (0..30)
+        .map(|n| Candidate {
+            session: SessionRef::Pi(PathBuf::from(format!("/s{n}.jsonl"))),
+            updated: SystemTime::now(),
+            last_line: format!("session number {n:02}"),
+        })
+        .collect();
+    let mut app = App::new(state(Agent::Pi, "idle"), Screen::Picker(candidates), Vec::new());
+    for n in 1..30 {
+        press(&mut app, "j");
+        let screen = render(&mut app, 80, 24);
+        let wanted = format!("▸ updated just now · session number {n:02}");
+        assert!(screen.contains(&wanted), "after {n} presses:\n{screen}");
+    }
+    assert_eq!(press(&mut app, "\n"), Effect::PickSession(29));
+}
