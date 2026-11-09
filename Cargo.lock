@@ -6,7 +6,9 @@ version = 4
 name = "annorex"
 version = "0.1.0"
 dependencies = [
+ "annorex-hosts",
  "clap",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
