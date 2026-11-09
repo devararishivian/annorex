@@ -1,0 +1,15 @@
+{
+  "records": [
+    {
+      "state": "working",
+      "app": "claude-code",
+      "effective_app": "claude-code",
+      "msg": "Reading the project files",
+      "updated_at": "2026-11-09T15:14:52.7675+07:00",
+      "owner": {
+        "pid": 89409,
+        "name": "2.1.319"
+      }
+    }
+  ]
+}

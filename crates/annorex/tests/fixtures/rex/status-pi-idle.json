@@ -1,0 +1,14 @@
+{
+  "records": [
+    {
+      "state": "idle",
+      "app": "pi",
+      "effective_app": "pi",
+      "updated_at": "2026-11-09T15:53:40.611879+07:00",
+      "owner": {
+        "pid": 71118,
+        "name": "node"
+      }
+    }
+  ]
+}

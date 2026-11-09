@@ -1,0 +1,40 @@
+{
+  "last_exit": null,
+  "child": {
+    "pid": 29062,
+    "user_id": 0,
+    "user": "root",
+    "name": "login",
+    "path": "/usr/bin/login"
+  },
+  "foreground": {
+    "pid": 89409,
+    "user_id": 501,
+    "user": "dev",
+    "name": "2.1.319",
+    "path": "/Users/dev/.local/share/claude/versions/2.1.319",
+    "invoked_path": "/Users/dev/.local/bin/claude",
+    "argv0": "claude",
+    "cwd": "/Users/dev/work/project"
+  },
+  "ancestors": [
+    {
+      "pid": 29063,
+      "user_id": 501,
+      "user": "dev",
+      "name": "zsh",
+      "path": "/bin/zsh",
+      "invoked_path": "/bin/zsh",
+      "argv0": "-zsh",
+      "cwd": "/Users/dev/work/project"
+    },
+    {
+      "pid": 29062,
+      "user_id": 0,
+      "user": "root",
+      "name": "login",
+      "path": "/usr/bin/login"
+    }
+  ],
+  "home": "/Users/dev"
+}

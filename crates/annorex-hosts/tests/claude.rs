@@ -96,8 +96,5 @@ fn a_dangling_parent_makes_the_chain_untrusted_and_file_order_applies() {
 
 #[test]
 fn garbage_input_yields_no_messages_rather_than_an_error() {
-    assert_eq!(
-        parse_messages("not json\n{\"type\":\"progress\"}\n", 3),
-        [] as [annorex_hosts::Message; 0]
-    );
+    assert_eq!(parse_messages("not json\n{\"type\":\"progress\"}\n", 3), [] as [annorex_hosts::Message; 0]);
 }

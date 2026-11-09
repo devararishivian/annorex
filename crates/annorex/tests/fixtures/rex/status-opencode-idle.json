@@ -1,0 +1,14 @@
+{
+  "records": [
+    {
+      "state": "idle",
+      "app": "opencode",
+      "effective_app": "opencode",
+      "updated_at": "2026-11-09T15:53:40.885231+07:00",
+      "owner": {
+        "pid": 71133,
+        "name": "opencode.exe"
+      }
+    }
+  ]
+}

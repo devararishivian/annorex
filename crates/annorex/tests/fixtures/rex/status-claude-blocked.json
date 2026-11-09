@@ -1,0 +1,16 @@
+{
+  "records": [
+    {
+      "state": "blocked",
+      "kind": "question",
+      "app": "claude-code",
+      "effective_app": "claude-code",
+      "msg": "answer: Pick a color. (Red · Blue)",
+      "updated_at": "2026-11-09T15:31:02.118734+07:00",
+      "owner": {
+        "pid": 54546,
+        "name": "2.1.319"
+      }
+    }
+  ]
+}

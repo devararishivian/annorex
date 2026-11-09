@@ -14,7 +14,7 @@ changes for Annorex.
       `crates/plannotator-tui/src/last/roots.rs`)
     - `crates/annorex-hosts/tests/` and `crates/annorex-hosts/tests/fixtures/` (from
       `crates/plannotator-tui-hosts/tests/`)
-    - The lint table in the root `Cargo.toml`
+    - The lint table in the root `Cargo.toml` and the root `rustfmt.toml`
 
 ```text
 MIT License
