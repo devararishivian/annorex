@@ -42,12 +42,15 @@ pub enum Action {
     Remove,
     Reload,
     Zoom,
+    PrevFile,
+    NextFile,
+    CloseFile,
     Quit,
 }
 
 impl Action {
     /// Every action, in the order of the documentation.
-    pub const ALL: [Action; 33] = [
+    pub const ALL: [Action; 36] = [
         Action::Left,
         Action::Right,
         Action::Down,
@@ -80,6 +83,9 @@ impl Action {
         Action::Remove,
         Action::Reload,
         Action::Zoom,
+        Action::PrevFile,
+        Action::NextFile,
+        Action::CloseFile,
         Action::Quit,
     ];
 
@@ -118,6 +124,9 @@ impl Action {
             Action::Remove => "remove",
             Action::Reload => "reload",
             Action::Zoom => "zoom",
+            Action::PrevFile => "prev_file",
+            Action::NextFile => "next_file",
+            Action::CloseFile => "close_file",
             Action::Quit => "quit",
         }
     }
@@ -157,6 +166,9 @@ impl Action {
             Action::Remove => "x",
             Action::Reload => "r",
             Action::Zoom => "z",
+            Action::PrevFile => "[",
+            Action::NextFile => "]",
+            Action::CloseFile => "W",
             Action::Quit => "q",
         }
     }

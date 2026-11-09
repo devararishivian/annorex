@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::{Path, PathBuf};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -9,8 +10,9 @@ use super::editor::{Editor, EditorResult};
 use crate::agent::Agent;
 use crate::config::Config;
 use crate::deliver::DeliveryMode;
-use crate::doc::Doc;
+use crate::doc::{Doc, DocKind};
 use crate::draft::{Draft, DraftKey, Editing};
+use crate::files::{LoadedFile, Stamp};
 use crate::keys::Action;
 use crate::payload::sanitize;
 use crate::replies::{Candidate, Reply};
@@ -72,6 +74,30 @@ pub enum Effect {
     Discard,
 }
 
+/// What the viewer shows: the replies of the agent, or files of the work directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Replies,
+    Files,
+}
+
+/// The most files that the viewer keeps open.
+pub(crate) const MAX_OPEN_FILES: usize = 50;
+
+/// The id of the document of a file.
+pub fn file_id(relative: &Path) -> String {
+    format!("file:{}", relative.display())
+}
+
+/// What the viewer knows about an open file.
+#[derive(Debug, Clone)]
+pub(crate) struct OpenFile {
+    pub(crate) relative: PathBuf,
+    pub(crate) kind: DocKind,
+    #[allow(dead_code, reason = "the watcher in a later task reads it")]
+    pub(crate) stamp: Stamp,
+}
+
 /// A question that waits for a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Confirm {
@@ -81,6 +107,8 @@ pub(crate) enum Confirm {
     Discard,
     /// Quit with unsent notes: `s`, `k`, `d`, or `esc`.
     Quit,
+    /// Close the file on the screen, which has unsent notes? `y` or `n`.
+    CloseFile,
 }
 
 /// Where the keys go.
@@ -158,6 +186,13 @@ pub struct App {
     shown_id: Option<String>,
     /// Why the last save of the draft failed.
     pub(crate) save_error: Option<String>,
+    pub(crate) mode: Mode,
+    /// The work directory in `Mode::Files`.
+    pub(crate) root: Option<PathBuf>,
+    /// The open files by document id (`Mode::Files`). `replies` keeps their texts, in open order.
+    pub(crate) files: HashMap<String, OpenFile>,
+    /// The ids of the documents whose review the last discard removed. The caller removes the drafts.
+    discarded: Vec<String>,
 }
 
 impl App {
@@ -195,6 +230,10 @@ impl App {
             exit: false,
             shown_id: None,
             save_error: None,
+            mode: Mode::Replies,
+            root: None,
+            files: HashMap::new(),
+            discarded: Vec::new(),
         };
         if !replies.is_empty() {
             app.replies = replies;
@@ -204,6 +243,88 @@ impl App {
     }
 
     /// The document of the selected reply.
+    /// A viewer for the files of `root`. It starts with no file open.
+    pub fn new_files(state: AgentState, root: PathBuf, config: &Config) -> Self {
+        let mut app = Self::new(state, Screen::Viewer, Vec::new(), config);
+        app.mode = Mode::Files;
+        app.root = Some(root);
+        app
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Add a file to the open files and show it. An open file is only selected.
+    pub fn open_file(&mut self, loaded: LoadedFile) -> Effect {
+        let id = file_id(&loaded.relative);
+        if let Some(index) = self.replies.iter().position(|reply| reply.id == id) {
+            self.show_reply(index);
+            return Effect::None;
+        }
+        if self.replies.len() >= MAX_OPEN_FILES {
+            self.status = Some("Too many open files. Close one with W.".to_owned());
+            return Effect::None;
+        }
+        self.files.insert(
+            id.clone(),
+            OpenFile { kind: DocKind::of(&loaded.relative), relative: loaded.relative, stamp: loaded.stamp },
+        );
+        self.replies.push(Reply { id, text: loaded.text, at: None });
+        self.screen = Screen::Viewer;
+        self.show_reply(self.replies.len() - 1);
+        Effect::None
+    }
+
+    /// The path of the file on the screen, relative to the root.
+    pub fn shown_file(&self) -> Option<&Path> {
+        self.files.get(self.shown_id.as_deref()?).map(|file| file.relative.as_path())
+    }
+
+    /// `[` and `]`: show the previous or the next open file.
+    fn step_file(&mut self, forward: bool) {
+        let target = if forward { Some(self.selected + 1) } else { self.selected.checked_sub(1) };
+        if let Some(index) = target.filter(|&index| index < self.replies.len()) {
+            self.show_reply(index);
+        }
+    }
+
+    /// `W`: close the file on the screen. A file with unsent notes asks first.
+    fn begin_close(&mut self) {
+        match self.review() {
+            Some(review) if review.has_unsent() => self.confirm = Some(Confirm::CloseFile),
+            _ => self.close_shown(),
+        }
+    }
+
+    /// Remove the file on the screen from the open files. Its notes stay in its draft on disk.
+    fn close_shown(&mut self) {
+        let Some(id) = self.shown_id.take() else { return };
+        let index = self.selected.min(self.replies.len().saturating_sub(1));
+        if index < self.replies.len() {
+            self.replies.remove(index);
+        }
+        self.files.remove(&id);
+        self.reviews.remove(&id);
+        self.sent.remove(&id);
+        self.parked.remove(&id);
+        self.editor = None;
+        self.editing_id = None;
+        self.selection = None;
+        self.confirm = None;
+        self.annotation_index = 0;
+        if self.replies.is_empty() {
+            self.doc = Doc::parse("");
+            self.cache.clear();
+            self.selected = 0;
+            self.panel_index = 0;
+            self.cursor = 0;
+            self.top = 0;
+        } else {
+            self.show_reply(index.min(self.replies.len() - 1));
+        }
+    }
+
     pub fn doc(&self) -> &Doc {
         &self.doc
     }
@@ -353,7 +474,10 @@ impl App {
         let id = reply.id.clone();
         self.selected = index;
         self.panel_index = index;
-        self.doc = Doc::parse(&reply.text);
+        self.doc = match self.files.get(&id) {
+            Some(file) => Doc::for_kind(file.kind, &reply.text),
+            None => Doc::parse(&reply.text),
+        };
         self.cache.clear();
         self.top = 0;
         let first = self.doc.lines.iter().position(|line| !line.is_blank());
@@ -408,13 +532,34 @@ impl App {
 
     /// The draft of the reply on the screen: the review, the open editor, and the send time.
     pub fn draft(&self, agent: Agent, session: &str) -> Option<Draft> {
-        let id = self.shown_id.clone()?;
-        let key = DraftKey { agent, session: session.to_owned(), document: id.clone() };
-        let mut draft = Draft::new(key, "last reply");
-        draft.review = self.reviews.get(&id).cloned().unwrap_or_default();
-        draft.editing =
-            self.editor.as_ref().map(|editor| Editing { annotation: self.editing_id, ..editor.to_editing() });
-        draft.sent_at = self.sent.get(&id).cloned();
+        self.draft_of(self.shown_id.as_deref()?, agent, session)
+    }
+
+    /// The drafts to save after a send: the reply on the screen, or every open file.
+    pub fn drafts(&self, agent: Agent, session: &str) -> Vec<Draft> {
+        match self.mode {
+            Mode::Replies => self.draft(agent, session).into_iter().collect(),
+            Mode::Files => {
+                self.replies.iter().filter_map(|reply| self.draft_of(&reply.id, agent, session)).collect()
+            }
+        }
+    }
+
+    fn draft_of(&self, id: &str, agent: Agent, session: &str) -> Option<Draft> {
+        self.replies.iter().find(|reply| reply.id == id)?;
+        let key = DraftKey { agent, session: session.to_owned(), document: id.to_owned() };
+        let name = self
+            .files
+            .get(id)
+            .map_or_else(|| "last reply".to_owned(), |file| file.relative.display().to_string());
+        let mut draft = Draft::new(key, &name);
+        draft.review = self.reviews.get(id).cloned().unwrap_or_default();
+        draft.editing = if self.shown_id.as_deref() == Some(id) {
+            self.editor.as_ref().map(|editor| Editing { annotation: self.editing_id, ..editor.to_editing() })
+        } else {
+            self.parked.get(id).cloned()
+        };
+        draft.sent_at = self.sent.get(id).cloned();
         Some(draft)
     }
 
@@ -442,6 +587,15 @@ impl App {
 
     /// Record a send or a paste of the reply on the screen.
     pub fn mark_sent(&mut self, at: String) {
+        if self.mode == Mode::Files {
+            for reply in &self.replies {
+                if let Some(review) = self.reviews.get_mut(&reply.id) {
+                    review.mark_sent(&at);
+                    self.sent.insert(reply.id.clone(), at.clone());
+                }
+            }
+            return;
+        }
         if let Some(id) = self.shown_id.clone() {
             if let Some(review) = self.reviews.get_mut(&id) {
                 review.mark_sent(&at);
@@ -580,6 +734,9 @@ impl App {
                 Some(Action::FindPrev) => self.find_next(false, false),
                 Some(Action::Replies) => self.toggle_panel(PanelView::Replies),
                 Some(Action::Annotations) => self.toggle_panel(PanelView::Annotations),
+                Some(Action::PrevFile) if self.mode == Mode::Files => self.step_file(false),
+                Some(Action::NextFile) if self.mode == Mode::Files => self.step_file(true),
+                Some(Action::CloseFile) if self.mode == Mode::Files => self.begin_close(),
                 Some(Action::Select) => self.toggle_selection(false),
                 Some(Action::SelectLines) => self.toggle_selection(true),
                 Some(Action::Comment) => return self.begin_new(Kind::Comment),
@@ -721,7 +878,7 @@ impl App {
                 KeyCode::Char('d') => {
                     self.confirm = None;
                     self.quit_after = true;
-                    self.discard_review()
+                    self.discard_review(self.mode == Mode::Files)
                 }
                 KeyCode::Esc => {
                     self.confirm = None;
@@ -745,16 +902,33 @@ impl App {
             }
             Confirm::Discard => {
                 self.confirm = None;
-                if key.code == KeyCode::Char('y') { self.discard_review() } else { Effect::None }
+                if key.code == KeyCode::Char('y') { self.discard_review(false) } else { Effect::None }
+            }
+            Confirm::CloseFile => {
+                self.confirm = None;
+                if key.code == KeyCode::Char('y') {
+                    self.close_shown();
+                }
+                Effect::None
             }
         }
     }
 
     /// Remove the review of the reply on the screen. The caller removes the draft file.
-    fn discard_review(&mut self) -> Effect {
-        if let Some(id) = self.shown_id.clone() {
+    fn discard_review(&mut self, all_files: bool) -> Effect {
+        let ids: Vec<String> = if all_files {
+            self.replies
+                .iter()
+                .filter(|reply| self.reviews.get(&reply.id).is_some_and(Review::has_unsent))
+                .map(|reply| reply.id.clone())
+                .collect()
+        } else {
+            self.shown_id.clone().into_iter().collect()
+        };
+        for id in ids {
             self.reviews.remove(&id);
             self.sent.remove(&id);
+            self.discarded.push(id);
         }
         self.selection = None;
         self.annotation_index = 0;
@@ -764,14 +938,26 @@ impl App {
 
     /// `q`: quit, but ask first when the reply on the screen has notes that no send covered.
     fn request_quit(&mut self) -> Effect {
-        let unsent =
-            self.shown_id.as_ref().is_some_and(|id| self.reviews.get(id).is_some_and(Review::has_unsent));
+        let unsent = match self.mode {
+            Mode::Files => self.unsent_file_count() > 0,
+            Mode::Replies => {
+                self.shown_id.as_ref().is_some_and(|id| self.reviews.get(id).is_some_and(Review::has_unsent))
+            }
+        };
         if unsent {
             self.confirm = Some(Confirm::Quit);
             Effect::None
         } else {
             Effect::Quit
         }
+    }
+
+    /// The number of open files with notes that no send took.
+    pub fn unsent_file_count(&self) -> usize {
+        self.replies
+            .iter()
+            .filter(|reply| self.reviews.get(&reply.id).is_some_and(Review::has_unsent))
+            .count()
     }
 
     /// `S` and `P`: send or paste the export, when there is something to send.
@@ -803,7 +989,15 @@ impl App {
 
     /// The number of annotations of the reply on the screen.
     pub fn annotation_count(&self) -> usize {
-        self.review().map_or(0, |review| review.annotations.len())
+        match self.mode {
+            Mode::Replies => self.review().map_or(0, |review| review.annotations.len()),
+            Mode::Files => self
+                .replies
+                .iter()
+                .filter_map(|reply| self.reviews.get(&reply.id))
+                .map(|review| review.annotations.len())
+                .sum(),
+        }
     }
 
     /// The Markdown that a send gives the agent: the general note, then the annotations that no
@@ -818,6 +1012,9 @@ impl App {
     }
 
     fn export_of(&self, all: bool) -> String {
+        if self.mode == Mode::Files {
+            return self.export_files(all);
+        }
         let Some(review) = self.review() else { return String::new() };
         let line_of = |offset: usize| self.doc.line_of(offset);
         let name = self.export_name();
@@ -828,6 +1025,59 @@ impl App {
             annotations: if all { review.in_order() } else { review.unsent() },
         };
         crate::review::export(&review.note, &[section])
+    }
+
+    /// One message for all open files: the general notes, then one section for each file with
+    /// notes, in the order in which the files were opened.
+    fn export_files(&self, all: bool) -> String {
+        struct Part<'a> {
+            name: String,
+            source: String,
+            annotations: Vec<&'a Annotation>,
+        }
+        let mut notes: Vec<&str> = Vec::new();
+        let mut parts: Vec<Part<'_>> = Vec::new();
+        for reply in &self.replies {
+            let Some(review) = self.reviews.get(&reply.id) else { continue };
+            let note = review.note.trim();
+            if !note.is_empty() {
+                notes.push(note);
+            }
+            let annotations = if all { review.in_order() } else { review.unsent() };
+            if annotations.is_empty() {
+                continue;
+            }
+            let name = self
+                .files
+                .get(&reply.id)
+                .map_or_else(|| reply.id.clone(), |file| file.relative.display().to_string());
+            let source = if self.shown_id.as_deref() == Some(reply.id.as_str()) {
+                self.doc.source.clone()
+            } else {
+                sanitize(&reply.text)
+            };
+            parts.push(Part { name, source, annotations });
+        }
+        let line_ofs: Vec<Box<dyn Fn(usize) -> usize + '_>> = parts
+            .iter()
+            .map(|part| {
+                let source = part.source.as_str();
+                Box::new(move |offset: usize| {
+                    source.get(..offset).map_or(1, |head| head.matches('\n').count() + 1)
+                }) as Box<dyn Fn(usize) -> usize + '_>
+            })
+            .collect();
+        let sections: Vec<Section<'_>> = parts
+            .iter()
+            .zip(&line_ofs)
+            .map(|(part, line_of)| Section {
+                name: &part.name,
+                source: &part.source,
+                line_of: line_of.as_ref(),
+                annotations: part.annotations.clone(),
+            })
+            .collect();
+        crate::review::export(&notes.join("\n\n"), &sections)
     }
 
     /// `last reply` for the newest reply, else `earlier reply (HH:MM)` in the local time.
@@ -848,6 +1098,16 @@ impl App {
 
     /// The reply counts as sent at `at`, and the general note is used up.
     pub fn finish_send(&mut self, at: String) {
+        if self.mode == Mode::Files {
+            for reply in &self.replies {
+                if let Some(review) = self.reviews.get_mut(&reply.id) {
+                    review.note.clear();
+                    review.mark_sent(&at);
+                    self.sent.insert(reply.id.clone(), at.clone());
+                }
+            }
+            return;
+        }
         if let Some(id) = self.shown_id.clone() {
             if let Some(review) = self.reviews.get_mut(&id) {
                 review.note.clear();
@@ -855,6 +1115,11 @@ impl App {
             }
             self.sent.insert(id, at);
         }
+    }
+
+    /// The ids of the documents whose notes the last discard removed. The caller removes their drafts.
+    pub fn take_discarded(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.discarded)
     }
 
     /// End the viewer after the send or the discard that the quit question started.

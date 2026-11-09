@@ -1,0 +1,44 @@
+---
+source: crates/annorex/tests/files_review.rs
+expression: "render(&mut app, 120, 40)"
+---
+Annorex · files · claude (idle)                                                        file 1/2 · unsent 1,2  [Send 2 ▸]
+1 beta line                                                                     │ Files
+2 second line                                                                   │▸  1● b.txt (1)
+                                                                                │   2● a.md (1)
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+                                                                                │
+j/k move  enter show  esc back  p close  q quit

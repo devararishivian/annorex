@@ -1,0 +1,28 @@
+---
+source: crates/annorex/tests/files_review.rs
+expression: "render(&mut app, 80, 24)"
+---
+Annorex · files · claude (idle)                  file 2/2 · unsent 2  [Send 1 ▸]
+1 Title
+
+3 alpha text
+
+
+
+
+
+
+
+
+
+
+
+ Files ─────────────────────────────────────────────────────────────────────────
+   1  b.txt (0)
+▸  2● a.md (1)
+
+
+
+
+
+j/k move  enter show  esc back  p close  q quit

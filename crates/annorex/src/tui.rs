@@ -290,24 +290,25 @@ impl<R: Runner> Viewer<'_, R> {
 
     /// The review is gone from the app. Remove the draft file too.
     fn discard(&self, app: &mut App) {
-        let key = app.shown_reply_id().and_then(|id| self.draft_key(id));
-        if let (Some(store), Some(key)) = (&self.store, key)
-            && let Err(error) = store.discard(&key)
-        {
-            app.set_save_error(Some(error.to_string()));
+        for id in app.take_discarded() {
+            if let (Some(store), Some(key)) = (&self.store, self.draft_key(&id))
+                && let Err(error) = store.discard(&key)
+            {
+                app.set_save_error(Some(error.to_string()));
+            }
         }
         app.quit_if_pending();
     }
 
-    /// Save the draft of the reply on the screen.
+    /// Save the drafts of the reply on the screen, or of all open files.
     fn save_draft(&self, app: &mut App) {
         let (Some(store), Some(agent), Some(session)) =
             (&self.store, self.state.agent, self.session.as_ref().map(SessionRef::id))
         else {
             return;
         };
-        let Some(draft) = app.draft(agent, &session) else { return };
-        app.set_save_error(store.save(&draft).err().map(|error| error.to_string()));
+        let error = app.drafts(agent, &session).iter().find_map(|draft| store.save(draft).err());
+        app.set_save_error(error.map(|error| error.to_string()));
     }
 
     fn apply(&mut self, effect: Effect, app: &mut App) {

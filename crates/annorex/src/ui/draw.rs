@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Confirm, Focus, PanelView, Screen, match_ranges};
+use super::app::{App, Confirm, Focus, Mode, PanelView, Screen, match_ranges};
 use crate::agent::Agent;
 use crate::doc::{DocSpan, SpanStyle};
 use crate::keys::{Action, KeyMap};
@@ -86,7 +86,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     };
     match app.screen.clone() {
         Screen::Error(message) => {
-            draw_header(frame, header, app, "last reply", &[]);
+            draw_header(frame, header, app, title_of(app), &[]);
             let body = Rect::new(area.x, header.bottom(), area.width, footer.y - header.bottom());
             let paragraph = Paragraph::new(format!("Annorex: {message}")).wrap(Wrap { trim: true });
             frame.render_widget(paragraph, body);
@@ -186,9 +186,18 @@ fn draw_footer(frame: &mut Frame, area: Rect, keys: &str, message: Option<String
     frame.render_widget(Paragraph::new(fit(&text, area.width)).style(style), area);
 }
 
+fn title_of(app: &App) -> &'static str {
+    if app.mode() == Mode::Files { "files" } else { "last reply" }
+}
+
 fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
     let (selected, count) = app.reply_position();
-    let position = format!("reply {}/{count}", selected + 1);
+    let files = app.mode() == Mode::Files;
+    let position = match (files, count) {
+        (true, 0) => "no file open".to_owned(),
+        (true, _) => format!("file {}/{count}", selected + 1),
+        (false, _) => format!("reply {}/{count}", selected + 1),
+    };
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let unsent = app.unsent_replies();
     let button = send_button(app);
@@ -207,7 +216,7 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
     }
     rights.push(with_button(position.clone()));
     rights.push(vec![(position, bold)]);
-    draw_header(frame, header, app, "last reply", &rights);
+    draw_header(frame, header, app, title_of(app), &rights);
     let (doc_area, panel_area, overlay) = match layout {
         Layout::Single { doc, overlay, .. } => (doc, app.panel_open.then_some(overlay), true),
         Layout::Bottom { doc, panel, .. } | Layout::Side { doc, panel, .. } => {
@@ -240,7 +249,22 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         Confirm::Discard if app.review().is_none_or(Review::is_empty) => {
             "Remove the draft file that Annorex cannot read? y/n".to_owned()
         }
+        Confirm::Discard if app.mode() == Mode::Files => "Discard the notes of this file? y/n".to_owned(),
         Confirm::Discard => "Discard the notes of this reply? y/n".to_owned(),
+        Confirm::CloseFile => {
+            let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
+            format!("Close {path}? It has unsent notes. y/n")
+        }
+        Confirm::Quit if app.mode() == Mode::Files => {
+            let count = app.unsent_file_count();
+            let files = if count == 1 { "file" } else { "files" };
+            match &app.save_error {
+                Some(error) => format!(
+                    "Unsent notes in {count} {files}. The drafts cannot be saved: {error}. s send · d discard · esc back"
+                ),
+                None => format!("Unsent notes in {count} {files}. s send · k keep the drafts · d discard · esc back"),
+            }
+        }
         Confirm::Quit => match &app.save_error {
             Some(error) => {
                 format!("Unsent notes. The draft cannot be saved: {error}. s send · d discard · esc back")
@@ -460,7 +484,8 @@ fn row_spans(
 }
 
 fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
-    let block = Block::new().borders(borders).title(" Replies ");
+    let files = app.mode() == Mode::Files;
+    let block = Block::new().borders(borders).title(if files { " Files " } else { " Replies " });
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -479,7 +504,16 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
             let time = short_time(reply.at.as_deref(), &app.zone);
             let unsent = app.reviews.get(&reply.id).is_some_and(Review::has_unsent);
             let dot = if unsent { "●" } else { " " };
-            let text = format!("{marker} {:>2}{dot}{time} {}", index + 1, reply.first_line());
+            let text = if files {
+                let path = app.files.get(&reply.id).map_or_else(
+                    || reply.first_line().to_owned(),
+                    |file| file.relative.display().to_string(),
+                );
+                let count = app.reviews.get(&reply.id).map_or(0, |review| review.annotations.len());
+                format!("{marker} {:>2}{dot} {path} ({count})", index + 1)
+            } else {
+                format!("{marker} {:>2}{dot}{time} {}", index + 1, reply.first_line())
+            };
             let style = if index == app.panel_index && app.focus == Focus::Panel {
                 Style::new().add_modifier(Modifier::REVERSED)
             } else if index == app.selected {
