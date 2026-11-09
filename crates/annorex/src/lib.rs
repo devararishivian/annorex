@@ -11,6 +11,7 @@ pub mod layout;
 pub mod open;
 pub mod payload;
 pub mod replies;
+pub mod review;
 pub mod rex;
 pub mod safety;
 pub mod tui;
