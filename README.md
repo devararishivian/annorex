@@ -3,18 +3,23 @@
 Annorex is a review tool for coding agents in the [Rex](https://www.superlogical.com/rex) terminal. You annotate the
 text that an agent wrote. Then Annorex sends your notes back to the agent.
 
-> **Status: annotate and send available.** Annorex shows the replies of an agent in a pane next to it. You can
-> annotate a reply and send the notes back to the agent. The commands `annorex probe` and `annorex deliver` work. The
-> review of files is not available yet. The "Planned features" section describes it.
+> **Status: review of replies and of many files available.** Annorex shows the replies of an agent in a pane next to
+> it. It also shows the files in the work directory of the agent. You can annotate both and send the notes back to the
+> agent in one message. The commands `annorex probe` and `annorex deliver` work.
 
 ## Available now
 
 - **The reply viewer.** A Rex action opens Annorex in a pane next to the agent. Annorex shows the newest reply of the
   agent as formatted Markdown. You can select one of the 25 newest replies. The layout follows the size of the pane.
-- **Annotations.** Select text in a reply. Add a comment, mark the text for removal, or give a replacement.
+- **The file viewer.** A second Rex action opens the files of the work directory of the agent. A tree and a fuzzy find
+  help you to open files. You can open many files and annotate each one.
+- **Annotations.** Select text in a reply or in a file. Add a comment, mark the text for removal, or give a replacement.
 - **Send, paste, and copy.** Annorex exports your notes as Markdown. It sends them to the agent, pastes them without
-  Enter, or copies them.
+  Enter, or copies them. A send gives only the notes that Annorex did not send before. The notes of all open files go
+  in one message.
 - **Drafts.** Annorex saves your notes to disk after each change.
+- **Change banner.** When the agent changes an open file, a banner shows. Press `r` to read the file again. Your notes
+  move to their text.
 - `annorex probe` shows the agent in a pane, its state, and whether Annorex can send to it.
 - `annorex deliver` sends text from standard input to the agent in a pane. It removes escape characters and control
   characters, pastes the text as one bracketed paste, and presses Enter.
@@ -35,6 +40,7 @@ Use `--dir DIR` to write the module to a different directory. Then add these lin
 ```lua
 require("annorex").setup{}
 rex.bind("cmd+shift+a", "annorex_last")
+rex.bind("cmd+shift+f", "annorex_files")
 ```
 
 Run `rex config reload`. If Rex cannot find `annorex` on its `PATH`, give the path of the binary:
@@ -103,8 +109,12 @@ with certainty, it shows the sessions, newest first. Select one with `enter`.
 3. Press `S` to send. The header shows `[Send N ▸]`, with N the number of annotations. After a send, it shows
    `[Sent HH:MM]`.
 
-The export is Markdown. It starts with `# Annotations on last reply`. Each annotation has a number, the line numbers,
-the quoted source text, and your note as a quote.
+The export is Markdown. It starts with `# Annotations on last reply`. For an older reply, the name is
+`earlier reply (HH:MM)` in your local time. Each annotation has a number, the line numbers, the quoted source text, and
+your note as a quote.
+
+A send gives only the notes that Annorex did not send before. After you change a sent note, it counts as new. `Y`
+always copies all notes.
 
 `S` refuses to send when the agent shows a dialog, such as a permission prompt. Your notes stay in the draft. If the
 agent opens a dialog after the paste, Annorex does not press Enter. Answer the dialog, then press Enter in the agent
@@ -112,11 +122,61 @@ pane. When the agent is busy, Claude Code queues the message. Pi and OpenCode us
 
 `Y` copies the notes with an OSC 52 sequence and with `pbcopy`. If only the OSC 52 part works, the footer says so.
 
-`q` with unsent notes asks what to do: send (`s`), keep the draft (`k`), discard (`d`), or go back (`esc`).
+`q` and `ctrl+c` with unsent notes ask what to do: send (`s`), keep the draft (`k`), discard (`d`), or go back
+(`esc`).
+
+### Review files
+
+Focus the pane of Claude Code, Pi, or OpenCode. Press the key that you bound, or run "Annorex: review files" from the
+command palette. The action `annorex_files` opens the file viewer next to the agent pane. If the viewer is already open
+for that pane, the action focuses it. The root is the work directory of the agent process.
+
+The viewer starts with the file tree. Open a file with `enter`. Annorex shows a Markdown file (`.md` or `.markdown`) as
+Markdown. It shows all other files as plain text with line numbers. It shows the text of a file with control characters
+removed.
+
+You can open up to 50 files. Each file has its own annotations and its own draft. The keys of the reply viewer work in
+a file too. These keys are new:
+
+| Key        | Function                                                                         |
+|------------|----------------------------------------------------------------------------------|
+| `T`        | Open or close the file tree                                                      |
+| `ctrl+p`   | Open the fuzzy find of files                                                     |
+| `p`        | Open or close the list of open files (`●` marks a file with unsent notes)        |
+| `[` / `]`  | Show the previous or the next open file                                          |
+| `W`        | Close the file on the screen (asks first when it has unsent notes)               |
+| `r`        | Read the file again                                                              |
+
+In the tree, `j` and `k` move, `l` and `h` open and close a directory, `enter` opens a file or a directory, and `/`
+starts a filter. In the fuzzy find, type to filter by path, move with the arrows or with `ctrl+n` and `ctrl+p`, and
+press `enter` to open the file. A `●` marks a file with a saved draft that has unsent notes.
+
+The tree obeys `.gitignore`, also outside a git repository. It skips hidden files and the `.git` directory. It does not
+follow links. Annorex refuses a file that is outside the work directory, also through a link.
+
+Annorex looks at the open files every 2 seconds. When a file changes on disk, a banner shows
+`<path> changed on disk. Press r to read it again.` The list marks the file with `≠`. Press `r`. The text is new, and
+each note moves to its quoted text. If the text is gone, the note stays and the export says `text not found`. When the
+agent deletes a file, the banner says `<path> was deleted. Your notes are kept.` and the text stays.
+
+One send gives the general notes and the annotations of all open files in one message. It has one section
+`# Annotations on PATH` for each file, in the order in which you opened the files. If you press `q` with unsent notes in
+more than one file, the question counts the files.
+
+You can give files at the start. The paths are relative to the work directory:
+
+```sh
+annorex files --target block:... README.md docs/guide.md
+annorex rex open files --target block:... --placement right README.md
+```
+
+Limits: Annorex does not open a file larger than 1 MiB or a file with a NUL byte in its first 8192 bytes. The tree
+shows the first 20,000 entries and says so when there are more. If you open more than 50 files, Annorex asks you to
+close one first.
 
 ### Drafts
 
-Annorex saves one draft for each reply in `$XDG_STATE_HOME/annorex/drafts`. The default is
+Annorex saves one draft for each reply and for each file in `$XDG_STATE_HOME/annorex/drafts`. The default is
 `~/.local/state/annorex/drafts`. The directory has mode `0700` and the files have mode `0600`. The draft keeps the open
 editor, so a restart does not lose half a note. If a draft file is unreadable, Annorex keeps it and shows a message.
 
@@ -148,10 +208,13 @@ printf 'Fix the test in parser.rs.\n' | annorex deliver --target block:...
 printf 'Fix the test in parser.rs.\n' | annorex deliver --target block:... --paste-only
 annorex last --target block:...
 annorex rex open last --target block:... --placement right
+annorex files --target block:... [PATH...]
+annorex rex open files --target block:... [PATH...]
 ```
 
 `annorex last` runs the viewer in the current terminal. `annorex rex open last` opens a pane with the viewer, as the
-action does. It prints the block ID of the viewer as JSON.
+action does. It prints the block ID of the viewer as JSON. `annorex files` and `annorex rex open files` do the same for
+the file viewer.
 
 `annorex deliver` refuses to send when:
 
@@ -178,13 +241,9 @@ Exit codes:
 
 - Claude Code asks whether to trust a folder when it starts in a new folder. Claude Code does not report this dialog to
   Rex. Annorex cannot see it. Do not send while this dialog is open.
-- The reply list shows the time of each reply in UTC.
 - If the input box of the agent has text when you send, the notes join that text. Annorex cannot see the input box.
-- The hints in the footer do not follow keys that you rebind.
-
-## Planned features
-
-- **Review files.** You can open one or more files that the agent wrote. Annorex sends all notes in one message.
+- Annorex shows a change of a file only when the size or the time of the last change differs. A change that keeps
+  both is not seen.
 
 Supported agents: **Claude Code**, **Pi**, and **OpenCode**, in Rex on macOS.
 
@@ -192,8 +251,8 @@ Supported agents: **Claude Code**, **Pi**, and **OpenCode**, in Rex on macOS.
 
 Rex does not have a plugin system. Rex has custom actions in its Lua configuration file. Annorex has two parts:
 
-1. A small Lua module. The module adds the action "review the last reply" to the Rex command palette. The action
-   "review files" is planned.
+1. A small Lua module. The module adds the actions "review the last reply" and "review files" to the Rex command
+   palette.
 2. A Rust program. The program runs in the pane that the action opens.
 
 For more information, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
