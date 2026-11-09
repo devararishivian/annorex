@@ -27,6 +27,9 @@ pub struct Annotation {
     pub label: Option<String>,
     /// True when the quote no longer stands at `range` in the document.
     pub detached: bool,
+    /// When a send or a paste took this annotation. A change of the annotation clears it.
+    #[serde(default)]
+    pub sent_at: Option<String>,
 }
 
 impl Annotation {
@@ -71,13 +74,38 @@ impl Review {
             replacement: (kind == Kind::Replace).then(String::new),
             label: None,
             detached: false,
+            sent_at: None,
         });
         id
     }
 
     /// Change one annotation. Returns false when there is no such id.
+    /// A changed annotation counts as unsent again.
     pub fn update(&mut self, id: u64, edit: impl FnOnce(&mut Annotation)) -> bool {
-        self.annotations.iter_mut().find(|a| a.id == id).map(edit).is_some()
+        self.annotations
+            .iter_mut()
+            .find(|a| a.id == id)
+            .map(|annotation| {
+                edit(annotation);
+                annotation.sent_at = None;
+            })
+            .is_some()
+    }
+
+    /// The annotations that no send or paste took yet, in document order.
+    pub fn unsent(&self) -> Vec<&Annotation> {
+        self.in_order().into_iter().filter(|a| a.sent_at.is_none()).collect()
+    }
+
+    pub fn has_unsent(&self) -> bool {
+        self.annotations.iter().any(|a| a.sent_at.is_none())
+    }
+
+    /// A send or a paste took every annotation that it did not take before.
+    pub fn mark_sent(&mut self, at: &str) {
+        for annotation in self.annotations.iter_mut().filter(|a| a.sent_at.is_none()) {
+            annotation.sent_at = Some(at.to_owned());
+        }
     }
 
     pub fn remove(&mut self, id: u64) -> Option<Annotation> {

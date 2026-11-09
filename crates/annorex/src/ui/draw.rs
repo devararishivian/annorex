@@ -14,7 +14,7 @@ use crate::agent::Agent;
 use crate::doc::{DocSpan, SpanStyle};
 use crate::layout::{Layout, compute};
 use crate::replies::Candidate;
-use crate::review::Kind;
+use crate::review::{Kind, Review};
 use crate::safety::Safety;
 use crate::wrap::{VisualLine, fit, gutter_width};
 
@@ -187,8 +187,16 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
             let number = app.review().and_then(|review| review.in_order().iter().position(|a| a.id == id));
             format!("Delete annotation {}? y/n", number.map_or(0, |index| index + 1))
         }
+        Confirm::Discard if app.review().is_none_or(Review::is_empty) => {
+            "Remove the draft file that Annorex cannot read? y/n".to_owned()
+        }
         Confirm::Discard => "Discard the notes of this reply? y/n".to_owned(),
-        Confirm::Quit => "Unsent notes. s send · k keep the draft · d discard · esc back".to_owned(),
+        Confirm::Quit => match &app.save_error {
+            Some(error) => {
+                format!("Unsent notes. The draft cannot be saved: {error}. s send · d discard · esc back")
+            }
+            None => "Unsent notes. s send · k keep the draft · d discard · esc back".to_owned(),
+        },
     });
     let message = prompt
         .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")))
@@ -413,8 +421,7 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         .map(|(index, reply)| {
             let marker = if index == app.selected { "▸" } else { " " };
             let time = short_time(reply.at.as_deref(), &app.zone);
-            let unsent = app.reviews.get(&reply.id).is_some_and(|review| !review.is_empty())
-                && !app.sent.contains_key(&reply.id);
+            let unsent = app.reviews.get(&reply.id).is_some_and(Review::has_unsent);
             let dot = if unsent { "●" } else { " " };
             let text = format!("{marker} {:>2}{dot}{time} {}", index + 1, reply.first_line());
             let style = if index == app.panel_index && app.focus == Focus::Panel {
@@ -445,7 +452,7 @@ fn draw_annotation_list(frame: &mut Frame, app: &App, area: Rect, borders: Borde
     if inner.width == 0 || inner.height == 0 {
         return;
     }
-    let items = app.review().map(crate::review::Review::in_order).unwrap_or_default();
+    let items = app.review().map(Review::in_order).unwrap_or_default();
     if items.is_empty() {
         frame.render_widget(Paragraph::new(fit("no annotations yet", inner.width)), inner);
         return;

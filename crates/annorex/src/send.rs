@@ -67,9 +67,10 @@ pub fn apply_result(app: &mut App, result: SendResult, now: &str) -> bool {
             true
         }
         SendResult::Held(message) => {
+            // The notes are in the input box of the agent. Stay open so the message shows.
             app.finish_send(now.to_owned());
             app.set_status(message);
-            app.quit_if_pending();
+            app.cancel_pending_quit();
             true
         }
         SendResult::Nothing => {

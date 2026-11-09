@@ -628,3 +628,94 @@ fn a_paste_outside_the_editor_does_nothing() {
     assert_eq!(app.handle_paste("S\nX\ny"), Effect::None);
     assert_eq!(app.review().expect("review").annotations.len(), 1);
 }
+
+fn idle() -> Safety {
+    Safety::Clear { state: Some("idle".to_owned()) }
+}
+
+#[test]
+fn export_skips_sent_annotations_and_a_change_makes_one_unsent() {
+    let mut app = annotated(Agent::ClaudeCode, idle());
+    app.finish_send("2026-11-09T11:00:00Z".to_owned());
+    assert!(app.export().is_empty(), "everything was sent");
+    press(&mut app, "cother\n");
+    let export = app.export();
+    assert!(export.contains("> other") && !export.contains("> note"), "{export}");
+    let all = app.export_all();
+    assert!(all.contains("> other") && all.contains("> note"), "{all}");
+    press(&mut app, "ae more\n");
+    let export = app.export();
+    assert!(export.contains("> note more"), "an edit makes the annotation unsent again:\n{export}");
+}
+
+#[test]
+fn send_with_all_sent_says_nothing_new() {
+    let mut app = annotated(Agent::ClaudeCode, idle());
+    app.finish_send("2026-11-09T11:00:00Z".to_owned());
+    let effect = press_key(&mut app, KeyCode::Char('S'), KeyModifiers::SHIFT);
+    assert_eq!(effect, Effect::None);
+    assert_eq!(app.status(), Some("Nothing new to send. Press Y to copy all notes."));
+}
+
+#[test]
+fn older_reply_has_its_own_name_in_the_export() {
+    let mut app = three_replies();
+    press(&mut app, "cmine\n");
+    assert!(app.export().starts_with("# Annotations on last reply"), "{}", app.export());
+    press(&mut app, "pj");
+    press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    press(&mut app, "cold\n");
+    assert!(app.export().contains("# Annotations on earlier reply (10:30)"), "{}", app.export());
+}
+
+#[test]
+fn unreadable_draft_is_named_in_the_quit_question() {
+    let mut app = annotated(Agent::ClaudeCode, idle());
+    app.set_save_error(Some("the draft x.json cannot be read".to_owned()));
+    press(&mut app, "q");
+    let screen = render(&mut app, 120, 12);
+    assert!(screen.contains("The draft cannot be saved: the draft x.json cannot be read"), "{screen}");
+    assert!(!screen.contains("k keep the draft"), "{screen}");
+    assert_eq!(press_key(&mut app, KeyCode::Char('k'), KeyModifiers::NONE), Effect::None, "k does nothing");
+    assert_eq!(press_key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE), Effect::Discard);
+}
+
+#[test]
+fn x_removes_an_unreadable_draft_of_an_empty_review() {
+    let mut app = app("alpha beta\n");
+    app.set_save_error(Some("the draft x.json cannot be read".to_owned()));
+    press(&mut app, "X");
+    assert!(render(&mut app, 120, 12).contains("Remove the draft file that Annorex cannot read? y/n"));
+    assert_eq!(press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE), Effect::Discard);
+}
+
+#[test]
+fn held_enter_in_the_quit_flow_stays_open() {
+    use annorex::deliver::DeliveryMode;
+    use annorex::send::{SendResult, apply_result};
+    let mut app = annotated(Agent::ClaudeCode, idle());
+    press(&mut app, "q");
+    assert_eq!(press_key(&mut app, KeyCode::Char('s'), KeyModifiers::NONE), Effect::Send(DeliveryMode::Send));
+    apply_result(
+        &mut app,
+        SendResult::Held("Pasted, but Enter was held: press Enter in the agent pane.".to_owned()),
+        "t",
+    );
+    assert!(!app.should_exit(), "the viewer stays so the message shows");
+    assert!(app.status().is_some_and(|text| text.contains("Enter was held")));
+}
+
+#[test]
+fn ctrl_c_asks_once() {
+    let mut app = annotated(Agent::ClaudeCode, idle());
+    let ctrl_c = |app: &mut App| press_key(app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert_eq!(ctrl_c(&mut app), Effect::None);
+    assert!(render(&mut app, 120, 12).contains("Unsent notes."));
+    assert_eq!(ctrl_c(&mut app), Effect::Quit);
+    let mut editing = annotated(Agent::ClaudeCode, idle());
+    press(&mut editing, "cabc");
+    assert_eq!(press_key(&mut editing, KeyCode::Char('c'), KeyModifiers::CONTROL), Effect::SaveDraft);
+    assert!(editing.editor().is_none(), "ctrl+c closes the editor first");
+    let mut clean = app_with("alpha\n", &Config::default());
+    assert_eq!(press_key(&mut clean, KeyCode::Char('c'), KeyModifiers::CONTROL), Effect::Quit);
+}

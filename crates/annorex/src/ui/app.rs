@@ -384,6 +384,9 @@ impl App {
     /// Record a send or a paste of the reply on the screen.
     pub fn mark_sent(&mut self, at: String) {
         if let Some(id) = self.shown_id.clone() {
+            if let Some(review) = self.reviews.get_mut(&id) {
+                review.mark_sent(&at);
+            }
             self.sent.insert(id, at);
         }
     }
@@ -403,10 +406,7 @@ impl App {
         self.replies
             .iter()
             .enumerate()
-            .filter(|(_, reply)| {
-                self.reviews.get(&reply.id).is_some_and(|review| !review.is_empty())
-                    && !self.sent.contains_key(&reply.id)
-            })
+            .filter(|(_, reply)| self.reviews.get(&reply.id).is_some_and(Review::has_unsent))
             .map(|(index, _)| index + 1)
             .collect()
     }
@@ -426,7 +426,18 @@ impl App {
             return Effect::None;
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            return Effect::Quit;
+            // Like `q`: an open editor closes first, the first press asks about unsent notes, the
+            // second press quits. The draft stays on disk.
+            if self.editor.is_some() {
+                self.editor = None;
+                self.editing_id = None;
+                return Effect::SaveDraft;
+            }
+            if self.confirm == Some(Confirm::Quit) {
+                return Effect::Quit;
+            }
+            self.confirm = None;
+            return self.request_quit();
         }
         self.status = None;
         if self.editor.is_some() {
@@ -520,7 +531,10 @@ impl App {
                 Some(Action::Paste) => return self.request_send(DeliveryMode::PasteOnly),
                 Some(Action::SendWithNote) => return self.begin_note(),
                 Some(Action::Copy) => return Effect::Copy,
-                Some(Action::Discard) if self.review().is_some_and(|review| !review.is_empty()) => {
+                Some(Action::Discard)
+                    if self.review().is_some_and(|review| !review.is_empty())
+                        || self.save_error.is_some() =>
+                {
                     self.confirm = Some(Confirm::Discard);
                 }
                 _ => {}
@@ -640,7 +654,8 @@ impl App {
                     }
                     effect
                 }
-                KeyCode::Char('k') => {
+                // With an unreadable draft the notes are not on disk, so "keep" would be false.
+                KeyCode::Char('k') if self.save_error.is_none() => {
                     self.confirm = None;
                     Effect::Quit
                 }
@@ -684,14 +699,14 @@ impl App {
         }
         self.selection = None;
         self.annotation_index = 0;
+        self.save_error = None;
         Effect::Discard
     }
 
     /// `q`: quit, but ask first when the reply on the screen has notes that no send covered.
     fn request_quit(&mut self) -> Effect {
-        let unsent = self.shown_id.as_ref().is_some_and(|id| {
-            self.reviews.get(id).is_some_and(|review| !review.is_empty()) && !self.sent.contains_key(id)
-        });
+        let unsent =
+            self.shown_id.as_ref().is_some_and(|id| self.reviews.get(id).is_some_and(Review::has_unsent));
         if unsent {
             self.confirm = Some(Confirm::Quit);
             Effect::None
@@ -703,7 +718,7 @@ impl App {
     /// `S` and `P`: send or paste the export, when there is something to send.
     fn request_send(&mut self, mode: DeliveryMode) -> Effect {
         if self.export().is_empty() {
-            self.status = Some("Nothing to send: no annotations yet.".to_owned());
+            self.status = Some(self.nothing_to_send());
             return Effect::None;
         }
         Effect::Send(mode)
@@ -718,23 +733,58 @@ impl App {
         Effect::SaveDraft
     }
 
+    /// Why there is nothing to send.
+    fn nothing_to_send(&self) -> String {
+        if self.review().is_some_and(|review| !review.is_empty()) {
+            "Nothing new to send. Press Y to copy all notes.".to_owned()
+        } else {
+            "Nothing to send: no annotations yet.".to_owned()
+        }
+    }
+
     /// The number of annotations of the reply on the screen.
     pub fn annotation_count(&self) -> usize {
         self.review().map_or(0, |review| review.annotations.len())
     }
 
-    /// The Markdown for the agent: the general note, then the annotations. Empty when there is
-    /// nothing to send.
+    /// The Markdown that a send gives the agent: the general note, then the annotations that no
+    /// send took yet. Empty when there is nothing to send.
     pub fn export(&self) -> String {
+        self.export_of(false)
+    }
+
+    /// The Markdown of all annotations, also the ones that a send took. `Y` copies this.
+    pub fn export_all(&self) -> String {
+        self.export_of(true)
+    }
+
+    fn export_of(&self, all: bool) -> String {
         let Some(review) = self.review() else { return String::new() };
         let line_of = |offset: usize| self.doc.line_of(offset);
+        let name = self.export_name();
         let section = Section {
-            name: "last reply",
+            name: &name,
             source: &self.doc.source,
             line_of: &line_of,
-            annotations: review.in_order(),
+            annotations: if all { review.in_order() } else { review.unsent() },
         };
         crate::review::export(&review.note, &[section])
+    }
+
+    /// `last reply` for the newest reply, else `earlier reply (HH:MM)` in the local time.
+    pub fn export_name(&self) -> String {
+        let (position, _) = self.reply_position();
+        let time = self
+            .replies
+            .get(position)
+            .and_then(|reply| reply.at.as_deref())
+            .and_then(|at| at.parse::<jiff::Timestamp>().ok())
+            .map(|time| time.to_zoned(self.zone.clone()).strftime("%H:%M").to_string());
+        match (position, time) {
+            (0, _) => "last reply".to_owned(),
+            (_, Some(time)) => format!("earlier reply ({time})"),
+            (_, None) => "earlier reply".to_owned(),
+        }
     }
 
     /// The reply counts as sent at `at`, and the general note is used up.
@@ -742,6 +792,7 @@ impl App {
         if let Some(id) = self.shown_id.clone() {
             if let Some(review) = self.reviews.get_mut(&id) {
                 review.note.clear();
+                review.mark_sent(&at);
             }
             self.sent.insert(id, at);
         }
@@ -871,7 +922,7 @@ impl App {
         editor.text.trim().clone_into(&mut review.note);
         self.sent.remove(&reply);
         if self.export().is_empty() {
-            self.status = Some("Nothing to send: no annotations yet.".to_owned());
+            self.status = Some(self.nothing_to_send());
             return Effect::SaveDraft;
         }
         Effect::SendWithNote

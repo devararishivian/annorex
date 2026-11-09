@@ -113,7 +113,7 @@ impl<W: Write> Clipboard for SystemClipboard<W> {
 /// Copy the notes of the reply on the screen. The footer tells the result.
 pub fn copy_review(app: &mut App, clipboard: &mut impl Clipboard) {
     let count = app.annotation_count();
-    let text = app.export();
+    let text = app.export_all();
     if text.is_empty() {
         app.set_status("Nothing to copy: no annotations yet.".to_owned());
         return;

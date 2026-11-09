@@ -6,7 +6,7 @@
 use std::ffi::OsString;
 use std::io::Write;
 use std::ops::Range;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -130,6 +130,21 @@ fn safe(part: &str) -> String {
         .collect()
 }
 
+/// Makes the name of each temporary file different, also between threads of one process.
+static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The 32-bit FNV-1a hash of a text.
+fn fnv1a(text: &str) -> u32 {
+    text.bytes().fold(0x811c_9dc5, |hash, byte| (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193))
+}
+
+/// A part of a file name that no other part can give: the first 60 safe characters, a `-`, and
+/// 8 hexadecimal digits of the hash of the whole part.
+fn unique_part(part: &str) -> String {
+    let head: String = safe(part).chars().take(60).collect();
+    format!("{head}-{:08x}", fnv1a(part))
+}
+
 /// The draft files in one directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DraftStore {
@@ -139,6 +154,17 @@ pub struct DraftStore {
 impl DraftStore {
     /// The file of a draft.
     pub fn path(&self, key: &DraftKey) -> PathBuf {
+        let name = format!(
+            "{}-{}-{}.json",
+            key.agent.status_app(),
+            unique_part(&key.session),
+            unique_part(&key.document)
+        );
+        self.dir.join(name)
+    }
+
+    /// The file name of M2 and before. Two keys could share it. `load` and `discard` still use it.
+    fn legacy_path(&self, key: &DraftKey) -> PathBuf {
         let name = format!("{}-{}-{}.json", key.agent.status_app(), safe(&key.session), safe(&key.document));
         self.dir.join(name)
     }
@@ -161,13 +187,15 @@ impl DraftStore {
     pub fn load(&self, key: &DraftKey) -> Result<Option<Draft>, DraftError> {
         let path = self.path(key);
         match Self::read(&path)? {
-            Some(draft) if draft.key == *key => Ok(Some(draft)),
-            Some(_) => Err(DraftError::Unreadable { path }),
-            None => Ok(None),
+            Some(draft) if draft.key == *key => return Ok(Some(draft)),
+            Some(_) => return Err(DraftError::Unreadable { path }),
+            None => {}
         }
+        // A file with the old name belongs to this key only when it holds this key.
+        Ok(Self::read(&self.legacy_path(key)).ok().flatten().filter(|draft| draft.key == *key))
     }
 
-    /// Write the draft to `<file>.tmp`, then rename it over the file. Refuses to write over a
+    /// Write the draft to a private `<file>.<pid>.<n>.tmp`, then rename it over the file. Refuses to write over a
     /// file that `load` cannot read.
     pub fn save(&self, draft: &Draft) -> Result<(), DraftError> {
         self.load(&draft.key)?;
@@ -177,9 +205,11 @@ impl DraftStore {
             move |source| DraftError::Io { path, source }
         };
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&self.dir).map_err(io(&self.dir))?;
+        std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o700)).map_err(io(&self.dir))?;
         let bytes = serde_json::to_vec_pretty(&FileOut { version: VERSION, draft })
             .map_err(|error| DraftError::Io { path: path.clone(), source: error.into() })?;
-        let tmp = path.with_extension("json.tmp");
+        let unique = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_extension(format!("json.{}.{unique}.tmp", std::process::id()));
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -187,7 +217,7 @@ impl DraftStore {
             .mode(0o600)
             .open(&tmp)
             .map_err(io(&tmp))?;
-        file.write_all(&bytes).and_then(|()| file.sync_all()).map_err(io(&tmp))?;
+        file.write_all(&bytes).map_err(io(&tmp))?;
         std::fs::rename(&tmp, &path).map_err(io(&path))
     }
 
@@ -195,6 +225,9 @@ impl DraftStore {
     /// be read: it is the way out of that state.
     pub fn discard(&self, key: &DraftKey) -> Result<(), DraftError> {
         let path = self.path(key);
+        if Self::read(&self.legacy_path(key)).ok().flatten().is_some_and(|draft| draft.key == *key) {
+            let _ = std::fs::remove_file(self.legacy_path(key));
+        }
         match std::fs::remove_file(&path) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
                 Err(DraftError::Io { path, source: error })
@@ -227,7 +260,6 @@ impl DraftStore {
 #[allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
     use std::ffi::OsString;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     use super::*;
@@ -252,6 +284,76 @@ mod tests {
         let dir = tempfile::tempdir().expect("dir");
         let store = DraftStore { dir: dir.path().join("drafts") };
         (dir, store)
+    }
+
+    fn long_key(session: &str, document: &str) -> DraftKey {
+        DraftKey { agent: Agent::ClaudeCode, session: session.to_owned(), document: document.to_owned() }
+    }
+
+    #[test]
+    fn similar_keys_get_different_draft_files() {
+        let (_dir, store) = store();
+        let long = "a".repeat(100);
+        let keys = [
+            long_key("s1-b", "x"),
+            long_key("s1", "b-x"),
+            long_key("s", &format!("file:{long}1")),
+            long_key("s", &format!("file:{long}2")),
+        ];
+        let names: std::collections::HashSet<PathBuf> = keys.iter().map(|key| store.path(key)).collect();
+        assert_eq!(names.len(), 4, "{names:?}");
+        for key in &keys {
+            let name = store.path(key).file_name().expect("name").to_string_lossy().into_owned();
+            assert!(
+                name.len() < 220 && name.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn old_file_name_still_loads() {
+        let (_dir, store) = store();
+        let draft = draft_with_comment("r1", "alpha beta gamma\n");
+        store.save(&draft).expect("save");
+        let old = store.dir.join("claude-code-s1-r1.json");
+        std::fs::rename(store.path(&draft.key), &old).expect("rename to the old name");
+        assert_eq!(store.load(&draft.key).expect("load"), Some(draft.clone()));
+        store.discard(&draft.key).expect("discard");
+        assert!(!old.exists());
+    }
+
+    #[test]
+    fn save_uses_a_private_temp_name_and_fixes_the_directory_mode() {
+        let dir = tempfile::tempdir().expect("dir");
+        let drafts = dir.path().join("drafts");
+        std::fs::create_dir(&drafts).expect("dir");
+        std::fs::set_permissions(&drafts, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let store = DraftStore { dir: drafts.clone() };
+        store.save(&draft_with_comment("r1", "alpha beta gamma\n")).expect("save");
+        assert_eq!(std::fs::metadata(&drafts).expect("meta").permissions().mode() & 0o777, 0o700);
+        let threads: Vec<_> = (0..2)
+            .map(|n| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    for i in 0..50 {
+                        let mut draft = draft_with_comment("r1", "alpha beta gamma\n");
+                        draft.name = format!("writer {n} save {i} {}", "x".repeat(2000));
+                        store.save(&draft).expect("save");
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("thread");
+        }
+        assert!(store.load(&key("r1")).expect("valid JSON after the race").is_some());
+        let left: Vec<_> = std::fs::read_dir(&drafts)
+            .expect("dir")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "tmp"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]
@@ -293,10 +395,12 @@ mod tests {
         };
         let (_dir, store) = store();
         let name = store.path(&key).file_name().expect("name").to_string_lossy().into_owned();
-        assert_eq!(name, "opencode-a_b-my_file_name.md.json");
+        assert!(name.starts_with("opencode-a_b-") && name.contains("-my_file_name.md-"), "{name}");
+        assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)), "{name}");
         let long = DraftKey { document: "x".repeat(200), ..key };
         let name = store.path(&long).file_name().expect("name").to_string_lossy().into_owned();
-        assert_eq!(name, format!("opencode-a_b-{}.json", "x".repeat(80)));
+        assert!(name.contains(&format!("-{}-", "x".repeat(60))), "{name}");
+        assert!(!name.contains(&"x".repeat(61)), "{name}");
         assert!(store.path(&long).starts_with(&store.dir));
     }
 
@@ -344,7 +448,8 @@ mod tests {
             .expect("dir")
             .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, ["claude-code-s1-r1.json"]);
+        let expected = store.path(&draft.key).file_name().expect("name").to_string_lossy().into_owned();
+        assert_eq!(names, [expected]);
     }
 
     #[test]
