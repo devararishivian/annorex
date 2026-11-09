@@ -13,7 +13,8 @@ pub const TERMINAL_FLAVOR: &str = "com.superlogical.terminal.shell";
 pub const SIDE_BY_SIDE_COLUMNS: u16 = 160;
 
 /// Where the viewer opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Placement {
     /// Next to the agent when the agent pane has 160 columns or more, else below.
     #[default]

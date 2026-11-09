@@ -97,7 +97,7 @@ fn dialog_text(kind: Option<&str>, msg: Option<&str>) -> String {
 
 /// Deliver `payload` to the agent in `block`.
 ///
-/// The order is: process, status, modes, status again, paste, wait [`ENTER_DELAY`], status a
+/// The order is: process, status, modes, status again, paste, wait `enter_delay`, status a
 /// third time, Enter. Nothing is written when there is no agent, when the agent shows a dialog
 /// at the first two checks, or when bracketed paste is off. When the paste fails, or a dialog
 /// opens after the paste, Enter is not pressed. Delivery never tries again.
@@ -107,6 +107,7 @@ pub fn deliver(
     block: &str,
     payload: &str,
     mode: DeliveryMode,
+    enter_delay: Duration,
 ) -> Result<Outcome, DeliverError> {
     if sanitize(payload).trim().is_empty() {
         return Err(DeliverError::EmptyPayload);
@@ -126,7 +127,7 @@ pub fn deliver(
     if mode == DeliveryMode::PasteOnly {
         return Ok(Outcome::Pasted);
     }
-    sleeper.sleep(ENTER_DELAY);
+    sleeper.sleep(enter_delay);
     // A dialog can open during the wait. Enter would answer it, so check again.
     if let Safety::Blocked { kind, msg } = check(&api.program_status(block)?) {
         return Err(DeliverError::EnterWithheld { kind, msg });
@@ -252,9 +253,19 @@ mod tests {
     const BLOCK: &str = "block:b1";
 
     #[test]
+    fn enter_delay_comes_from_the_caller() {
+        let fake = Fake::new(&[]);
+        let delay = Duration::from_millis(120);
+        deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, delay).expect("sent");
+        assert!(fake.calls().contains(&Call::Sleep(delay)), "{:?}", fake.calls());
+        assert!(!fake.calls().contains(&Call::Sleep(ENTER_DELAY)));
+    }
+
+    #[test]
     fn send_happy_path_order() {
         let fake = Fake::new(&[Some("idle"), Some("idle"), Some("idle")]);
-        let outcome = deliver(&fake, &fake, BLOCK, "hello\r\nworld", DeliveryMode::Send).expect("sent");
+        let outcome =
+            deliver(&fake, &fake, BLOCK, "hello\r\nworld", DeliveryMode::Send, ENTER_DELAY).expect("sent");
         assert_eq!(outcome, Outcome::Sent);
         assert_eq!(
             fake.calls(),
@@ -274,7 +285,10 @@ mod tests {
     #[test]
     fn sends_while_working() {
         let fake = Fake::new(&[Some("working"), Some("working"), Some("working")]);
-        assert_eq!(deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send).expect("sent"), Outcome::Sent);
+        assert_eq!(
+            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY).expect("sent"),
+            Outcome::Sent
+        );
         assert_eq!(fake.writes().len(), 2);
     }
 
@@ -282,7 +296,7 @@ mod tests {
     fn paste_only_never_presses_enter() {
         let fake = Fake::new(&[Some("idle"), Some("idle")]);
         assert_eq!(
-            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::PasteOnly).expect("pasted"),
+            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::PasteOnly, ENTER_DELAY).expect("pasted"),
             Outcome::Pasted
         );
         assert_eq!(fake.writes(), ["\x1b[200~note\x1b[201~"]);
@@ -292,7 +306,7 @@ mod tests {
     #[test]
     fn refuses_when_blocked() {
         let fake = Fake::new(&[Some("blocked"), Some("blocked")]);
-        match deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send) {
+        match deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY) {
             Err(DeliverError::Blocked { kind, msg }) => {
                 assert_eq!(kind.as_deref(), Some("question"));
                 assert_eq!(msg.as_deref(), Some("answer: Pick a color."));
@@ -306,7 +320,7 @@ mod tests {
     fn refuses_when_dialog_opens_between_checks() {
         let fake = Fake::new(&[Some("working"), Some("blocked")]);
         assert!(matches!(
-            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send),
+            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY),
             Err(DeliverError::Blocked { .. })
         ));
         assert_eq!(fake.writes(), [] as [String; 0]);
@@ -315,7 +329,7 @@ mod tests {
     #[test]
     fn withholds_enter_when_dialog_opens_after_the_paste() {
         let fake = Fake::new(&[Some("working"), Some("working"), Some("blocked")]);
-        match deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send) {
+        match deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY) {
             Err(DeliverError::EnterWithheld { kind, .. }) => assert_eq!(kind.as_deref(), Some("question")),
             other => panic!("expected EnterWithheld, got {other:?}"),
         }
@@ -328,7 +342,7 @@ mod tests {
         let mut fake = Fake::new(&[Some("idle"), Some("idle")]);
         fake.paste_mode = false;
         assert!(matches!(
-            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send),
+            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY),
             Err(DeliverError::NoBracketedPaste)
         ));
         assert_eq!(fake.writes(), [] as [String; 0]);
@@ -339,7 +353,7 @@ mod tests {
         let mut fake = Fake::new(&[None, None]);
         fake.argv0 = Some("-zsh");
         assert!(matches!(
-            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send),
+            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY),
             Err(DeliverError::NoAgent)
         ));
         assert_eq!(fake.writes(), [] as [String; 0]);
@@ -350,7 +364,7 @@ mod tests {
         let fake = Fake::new(&[Some("idle"), Some("idle")]);
         for payload in ["", "\x1b\x07", " \n\t\r\n"] {
             assert!(matches!(
-                deliver(&fake, &fake, BLOCK, payload, DeliveryMode::Send),
+                deliver(&fake, &fake, BLOCK, payload, DeliveryMode::Send, ENTER_DELAY),
                 Err(DeliverError::EmptyPayload)
             ));
         }
@@ -362,7 +376,7 @@ mod tests {
         let mut fake = Fake::new(&[Some("idle"), Some("idle")]);
         fake.fail_first_write = true;
         assert!(matches!(
-            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send),
+            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY),
             Err(DeliverError::Rex(_))
         ));
         assert_eq!(fake.writes().len(), 1);

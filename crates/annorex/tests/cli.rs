@@ -119,3 +119,19 @@ fn help_lists_last_and_rex() {
     assert!(help.contains("last"), "{help}");
     assert!(help.contains("rex"), "{help}");
 }
+
+#[test]
+fn bad_config_exits_64() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::create_dir_all(dir.path().join("annorex")).expect("config dir");
+    std::fs::write(dir.path().join("annorex/config.toml"), "colour = 1\n").expect("config");
+    let home = dir.path().to_string_lossy().into_owned();
+    let env = [("XDG_CONFIG_HOME", home.as_str()), ("REX_SESSION", "session:x"), ("PATH", "")];
+    for args in
+        [&["deliver", "--target", "block:b1"][..], &["rex", "open", "last", "--target", "block:b1"][..]]
+    {
+        let output = annorex(args, &env, "hello");
+        assert_eq!(output.status.code(), Some(64), "{args:?}: {}", text(&output.stderr));
+        assert!(text(&output.stderr).contains("colour"), "{}", text(&output.stderr));
+    }
+}

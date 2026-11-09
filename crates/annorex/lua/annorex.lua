@@ -9,7 +9,7 @@
 --
 -- Options of setup{}:
 --   bin        The annorex binary. Default "annorex" (found on the PATH of the Rex server).
---   placement  "auto" (default), "right", or "below".
+--   placement  "auto", "right", or "below". Default: unset. Then config.toml decides, else "auto".
 --
 -- This module only starts `annorex rex open last`. The binary does all other work.
 
@@ -17,8 +17,10 @@ local M = {}
 
 M.options = {
   bin = "annorex",
-  placement = "auto",
 }
+
+-- The options that setup{} accepts.
+local KNOWN = { bin = true, placement = true }
 
 local function first_line(text)
   for line in (text or ""):gmatch("[^\n]+") do
@@ -34,12 +36,16 @@ end
 
 local function open_last(ctx)
   if ctx.block_id == nil or ctx.session_id == nil then fail("no focused pane") end
-  local result, err = rex.exec({
+  local argv = {
     M.options.bin, "rex", "open", "last",
     "--target", ctx.block_id,
     "--session", ctx.session_id,
-    "--placement", M.options.placement,
-  }, { timeout = 25 })
+  }
+  if M.options.placement then
+    table.insert(argv, "--placement")
+    table.insert(argv, M.options.placement)
+  end
+  local result, err = rex.exec(argv, { timeout = 25 })
   if result == nil then fail(err) end
   if not result.ok then
     local line = first_line(result.stderr) or first_line(result.stdout) or "annorex rex open failed"
@@ -51,7 +57,7 @@ end
 
 function M.setup(opts)
   for key, value in pairs(opts or {}) do
-    if M.options[key] ~= nil then
+    if KNOWN[key] then
       M.options[key] = value
     else
       rex.log("warn", "annorex: unknown option " .. tostring(key))

@@ -2,9 +2,11 @@
 
 pub mod agent;
 pub mod cli;
+pub mod config;
 pub mod deliver;
 pub mod doc;
 pub mod install;
+pub mod keys;
 pub mod layout;
 pub mod open;
 pub mod payload;

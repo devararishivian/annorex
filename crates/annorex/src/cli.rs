@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 
 use crate::agent::{Agent, BusyEffect, detect};
+use crate::config::{Config, resolve_placement};
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
 use crate::install::{InstallError, config_dir, install};
 use crate::open::{OpenError, Placement, open_last};
@@ -101,9 +102,9 @@ enum OpenView {
         /// The Rex session of the target. The default is `$REX_SESSION`.
         #[arg(long)]
         session: Option<String>,
-        /// Where the viewer opens.
-        #[arg(long, value_enum, default_value_t = Placement::Auto)]
-        placement: Placement,
+        /// Where the viewer opens. The default is the config file, else `auto`.
+        #[arg(long, value_enum)]
+        placement: Option<Placement>,
     },
 }
 
@@ -240,6 +241,11 @@ fn probe(
     Ok(EXIT_OK)
 }
 
+/// Load the config file. A bad file is a usage error (exit 64).
+fn load_config(env: &impl Fn(&str) -> Option<OsString>) -> Result<Config, Failure> {
+    Config::from_env(env).map_err(|error| Failure { code: EXIT_USAGE, message: error.to_string() })
+}
+
 fn send(
     env: &impl Fn(&str) -> Option<OsString>,
     target: &str,
@@ -258,8 +264,9 @@ fn send(
     if sanitize(&payload).trim().is_empty() {
         return Err(DeliverError::EmptyPayload.into());
     }
+    let config = load_config(env)?;
     let rex: Rex<SystemRunner> = Rex::discover_with(env, session)?;
-    let outcome = deliver(&rex, &RealSleeper, target, &payload, mode)?;
+    let outcome = deliver(&rex, &RealSleeper, target, &payload, mode, config.enter_delay)?;
     let word = match outcome {
         Outcome::Sent => "sent",
         Outcome::Pasted => "pasted",
@@ -338,9 +345,11 @@ fn rex_open_last(
     env: &impl Fn(&str) -> Option<OsString>,
     target: &str,
     session: Option<String>,
-    placement: Placement,
+    placement: Option<Placement>,
     out: &mut impl Write,
 ) -> Result<i32, Failure> {
+    let config = load_config(env)?;
+    let placement = resolve_placement(placement, config.placement);
     let rex = Rex::discover_with(env, session)?;
     let exe = std::env::current_exe().map_err(|error| Failure {
         code: EXIT_FAILURE,

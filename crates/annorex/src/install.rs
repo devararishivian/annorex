@@ -159,4 +159,17 @@ mod tests {
         assert!(code.clone().any(|line| line.contains("rex.action{")));
         assert!(MODULE_SOURCE.contains("\"rex\", \"open\", \"last\""));
     }
+
+    #[test]
+    fn module_passes_placement_only_when_set() {
+        let code: String = MODULE_SOURCE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let guard = code.find("if M.options.placement").expect("a guard for placement");
+        let flag = code.find("\"--placement\"").expect("the flag");
+        assert!(guard < flag, "the flag must come after the guard");
+        assert!(!code.contains("placement = \"auto\""), "the module must not set a default placement");
+    }
 }
