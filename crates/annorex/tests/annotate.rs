@@ -719,3 +719,85 @@ fn ctrl_c_asks_once() {
     let mut clean = app_with("alpha\n", &Config::default());
     assert_eq!(press_key(&mut clean, KeyCode::Char('c'), KeyModifiers::CONTROL), Effect::Quit);
 }
+
+#[test]
+fn cursor_is_visible_on_a_trailing_space() {
+    use ratatui::style::Modifier;
+    let text = format!("{} {}\n", "a".repeat(37), "b".repeat(10));
+    let mut app = app(&text);
+    press(&mut app, "0");
+    for _ in 0..37 {
+        press(&mut app, "l");
+    }
+    assert_eq!(app.cursor(), 37, "the cursor is on the space");
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).expect("terminal");
+    terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let reversed = (2..40u16)
+        .flat_map(|x| (1..4u16).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            buffer.cell((x, y)).expect("cell").style().add_modifier.contains(Modifier::REVERSED)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reversed, [(39, 1)], "the cursor shows on the trailing space");
+}
+
+#[test]
+fn reply_text_change_moves_annotations_and_the_editor_range() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "wvlllc");
+    press(&mut app, "x\n");
+    press(&mut app, "g0vllllcn");
+    assert!(app.editor().is_some());
+    let new = "intro line\n\nalpha beta\n";
+    app.set_replies(vec![reply("r1", new)]);
+    let beta = new.find("beta").expect("beta");
+    let first = &app.review().expect("review").annotations[0];
+    assert_eq!((first.range.clone(), first.detached), (beta..beta + 4, false), "the saved note moved");
+    press(&mut app, "\n");
+    let alpha = new.find("alpha").expect("alpha");
+    let second = &app.review().expect("review").annotations[1];
+    assert_eq!(second.range, alpha..alpha + 5, "the note under edit moved");
+    assert_eq!(second.quote, "alpha");
+}
+
+#[test]
+fn an_editor_on_lost_text_closes_with_a_message() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "vllllcn");
+    app.set_replies(vec![reply("r1", "totally different\n")]);
+    assert!(app.editor().is_none(), "the editor closed");
+    assert!(app.status().is_some_and(|text| text.contains("is gone")), "{:?}", app.status());
+}
+
+#[test]
+fn hints_follow_rebound_keys() {
+    let dir = tempfile::tempdir().expect("dir");
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[keys]\ncomment = \"y\"\nquit = \"Z\"\nreload = \"R\"\n").expect("config");
+    let config = Config::load(&file).expect("config");
+    let mut app = app_with("alpha beta\n", &config);
+    let screen = render(&mut app, 120, 12);
+    let footer = screen.lines().last().expect("footer").to_owned();
+    assert!(footer.contains("y/d/s annotate") && footer.contains("Z quit"), "{footer}");
+    assert!(!footer.contains("c/d/s") && !footer.contains(" q quit"), "{footer}");
+    let mut error =
+        App::new(state_of(Agent::ClaudeCode, idle()), Screen::Error("x".to_owned()), Vec::new(), &config);
+    let footer = render(&mut error, 120, 12).lines().last().expect("footer").to_owned();
+    assert!(footer.contains("R try again") && footer.contains("Z quit"), "{footer}");
+}
+
+#[test]
+fn selection_gives_the_range_of_the_annotation() {
+    let text = "**bold** text\nsecond line\n";
+    let mut app = app(text);
+    press(&mut app, "0vllllcn\n");
+    let first = &app.review().expect("review").annotations[0];
+    assert_eq!(first.quote, "bold** ", "a selection over markup quotes the source, markup included");
+    assert_eq!(first.range, 2..9);
+    let mut lines = self::app(text);
+    press(&mut lines, "Vjdx\n");
+    let delete = &lines.review().expect("review").annotations[0];
+    assert_eq!(delete.range.end, text.len() - 1, "both lines, without the final line feed");
+    assert!(delete.quote.ends_with("\nsecond line"), "{:?}", delete.quote);
+}

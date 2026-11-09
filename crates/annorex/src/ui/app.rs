@@ -14,7 +14,7 @@ use crate::draft::{Draft, DraftKey, Editing};
 use crate::keys::Action;
 use crate::payload::sanitize;
 use crate::replies::{Candidate, Reply};
-use crate::review::{Annotation, Kind, Review, Section};
+use crate::review::{Annotation, Kind, Review, Section, reanchor_range};
 use crate::safety::Safety;
 use crate::wrap::WrapCache;
 
@@ -103,6 +103,9 @@ pub(crate) enum Selection {
     Chars { anchor: usize },
     Lines { anchor: usize },
 }
+
+/// The footer message when the text under a note is gone after a new read.
+const MOVED_TEXT: &str = "The text under your note is gone after the new read, so the editor closed.";
 
 /// The state of the viewer.
 #[derive(Debug)]
@@ -247,6 +250,7 @@ impl App {
             .and_then(|id| replies.iter().position(|reply| reply.id == id))
             .filter(|&index| self.selected > 0 || index == 0);
         let (top, cursor) = (self.top, self.cursor);
+        let changed = self.changed_texts(&replies);
         self.replies = replies;
         self.screen = Screen::Viewer;
         match keep {
@@ -257,6 +261,61 @@ impl App {
                 self.snap_cursor();
             }
             None => self.show_reply(0),
+        }
+        self.place_again(&changed);
+    }
+
+    /// The replies that stay but have a new text: id, old source, new source.
+    fn changed_texts(&self, replies: &[Reply]) -> Vec<(String, String, String)> {
+        replies
+            .iter()
+            .filter_map(|new| {
+                let old = self.replies.iter().find(|old| old.id == new.id)?;
+                (old.text != new.text).then(|| (new.id.clone(), sanitize(&old.text), sanitize(&new.text)))
+            })
+            .collect()
+    }
+
+    /// Put the annotations, the open editor, and the parked editors of changed replies on their
+    /// quoted text again. An editor whose text is gone closes, and the footer says so.
+    fn place_again(&mut self, changed: &[(String, String, String)]) {
+        for (id, old, new) in changed {
+            if let Some(review) = self.reviews.get_mut(id) {
+                review.reanchor(new);
+            }
+            let lost = self.parked.get_mut(id).filter(|editing| !editing.general).is_some_and(|editing| {
+                match reanchor_range(old, new, &editing.range) {
+                    Some(range) => {
+                        editing.range = range;
+                        false
+                    }
+                    None => true,
+                }
+            });
+            if lost {
+                self.parked.remove(id);
+                self.status = Some(MOVED_TEXT.to_owned());
+            }
+            if self.shown_id.as_deref() == Some(id.as_str()) {
+                let moved = self
+                    .editor
+                    .as_ref()
+                    .filter(|editor| !editor.general)
+                    .map(|editor| reanchor_range(old, new, &editor.range));
+                match moved {
+                    Some(Some(range)) => {
+                        if let Some(editor) = self.editor.as_mut() {
+                            editor.range = range;
+                        }
+                    }
+                    Some(None) => {
+                        self.editor = None;
+                        self.editing_id = None;
+                        self.status = Some(MOVED_TEXT.to_owned());
+                    }
+                    None => {}
+                }
+            }
         }
     }
 

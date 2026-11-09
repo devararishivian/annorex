@@ -233,4 +233,32 @@ mod tests {
             other => panic!("{other:?}"),
         }
     }
+
+    #[test]
+    fn refused_send_through_deliver_keeps_the_review_and_the_draft() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        use crate::agent::Agent;
+        use crate::config::Config;
+        use crate::replies::Reply;
+        use crate::safety::Safety;
+        use crate::ui::{AgentState, App, Screen};
+
+        let state = AgentState { agent: Some(Agent::ClaudeCode), safety: Safety::Clear { state: None } };
+        let reply = Reply { id: "r1".to_owned(), text: "alpha beta\n".to_owned(), at: None };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        for c in "cnote\n".chars() {
+            let code = if c == '\n' { KeyCode::Enter } else { KeyCode::Char(c) };
+            app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        }
+        let before = app.draft(Agent::ClaudeCode, "s").expect("draft");
+        let fake = Fake::new(&["idle", "blocked"]);
+        let result = send_review(&fake, &fake, "block:b1", &app.export(), DeliveryMode::Send, Duration::ZERO);
+        assert!(matches!(result, SendResult::Refused(_)), "{result:?}");
+        assert!(!apply_result(&mut app, result, "2026-11-09T12:00:00Z"), "no draft save after a refusal");
+        let after = app.draft(Agent::ClaudeCode, "s").expect("draft");
+        assert_eq!(after.review, before.review, "the annotations did not change");
+        assert!(after.sent_at.is_none() && after.review.annotations.iter().all(|a| a.sent_at.is_none()));
+        assert!(fake.writes.borrow().is_empty());
+    }
 }

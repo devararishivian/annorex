@@ -428,7 +428,7 @@ fn match_split_by_wrap_is_highlighted() {
             .filter_map(|x| buffer.cell((x, y)).map(|cell| cell.symbol().to_owned()))
             .collect()
     };
-    assert_eq!(marked(1), "the", "the first row ends with the start of the match");
+    assert_eq!(marked(1), "the ", "the first row ends with the start of the match and the space");
     assert_eq!(marked(2), "text", "the second row starts with the rest of the match");
 }
 

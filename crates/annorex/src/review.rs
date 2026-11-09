@@ -148,6 +148,19 @@ impl Review {
     }
 }
 
+/// The place of `range` of `old` in `new`: the same range when the text stands there, else the
+/// first match of the text, else `None`.
+pub fn reanchor_range(old: &str, new: &str, range: &Range<usize>) -> Option<Range<usize>> {
+    let quote = old.get(range.clone())?;
+    if new.get(range.clone()) == Some(quote) {
+        return Some(range.clone());
+    }
+    if quote.is_empty() {
+        return None;
+    }
+    new.find(quote).map(|start| start..start + quote.len())
+}
+
 /// The annotations of one file, or of the last reply, for the export.
 #[allow(missing_debug_implementations, reason = "holds a closure")]
 pub struct Section<'a> {

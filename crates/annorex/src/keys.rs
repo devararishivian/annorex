@@ -184,6 +184,35 @@ impl KeyChord {
         Self { code: event.code, modifiers }
     }
 
+    /// The text of the key, as `parse_key` reads it.
+    pub fn text(self) -> String {
+        let mut out = String::new();
+        if self.modifiers.contains(KeyModifiers::CONTROL) {
+            out.push_str("ctrl+");
+        }
+        if self.modifiers.contains(KeyModifiers::ALT) {
+            out.push_str("alt+");
+        }
+        match self.code {
+            KeyCode::Char(' ') => out.push_str("space"),
+            KeyCode::Char(c) => out.push(c),
+            KeyCode::Enter => out.push_str("enter"),
+            KeyCode::Esc => out.push_str("esc"),
+            KeyCode::Tab => out.push_str("tab"),
+            KeyCode::Backspace => out.push_str("backspace"),
+            KeyCode::Up => out.push_str("up"),
+            KeyCode::Down => out.push_str("down"),
+            KeyCode::Left => out.push_str("left"),
+            KeyCode::Right => out.push_str("right"),
+            KeyCode::PageUp => out.push_str("pageup"),
+            KeyCode::PageDown => out.push_str("pagedown"),
+            KeyCode::Home => out.push_str("home"),
+            KeyCode::End => out.push_str("end"),
+            other => out.push_str(&format!("{other:?}").to_lowercase()),
+        }
+        out
+    }
+
     fn is_fixed(self) -> bool {
         match self.code {
             KeyCode::Enter
@@ -294,6 +323,14 @@ impl KeyMap {
             }
         }
         Ok(Self { map })
+    }
+
+    /// The key of an action as text, for the hints. An action without a key shows its default.
+    pub fn label(&self, action: Action) -> String {
+        self.map
+            .iter()
+            .find(|(_, bound)| **bound == action)
+            .map_or_else(|| action.default_key().to_owned(), |(chord, _)| chord.text())
     }
 
     /// The action of a key event, if the key is bound.

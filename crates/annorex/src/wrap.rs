@@ -185,7 +185,7 @@ fn wrap_spans(spans: &[DocSpan], width: usize) -> Vec<Vec<DocSpan>> {
         let word = all.get(index..word_end).unwrap_or_default();
         let word_width: usize = word.iter().map(|c| c.width).sum();
         if used > 0 && used + word_width > width {
-            trim_end(&mut rows);
+            // The spaces before the break stay in the row: they fit, and a cursor can stand on one.
             rows.push(Vec::new());
             used = 0;
         }
@@ -295,7 +295,7 @@ mod tests {
     use crate::doc::Doc;
 
     fn texts(lines: &[VisualLine]) -> Vec<String> {
-        lines.iter().map(VisualLine::plain).collect()
+        lines.iter().map(|line| line.plain().trim_end().to_owned()).collect()
     }
 
     #[test]
@@ -371,7 +371,11 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert_eq!(ranges, [vec![(0..10, true)], vec![(11..22, true)]]);
+        assert_eq!(
+            ranges,
+            [vec![(0..11, true)], vec![(11..22, true)]],
+            "the space before a break stays in its row"
+        );
     }
 
     #[test]

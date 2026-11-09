@@ -12,19 +12,69 @@ use unicode_width::UnicodeWidthStr;
 use super::app::{App, Confirm, Focus, PanelView, Screen, match_ranges};
 use crate::agent::Agent;
 use crate::doc::{DocSpan, SpanStyle};
+use crate::keys::{Action, KeyMap};
 use crate::layout::{Layout, compute};
 use crate::replies::Candidate;
 use crate::review::{Kind, Review};
 use crate::safety::Safety;
 use crate::wrap::{VisualLine, fit, gutter_width};
 
-/// The key hints of the viewer, most important first.
-const VIEWER_KEYS: &str = "j/k move  v select  c/d/s annotate  a list  p replies  / find  q quit";
-const PANEL_KEYS: &str = "j/k move  enter show  esc back  p close  q quit";
-const ANNOTATION_KEYS: &str = "j/k move  enter go  e edit  x delete  a close  esc back  q quit";
+/// The key hints of the viewer, most important first. They show the keys that are bound now.
+fn viewer_keys(keys: &KeyMap) -> String {
+    let k = |action| keys.label(action);
+    format!(
+        "{}/{} move  {} select  {}/{}/{} annotate  {} list  {} replies  {} find  {} quit",
+        k(Action::Down),
+        k(Action::Up),
+        k(Action::Select),
+        k(Action::Comment),
+        k(Action::Delete),
+        k(Action::Replace),
+        k(Action::Annotations),
+        k(Action::Replies),
+        k(Action::Find),
+        k(Action::Quit)
+    )
+}
+
+fn panel_keys(keys: &KeyMap) -> String {
+    let k = |action| keys.label(action);
+    format!(
+        "{}/{} move  enter show  esc back  {} close  {} quit",
+        k(Action::Down),
+        k(Action::Up),
+        k(Action::Replies),
+        k(Action::Quit)
+    )
+}
+
+fn annotation_keys(keys: &KeyMap) -> String {
+    let k = |action| keys.label(action);
+    format!(
+        "{}/{} move  enter go  {} edit  {} delete  {} close  esc back  {} quit",
+        k(Action::Down),
+        k(Action::Up),
+        k(Action::Edit),
+        k(Action::Remove),
+        k(Action::Annotations),
+        k(Action::Quit)
+    )
+}
+
+fn picker_keys(keys: &KeyMap) -> String {
+    format!(
+        "{}/{} move  enter open  {} quit",
+        keys.label(Action::Down),
+        keys.label(Action::Up),
+        keys.label(Action::Quit)
+    )
+}
+
+fn error_keys(keys: &KeyMap) -> String {
+    format!("{} try again  {} quit", keys.label(Action::Reload), keys.label(Action::Quit))
+}
+
 const EDITOR_KEYS: &str = "enter save  ctrl+j new line  tab label  esc cancel";
-const PICKER_KEYS: &str = "j/k move  enter open  q quit";
-const ERROR_KEYS: &str = "r try again  q quit";
 
 /// Draw the whole viewer.
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -40,13 +90,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             let body = Rect::new(area.x, header.bottom(), area.width, footer.y - header.bottom());
             let paragraph = Paragraph::new(format!("Annorex: {message}")).wrap(Wrap { trim: true });
             frame.render_widget(paragraph, body);
-            draw_footer(frame, footer, ERROR_KEYS, None);
+            draw_footer(frame, footer, &error_keys(&app.config.keys), None);
         }
         Screen::Picker(candidates) => {
             draw_header(frame, header, app, "choose the session", &[]);
             let body = Rect::new(area.x, header.bottom(), area.width, footer.y - header.bottom());
             draw_picker(frame, body, &candidates, app.picker_index);
-            draw_footer(frame, footer, PICKER_KEYS, None);
+            draw_footer(frame, footer, &picker_keys(&app.config.keys), None);
         }
         Screen::Viewer => draw_viewer(frame, app, layout, header, footer),
     }
@@ -203,15 +253,15 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         .or_else(|| app.status.clone())
         .or_else(|| app.save_error.as_ref().map(|error| format!("draft not saved: {error}")));
     let keys = if app.editor.is_some() {
-        EDITOR_KEYS
+        EDITOR_KEYS.to_owned()
     } else if app.focus == Focus::Panel && app.panel_view == PanelView::Annotations {
-        ANNOTATION_KEYS
+        annotation_keys(&app.config.keys)
     } else if app.focus == Focus::Panel {
-        PANEL_KEYS
+        panel_keys(&app.config.keys)
     } else {
-        VIEWER_KEYS
+        viewer_keys(&app.config.keys)
     };
-    draw_footer(frame, footer, keys, message);
+    draw_footer(frame, footer, &keys, message);
 }
 
 fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -331,7 +381,8 @@ fn row_matches(rows: &[VisualLine], index: usize, query: &str) -> Vec<std::ops::
     let group: Vec<&VisualLine> =
         rows.iter().skip(start).take_while(|other| other.doc_line == row.doc_line).collect();
     let texts: Vec<String> = group.iter().map(|row| row.plain()).collect();
-    let joined = texts.join(" ");
+    // A wrap that dropped its space needs one here. A wrap that kept it does not.
+    let mut joined = String::new();
     let mut begin = 0;
     let mut mine = (0, 0);
     for (position, text) in texts.iter().enumerate() {
@@ -339,7 +390,12 @@ fn row_matches(rows: &[VisualLine], index: usize, query: &str) -> Vec<std::ops::
         if start + position == index {
             mine = (begin, begin + length);
         }
-        begin += length + 1;
+        joined.push_str(text);
+        begin += length;
+        if !text.ends_with(' ') {
+            joined.push(' ');
+            begin += 1;
+        }
     }
     match_ranges(&joined, query)
         .into_iter()
