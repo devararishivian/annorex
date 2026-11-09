@@ -1,4 +1,4 @@
-//! The command line: `annorex probe`, `annorex deliver`, and `annorex rex`.
+//! The command line: `annorex probe`, `annorex deliver`, `annorex last`, and `annorex rex`.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -13,6 +13,7 @@ use crate::open::{OpenError, Placement, open_last};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
+use crate::tui::{LastError, run_last};
 
 /// Exit code: sent, pasted, or probe complete.
 pub const EXIT_OK: i32 = 0;
@@ -58,6 +59,15 @@ enum Command {
         /// Paste the text, but do not press Enter.
         #[arg(long)]
         paste_only: bool,
+    },
+    /// Show the replies of the agent in a pane. `annorex rex open last` runs it in a new pane.
+    Last {
+        /// The agent block (pane), for example `block:...`.
+        #[arg(long)]
+        target: String,
+        /// The Rex session of the target. The default is `$REX_SESSION`.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Set up the Rex integration.
     Rex {
@@ -123,6 +133,7 @@ pub fn run(
             let mode = if paste_only { DeliveryMode::PasteOnly } else { DeliveryMode::Send };
             send(&env, &target, session, mode, stdin, out)
         }
+        Command::Last { target, session } => last(&env, &target, session),
         Command::Rex { command: RexCommand::Install { dir } } => rex_install(&env, dir, out),
         Command::Rex {
             command: RexCommand::Open { view: OpenView::Last { target, session, placement } },
@@ -253,6 +264,20 @@ fn send(
         Outcome::Pasted => "pasted",
     };
     writeln!(out, "{word}").map_err(|error| io_failure(&error))?;
+    Ok(EXIT_OK)
+}
+
+fn last(
+    env: &impl Fn(&str) -> Option<OsString>,
+    target: &str,
+    session: Option<String>,
+) -> Result<i32, Failure> {
+    let rex = Rex::discover_with(env, session)?;
+    run_last(&rex, target).map_err(|error| match error {
+        LastError::Rex(rex) => Failure::from(rex),
+        LastError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
+        LastError::Terminal(_) => Failure { code: EXIT_FAILURE, message: error.to_string() },
+    })?;
     Ok(EXIT_OK)
 }
 

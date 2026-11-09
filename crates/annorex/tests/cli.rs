@@ -103,3 +103,19 @@ fn rex_open_rejects_unknown_placement() {
     let output = annorex(&["rex", "open", "last", "--target", "block:b1", "--placement", "left"], &env, "");
     assert_eq!(output.status.code(), Some(64));
 }
+
+#[test]
+fn last_without_session_exits_64() {
+    let output = annorex(&["last", "--target", "block:b1"], &[("PATH", "")], "");
+    assert_eq!(output.status.code(), Some(64));
+    assert!(text(&output.stderr).contains("session"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn help_lists_last_and_rex() {
+    let output = annorex(&["--help"], &[], "");
+    assert_eq!(output.status.code(), Some(0));
+    let help = text(&output.stdout);
+    assert!(help.contains("last"), "{help}");
+    assert!(help.contains("rex"), "{help}");
+}
