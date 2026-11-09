@@ -89,3 +89,17 @@ fn rex_install_refuses_foreign_file_with_exit_3() {
     assert_eq!(output.status.code(), Some(3));
     assert!(text(&output.stderr).contains("annorex.lua"), "{}", text(&output.stderr));
 }
+
+#[test]
+fn rex_open_without_session_exits_64() {
+    let output = annorex(&["rex", "open", "last", "--target", "block:b1"], &[("PATH", "")], "");
+    assert_eq!(output.status.code(), Some(64));
+    assert!(text(&output.stderr).contains("session"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn rex_open_rejects_unknown_placement() {
+    let env = [("REX_SESSION", "session:x")];
+    let output = annorex(&["rex", "open", "last", "--target", "block:b1", "--placement", "left"], &env, "");
+    assert_eq!(output.status.code(), Some(64));
+}
