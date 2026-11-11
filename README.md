@@ -3,14 +3,15 @@
 Annorex is a review tool for coding agents in the [Rex](https://www.superlogical.com/rex) terminal. You annotate the
 text that an agent wrote. Then Annorex sends your notes back to the agent.
 
-> **Status: review of replies and of many files available.** Annorex shows the replies of an agent in a pane next to
-> it. It also shows the files in the work directory of the agent. You can annotate both and send the notes back to the
+> **Status: review of replies and of many files available.** Annorex shows the replies of an agent over the full
+> window. It also shows the files in the work directory of the agent. You can annotate both and send the notes back to the
 > agent in one message. The commands `annorex probe` and `annorex deliver` work.
 
 ## Available now
 
-- **The reply viewer.** A Rex action opens Annorex in a pane next to the agent. Annorex shows the newest reply of the
-  agent as formatted Markdown. You can select one of the 25 newest replies. The layout follows the size of the pane.
+- **The reply viewer.** A Rex action opens Annorex in a floating layer over the full window of the agent. Annorex shows
+  the newest reply of the agent as formatted Markdown. You can select one of the 25 newest replies. The layout follows
+  the size of the window.
 - **The file viewer.** A second Rex action opens the files of the work directory of the agent. A tree and a fuzzy find
   help you to open files. You can open many files and annotate each one.
 - **Annotations.** Select text in a reply or in a file. Add a comment, mark the text for removal, or give a replacement.
@@ -35,7 +36,7 @@ annorex rex install
 ```
 
 `annorex rex install` writes the Lua module `annorex.lua` beside the `init.lua` of Rex. It does not change `init.lua`.
-Use `--dir DIR` to write the module to a different directory. Then add these lines to `init.lua`:
+Use `--dir DIR` to write the module to a different directory. Then it runs `rex config check` on a scratch copy and reports errors in the module. Then add these lines to `init.lua`:
 
 ```lua
 require("annorex").setup{}
@@ -49,14 +50,19 @@ Run `rex config reload`. If Rex cannot find `annorex` on its `PATH`, give the pa
 require("annorex").setup{ bin = "/Users/me/.cargo/bin/annorex" }
 ```
 
-The option `placement` sets where the viewer opens: `"auto"` (the default), `"right"`, or `"below"`. With `"auto"`, the
-viewer opens on the right when the agent pane has 160 columns or more. Otherwise it opens below.
+Annorex always opens over the full window of the agent. The agent pane keeps its size. There is no option for the
+placement. The key `placement` in `config.toml` and the option `--placement` give an error.
+
+Only one Annorex runs in each Rex session. If you start Annorex while one is open in the session, Annorex shows the open
+one. It does not open a second one, also for another agent or for the other viewer. Different sessions can each run their
+own Annorex at the same time. Rex ends the zoom of a pane when the layer opens, and it does not restore the zoom when
+you close the viewer.
 
 ### Review the last reply
 
 Focus the pane of Claude Code, Pi, or OpenCode. Press the key that you bound, or run "Annorex: review the last reply"
-from the command palette. The action `annorex_last` opens the viewer next to the agent pane. If the viewer is already
-open for that pane, the action focuses it.
+from the command palette. The action `annorex_last` opens the viewer over the full window. If an Annorex is already
+open in the session, the action focuses it.
 
 The header shows the agent and its state, for example `claude (idle)` or `opencode (waiting for permission)`. Annorex
 reads the state again every 2 seconds.
@@ -86,12 +92,11 @@ reads the state again every 2 seconds.
 | `e` / `x` (annotation list) | Edit or delete the annotation                                |
 | `esc`                   | Cancel the selection, the editor, or the list                    |
 | `r`                     | Read the transcript again                                        |
-| `z`                     | Zoom the viewer pane, or restore the layout                      |
 | `q`, `ctrl+c`           | Close the viewer                                                 |
 
 In the editor, `enter` saves the annotation. `ctrl+j` or `alt+enter` adds a new line. `tab` changes the label.
 
-The layout changes with the size of the pane:
+The layout changes with the size of the window:
 
 - 100 columns or more: the reply list is a panel on the right side.
 - 60 to 99 columns: the reply list is a panel at the bottom.
@@ -128,8 +133,8 @@ pane. When the agent is busy, Claude Code queues the message. Pi and OpenCode us
 ### Review files
 
 Focus the pane of Claude Code, Pi, or OpenCode. Press the key that you bound, or run "Annorex: review files" from the
-command palette. The action `annorex_files` opens the file viewer next to the agent pane. If the viewer is already open
-for that pane, the action focuses it. The root is the work directory of the agent process.
+command palette. The action `annorex_files` opens the file viewer over the full window. If an Annorex is already open
+in the session, the action focuses it. Then Annorex ignores the new paths. The root is the work directory of the agent process.
 
 The viewer starts with the file tree. Open a file with `enter`. Annorex shows a Markdown file (`.md` or `.markdown`) as
 Markdown. It shows all other files as plain text with line numbers. It shows the text of a file with control characters
@@ -167,7 +172,7 @@ You can give files at the start. The paths are relative to the work directory:
 
 ```sh
 annorex files --target block:... README.md docs/guide.md
-annorex rex open files --target block:... --placement right README.md
+annorex rex open files --target block:... README.md
 ```
 
 A path can name a directory. Then the tree opens there. If a file viewer is already open for the agent,
@@ -189,7 +194,6 @@ editor, so a restart does not lose half a note. If a draft file is unreadable, A
 Annorex reads `$XDG_CONFIG_HOME/annorex/config.toml`, or `~/.config/annorex/config.toml`. All settings are optional.
 
 ```toml
-placement = "right"        # "auto", "right", or "below"
 enter_delay_ms = 300       # 50 to 5000: the wait between the paste and Enter
 labels = ["nit"]           # more labels, after question, looks good, and must fix
 
@@ -198,7 +202,7 @@ comment = "y"              # an action name and a key
 ```
 
 A bad config file stops Annorex with exit code 64 and a message. The keys `enter`, `esc`, `tab`, the arrows, the page
-keys, `home`, `end`, and `ctrl+c` are fixed. The `--placement` option of the command line has priority over the file.
+keys, `home`, `end`, and `ctrl+c` are fixed.
 
 ### Use the commands
 
@@ -211,13 +215,14 @@ annorex probe --target block:... --json
 printf 'Fix the test in parser.rs.\n' | annorex deliver --target block:...
 printf 'Fix the test in parser.rs.\n' | annorex deliver --target block:... --paste-only
 annorex last --target block:...
-annorex rex open last --target block:... --placement right
+annorex rex open last --target block:...
 annorex files --target block:... [PATH...]
 annorex rex open files --target block:... [PATH...]
 ```
 
-`annorex last` runs the viewer in the current terminal. `annorex rex open last` opens a pane with the viewer, as the
-action does. It prints the block ID of the viewer as JSON. `annorex files` and `annorex rex open files` do the same for
+`annorex last` runs the viewer in the current terminal. `annorex rex open last` opens the layer with the viewer, as the
+action does. It prints the block ID of the viewer as JSON. If an Annorex is already open, the JSON has the field
+`existing`. `annorex files` and `annorex rex open files` do the same for
 the file viewer.
 
 `annorex deliver` refuses to send when:
@@ -271,6 +276,14 @@ For more information, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 MIT.
 
+## How Annorex differs from plannotator-tui
+
+plannotator-tui is a separate project with its own scope. These points describe Annorex only:
+
+- Annorex works only in Rex. It opens one full-window layer in each Rex session and never opens a second one.
+- Annorex keeps a draft of each note on disk. A closed viewer or a restart does not lose a note.
+- Annorex shows a banner when a file changes on disk while you annotate it.
+
 ## Acknowledgements
 
 These projects are the base of the Annorex idea:
@@ -282,5 +295,8 @@ These projects are the base of the Annorex idea:
   the same review in a terminal. Annorex uses the transcript readers from plannotator-tui under the MIT License. See
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - [memex](https://github.com/nicosuave/memex) by Nico Ritschel. memex shows how to connect a Rust tool to Rex.
+
+The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the rule of one
+review layer for each session.
 
 Annorex is an independent project. It has no connection to these projects, and they do not endorse it.
