@@ -1,4 +1,4 @@
--- Annorex for Rex: review the replies and the files of a coding agent in a pane next to it.
+-- Annorex for Rex: review the replies and the files of a coding agent over the full window of the agent.
 --
 -- `annorex rex install` writes this file beside Rex's init.lua. Then add to init.lua:
 --
@@ -10,7 +10,6 @@
 --
 -- Options of setup{}:
 --   bin        The annorex binary. Default "annorex" (found on the PATH of the Rex server).
---   placement  "auto", "right", or "below". Default: unset. Then config.toml decides, else "auto".
 --
 -- This module only starts `annorex rex open last` and `annorex rex open files`. The binary does all
 -- other work.
@@ -22,7 +21,7 @@ M.options = {
 }
 
 -- The options that setup{} accepts.
-local KNOWN = { bin = true, placement = true }
+local KNOWN = { bin = true }
 
 local function first_line(text)
   for line in (text or ""):gmatch("[^\n]+") do
@@ -43,10 +42,6 @@ local function open_view(ctx, view)
     "--target", ctx.block_id,
     "--session", ctx.session_id,
   }
-  if M.options.placement then
-    table.insert(argv, "--placement")
-    table.insert(argv, M.options.placement)
-  end
   local result, err = rex.exec(argv, { timeout = 25 })
   if result == nil then fail(err) end
   if not result.ok then
@@ -72,7 +67,7 @@ function M.setup(opts)
   rex.action{
     name = "annorex_last",
     title = "Annorex: review the last reply",
-    description = "Open the last reply of the agent in the focused pane, next to it.",
+    description = "Open the last reply of the agent in the focused pane, over the full window.",
     category = "Annorex",
     keywords = "annorex review reply agent claude pi opencode",
     run = function(ctx) return open_last(ctx) end,

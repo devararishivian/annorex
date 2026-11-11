@@ -12,7 +12,6 @@ use serde::Deserialize;
 
 use crate::deliver::ENTER_DELAY;
 use crate::keys::KeyMap;
-use crate::open::Placement;
 
 /// The labels that exist before the config file adds more.
 const DEFAULT_LABELS: [&str; 3] = ["question", "looks good", "must fix"];
@@ -31,8 +30,6 @@ pub enum ConfigError {
 /// The settings of Annorex.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    /// Where the viewer opens. `None` means that the command line or the default decides.
-    pub placement: Option<Placement>,
     /// The wait between the paste and the Enter key.
     pub enter_delay: Duration,
     /// The labels of an annotation, the default labels first.
@@ -44,7 +41,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            placement: None,
             enter_delay: ENTER_DELAY,
             labels: DEFAULT_LABELS.iter().map(|label| (*label).to_owned()).collect(),
             keys: KeyMap::default(),
@@ -55,7 +51,6 @@ impl Default for Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Raw {
-    placement: Option<Placement>,
     enter_delay_ms: Option<u64>,
     labels: Option<Vec<String>>,
     keys: Option<BTreeMap<String, String>>,
@@ -68,11 +63,6 @@ pub fn config_path(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
         env("HOME").map(PathBuf::from).filter(|path| path.is_absolute()).map(|home| home.join(".config"))
     })?;
     Some(base.join("annorex").join("config.toml"))
-}
-
-/// The placement: the command line flag, else the config file, else `auto`.
-pub fn resolve_placement(flag: Option<Placement>, config: Option<Placement>) -> Placement {
-    flag.or(config).unwrap_or_default()
 }
 
 impl Config {
@@ -90,7 +80,7 @@ impl Config {
         };
         let invalid = |message: String| ConfigError::Invalid { path: path.to_path_buf(), message };
         let raw: Raw = toml::from_str(&text).map_err(|error| invalid(error.message().to_owned()))?;
-        let mut config = Self { placement: raw.placement, ..Self::default() };
+        let mut config = Self::default();
         if let Some(ms) = raw.enter_delay_ms {
             if !DELAY_RANGE_MS.contains(&ms) {
                 return Err(invalid(format!(
@@ -123,8 +113,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
-    use super::{Config, config_path, resolve_placement};
-    use crate::open::Placement;
+    use super::{Config, config_path};
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
         move |key| pairs.iter().find(|(k, _)| *k == key).map(|(_, value)| OsString::from(value))
@@ -161,7 +150,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("dir");
         let config = Config::load(&dir.path().join("nope.toml")).expect("defaults");
         assert_eq!(config, Config::default());
-        assert_eq!(config.placement, None);
         assert_eq!(config.enter_delay, Duration::from_millis(300));
         assert_eq!(config.labels, ["question", "looks good", "must fix"]);
     }
@@ -178,9 +166,8 @@ mod tests {
     }
 
     #[test]
-    fn placement_and_delay_are_read() {
-        let config = load("placement = \"below\"\nenter_delay_ms = 120\n").expect("config");
-        assert_eq!(config.placement, Some(Placement::Below));
+    fn the_delay_is_read() {
+        let config = load("enter_delay_ms = 120\n").expect("config");
         assert_eq!(config.enter_delay, Duration::from_millis(120));
     }
 
@@ -221,9 +208,10 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_placement_names_the_value() {
-        let error = load("placement = \"left\"\n").expect_err("bad placement");
-        assert!(error.contains("left"), "{error}");
+    fn the_removed_placement_key_is_an_error_that_names_the_key() {
+        // Annorex opens over the full window. A config file of an older version can still have the key.
+        let error = load("placement = \"right\"\n").expect_err("removed key");
+        assert!(error.contains("placement"), "{error}");
     }
 
     #[test]
@@ -233,13 +221,6 @@ mod tests {
         std::fs::write(&path, "= = =\n").expect("config");
         let error = Config::load(&path).expect_err("bad toml").to_string();
         assert!(error.contains(&path.display().to_string()), "{error}");
-    }
-
-    #[test]
-    fn flag_wins_over_config_placement() {
-        assert_eq!(resolve_placement(Some(Placement::Below), Some(Placement::Right)), Placement::Below);
-        assert_eq!(resolve_placement(None, Some(Placement::Right)), Placement::Right);
-        assert_eq!(resolve_placement(None, None), Placement::Auto);
     }
 
     #[test]

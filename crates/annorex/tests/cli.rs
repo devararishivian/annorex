@@ -99,10 +99,23 @@ fn rex_open_without_session_exits_64() {
 }
 
 #[test]
-fn rex_open_rejects_unknown_placement() {
+fn rex_open_has_no_placement_flag() {
     let env = [("REX_SESSION", "session:x")];
-    let output = annorex(&["rex", "open", "last", "--target", "block:b1", "--placement", "left"], &env, "");
+    let output = annorex(&["rex", "open", "last", "--target", "block:b1", "--placement", "right"], &env, "");
     assert_eq!(output.status.code(), Some(64));
+    assert!(text(&output.stderr).contains("--placement"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn a_config_file_with_the_removed_placement_key_exits_64_and_names_the_key() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::create_dir_all(dir.path().join("annorex")).expect("config dir");
+    std::fs::write(dir.path().join("annorex/config.toml"), "placement = \"right\"\n").expect("config");
+    let home = dir.path().to_string_lossy().into_owned();
+    let env = [("XDG_CONFIG_HOME", home.as_str()), ("REX_SESSION", "session:x"), ("PATH", "")];
+    let output = annorex(&["rex", "open", "last", "--target", "block:b1"], &env, "");
+    assert_eq!(output.status.code(), Some(64), "{}", text(&output.stderr));
+    assert!(text(&output.stderr).contains("placement"), "{}", text(&output.stderr));
 }
 
 #[test]

@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 
 use crate::agent::{Agent, BusyEffect, detect};
-use crate::config::{Config, resolve_placement};
+use crate::config::Config;
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
 use crate::draft::{DraftStore, drafts_dir};
 use crate::install::{InstallError, config_dir, install};
-use crate::open::{OpenError, Placement, View, open_view};
+use crate::open::{OpenError, View, open_view};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
@@ -115,9 +115,6 @@ enum OpenView {
         /// The Rex session of the target. The default is `$REX_SESSION`.
         #[arg(long)]
         session: Option<String>,
-        /// Where the viewer opens. The default is the config file, else `auto`.
-        #[arg(long, value_enum)]
-        placement: Option<Placement>,
     },
     /// The viewer of the files. If it is open for the target, focus it.
     Files {
@@ -127,9 +124,6 @@ enum OpenView {
         /// The Rex session of the target. The default is `$REX_SESSION`.
         #[arg(long)]
         session: Option<String>,
-        /// Where the viewer opens. The default is the config file, else `auto`.
-        #[arg(long, value_enum)]
-        placement: Option<Placement>,
         /// Files to open at the start.
         paths: Vec<PathBuf>,
     },
@@ -164,14 +158,12 @@ pub fn run(
         Command::Last { target, session } => last(&env, &target, session),
         Command::Files { target, session, paths } => files(&env, &target, session, paths),
         Command::Rex { command: RexCommand::Install { dir } } => rex_install(&env, dir, out),
-        Command::Rex {
-            command: RexCommand::Open { view: OpenView::Last { target, session, placement } },
-        } => rex_open(&env, &View::Last, &target, session, placement, out),
-        Command::Rex {
-            command: RexCommand::Open { view: OpenView::Files { target, session, placement, paths } },
-        } => {
+        Command::Rex { command: RexCommand::Open { view: OpenView::Last { target, session } } } => {
+            rex_open(&env, &View::Last, &target, session, out)
+        }
+        Command::Rex { command: RexCommand::Open { view: OpenView::Files { target, session, paths } } } => {
             let paths: Vec<String> = paths.iter().map(|path| path.to_string_lossy().into_owned()).collect();
-            rex_open(&env, &View::Files(&paths), &target, session, placement, out)
+            rex_open(&env, &View::Files(&paths), &target, session, out)
         }
     };
     match result {
@@ -399,22 +391,20 @@ fn rex_open(
     view: &View<'_>,
     target: &str,
     session: Option<String>,
-    placement: Option<Placement>,
     out: &mut impl Write,
 ) -> Result<i32, Failure> {
-    let config = load_config(env)?;
-    let placement = resolve_placement(placement, config.placement);
+    // A bad config file stops here, with its message, and not later in a pane that closes at once.
+    load_config(env)?;
     let rex = Rex::discover_with(env, session)?;
     let exe = std::env::current_exe().map_err(|error| Failure {
         code: EXIT_FAILURE,
         message: format!("cannot find the path of the annorex binary: {error}"),
     })?;
-    let opened =
-        open_view(&rex, view, target, rex.session(), &exe, placement).map_err(|error| match error {
-            OpenError::Rex(rex) => Failure::from(rex),
-            OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
-            OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
-        })?;
+    let opened = open_view(&rex, view, target, rex.session(), &exe).map_err(|error| match error {
+        OpenError::Rex(rex) => Failure::from(rex),
+        OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
+        OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
+    })?;
     let json = serde_json::to_string(&opened)
         .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
     writeln!(out, "{json}").map_err(|error| io_failure(&error))?;

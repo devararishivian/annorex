@@ -162,16 +162,9 @@ mod tests {
     }
 
     #[test]
-    fn module_passes_placement_only_when_set() {
-        let code: String = MODULE_SOURCE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with("--"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let guard = code.find("if M.options.placement").expect("a guard for placement");
-        let flag = code.find("\"--placement\"").expect("the flag");
-        assert!(guard < flag, "the flag must come after the guard");
-        assert!(!code.contains("placement = \"auto\""), "the module must not set a default placement");
+    fn module_has_no_placement_option() {
+        assert!(!MODULE_SOURCE.contains("placement"), "Annorex opens over the full window only");
+        assert!(!MODULE_SOURCE.contains("--placement"));
     }
 
     #[test]
