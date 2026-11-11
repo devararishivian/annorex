@@ -10,7 +10,7 @@ use crate::agent::{Agent, BusyEffect, detect};
 use crate::config::Config;
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
 use crate::draft::{DraftStore, drafts_dir};
-use crate::install::{InstallError, config_dir, install};
+use crate::install::{Check, InstallError, check_module, config_dir, install, run_rex_config_check};
 use crate::open::{OpenError, View, open_view};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
@@ -373,10 +373,22 @@ fn rex_install(
         lines.push(String::new());
         lines.push(format!("  require(\"annorex\").setup{{ bin = \"{}\" }}", exe.display()));
     }
+    let scratch = std::env::temp_dir().join(format!("annorex-check-{}", std::process::id()));
+    let checked = std::fs::create_dir_all(&scratch)
+        .map_or(Check::Skipped, |()| check_module(&scratch, run_rex_config_check));
+    let _ = std::fs::remove_dir_all(&scratch);
+    lines.push(String::new());
+    match &checked {
+        Check::Passed => lines.push("Checked the module with rex config check: no errors.".to_owned()),
+        Check::Skipped => lines.push("Skipped the module check: rex is not available.".to_owned()),
+        Check::Failed(message) => {
+            lines.push(format!("rex config check found errors in the module:\n{message}"));
+        }
+    }
     lines.push(String::new());
     lines.push("Then run: rex config reload".to_owned());
     writeln!(out, "{}", lines.join("\n")).map_err(|error| io_failure(&error))?;
-    Ok(EXIT_OK)
+    Ok(if matches!(checked, Check::Failed(_)) { EXIT_FAILURE } else { EXIT_OK })
 }
 
 /// True when the directory of `exe` is a directory of `path`.

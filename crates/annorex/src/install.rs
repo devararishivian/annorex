@@ -69,6 +69,57 @@ pub fn install(dir: &Path) -> Result<Installed, InstallError> {
     Ok(Installed { path, replaced })
 }
 
+/// The outcome of one `rex config check` run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Probe {
+    pub success: bool,
+    /// What Rex printed, on failure.
+    pub message: String,
+}
+
+/// The result of the module check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Check {
+    Passed,
+    Failed(String),
+    /// Rex could not be run, so nothing was checked.
+    Skipped,
+}
+
+/// Check the module with Rex before the user reloads: write the module and an `init.lua` that
+/// loads it into `scratch`, then call `run` with the path of that `init.lua`. The real config
+/// is not touched.
+pub fn check_module(scratch: &Path, run: impl FnOnce(&Path) -> std::io::Result<Probe>) -> Check {
+    let init = scratch.join("init.lua");
+    let written = std::fs::write(scratch.join(MODULE_FILE), module_contents())
+        .and_then(|()| std::fs::write(&init, "require(\"annorex\").setup{}\n"));
+    if written.is_err() {
+        return Check::Skipped;
+    }
+    match run(&init) {
+        Ok(probe) if probe.success => Check::Passed,
+        Ok(probe) => Check::Failed(probe.message),
+        Err(_) => Check::Skipped,
+    }
+}
+
+/// Run `rex config check` on `init` with `REX_CONFIG` set to it, for this call only.
+pub fn run_rex_config_check(init: &Path) -> std::io::Result<Probe> {
+    let output = std::process::Command::new("rex")
+        .args(["config", "check"])
+        .arg(init)
+        .env("REX_CONFIG", init)
+        .output()?;
+    let mut message = String::from_utf8_lossy(&output.stdout).into_owned();
+    message.push_str(&String::from_utf8_lossy(&output.stderr));
+    let message = message
+        .lines()
+        .filter(|line| line.starts_with("error") || line.starts_with("Error"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(Probe { success: output.status.success(), message })
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
@@ -188,5 +239,38 @@ mod tests {
         assert!(installed.replaced);
         let text = std::fs::read_to_string(&path).expect("module");
         assert!(text.contains("annorex_files"), "the new module has the files action");
+    }
+
+    #[test]
+    fn check_passes_when_rex_accepts_the_scratch_config() {
+        let scratch = tempfile::tempdir().expect("temp dir");
+        let seen = std::cell::RefCell::new(None);
+        let result = check_module(scratch.path(), |init| {
+            *seen.borrow_mut() = Some((
+                std::fs::read_to_string(init).expect("init"),
+                std::fs::read_to_string(init.with_file_name("annorex.lua")).expect("module"),
+            ));
+            Ok(Probe { success: true, message: String::new() })
+        });
+        assert_eq!(result, Check::Passed);
+        let (init, module) = seen.into_inner().expect("runner called");
+        assert!(init.contains("require(\"annorex\").setup{}"), "{init}");
+        assert_eq!(module, module_contents());
+    }
+
+    #[test]
+    fn check_fails_with_the_rex_message() {
+        let scratch = tempfile::tempdir().expect("temp dir");
+        let result = check_module(scratch.path(), |_| {
+            Ok(Probe { success: false, message: "error annorex.lua:3: boom".to_owned() })
+        });
+        assert_eq!(result, Check::Failed("error annorex.lua:3: boom".to_owned()));
+    }
+
+    #[test]
+    fn check_is_skipped_when_rex_is_missing() {
+        let scratch = tempfile::tempdir().expect("temp dir");
+        let result = check_module(scratch.path(), |_| Err(std::io::ErrorKind::NotFound.into()));
+        assert_eq!(result, Check::Skipped);
     }
 }
