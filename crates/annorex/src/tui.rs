@@ -18,7 +18,6 @@ use crate::config::Config;
 use crate::deliver::{DeliveryMode, RealSleeper};
 use crate::draft::{DraftError, DraftKey, DraftStore};
 use crate::files;
-use crate::open::{pane_label, pane_label_files};
 use crate::replies::{
     Candidate, Reply, SessionRef, Source, candidates, load_replies, matching_panes, needs_picker,
     process_table,
@@ -495,11 +494,6 @@ impl<R: Runner> Viewer<'_, R> {
                 show(app, screen, replies);
                 self.restore_drafts(app);
             }
-            Effect::ToggleZoom => {
-                if let Err(message) = self.toggle_zoom() {
-                    app.set_status(message);
-                }
-            }
         }
     }
 
@@ -530,16 +524,6 @@ impl<R: Runner> Viewer<'_, R> {
             Err(error) => app.set_error(error.to_string()),
         }
         app.set_state(self.state.clone());
-    }
-
-    fn toggle_zoom(&self) -> Result<(), String> {
-        let label =
-            if self.files.is_some() { pane_label_files(self.target) } else { pane_label(self.target) };
-        let view = self.rex.view().map_err(|error| format!("cannot zoom: {error}"))?;
-        let block = view
-            .find_label(&label)
-            .ok_or_else(|| "cannot zoom: Rex does not show the viewer pane".to_owned())?;
-        self.rex.zoom_toggle(&block.block_id).map_err(|error| format!("cannot zoom: {error}"))
     }
 }
 
@@ -722,14 +706,14 @@ mod tests {
 
     #[test]
     fn other_effects_reach_the_caller() {
-        let mut events = script(vec![key('z'), Ok(None), key('r'), Ok(None)]);
+        let mut events = script(vec![key('r'), Ok(None), key('r'), Ok(None)]);
         let mut canvas = Counting::new();
         let (_tx, rx) = mpsc::channel();
         let stop = AtomicBool::new(false);
         let mut seen = Vec::new();
         let mut effects = |effect, _: &mut App| seen.push(effect);
         run_loop(&mut app(), &mut events, &mut canvas, &stop, &rx, &mut effects).expect("loop");
-        assert_eq!(seen, [Effect::ToggleZoom, Effect::Reload]);
+        assert_eq!(seen, [Effect::Reload, Effect::Reload]);
         assert_eq!(canvas.draws, 2);
     }
 

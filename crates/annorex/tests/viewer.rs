@@ -272,8 +272,8 @@ fn picker_enter_picks_session() {
 }
 
 #[test]
-fn z_is_toggle_zoom() {
-    assert_eq!(press(&mut viewer(), "z"), Effect::ToggleZoom);
+fn z_does_nothing_because_the_viewer_covers_the_window() {
+    assert_eq!(press(&mut viewer(), "z"), Effect::None);
 }
 
 #[test]

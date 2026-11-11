@@ -62,7 +62,6 @@ pub enum Effect {
     None,
     Quit,
     Reload,
-    ToggleZoom,
     PickSession(usize),
     /// The review or the editor of the current reply changed. The caller saves the draft.
     SaveDraft,
@@ -943,7 +942,6 @@ impl App {
                 Some(Action::Quit) => return self.request_quit(),
                 Some(Action::Reload) if self.mode == Mode::Files => self.reload_shown(),
                 Some(Action::Reload) => return Effect::Reload,
-                Some(Action::Zoom) => return Effect::ToggleZoom,
                 Some(Action::Down) => self.move_cursor(1),
                 Some(Action::Up) => self.move_cursor(-1),
                 Some(Action::Left) => self.step(false),
@@ -1088,7 +1086,6 @@ impl App {
                 Some(Action::Quit) => return self.request_quit(),
                 Some(Action::Reload) if self.mode == Mode::Files => self.reload_shown(),
                 Some(Action::Reload) => return Effect::Reload,
-                Some(Action::Zoom) => return Effect::ToggleZoom,
                 Some(Action::Down) => self.panel_move(1),
                 Some(Action::Up) => self.panel_move(-1),
                 Some(Action::Replies) => self.toggle_panel(PanelView::Replies),

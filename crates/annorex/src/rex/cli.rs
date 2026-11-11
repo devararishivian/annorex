@@ -288,17 +288,6 @@ impl<R: Runner> Rex<R> {
         Rex { bin: self.bin.clone(), session: session.to_owned(), runner: &self.runner }
     }
 
-    /// Create a split with `session.new_split`. Gives the ids of the new blocks.
-    pub fn new_split(&self, request: &serde_json::Value) -> Result<Vec<String>, RexError> {
-        #[derive(serde::Deserialize)]
-        struct Split {
-            #[serde(default)]
-            block_ids: Option<Vec<Option<String>>>,
-        }
-        let split: Split = self.api_typed("session.new_split", request)?;
-        Ok(split.block_ids.unwrap_or_default().into_iter().flatten().collect())
-    }
-
     /// The id of the window that holds `block`, from `session.describe_block`.
     pub fn window_of(&self, block: &str) -> Result<String, RexError> {
         #[derive(serde::Deserialize)]
@@ -334,11 +323,6 @@ impl<R: Runner> Rex<R> {
 
     pub fn focus_block(&self, block: &str) -> Result<(), RexError> {
         self.api_call("session.focus_block", &serde_json::json!({ "block_id": block })).map(drop)
-    }
-
-    /// Zoom the block, or restore the layout when it is zoomed.
-    pub fn zoom_toggle(&self, block: &str) -> Result<(), RexError> {
-        self.api_call("session.zoom_block", &serde_json::json!({ "block_id": block })).map(drop)
     }
 
     /// Write `data` to the terminal input of `block`, as if the user typed it.
@@ -632,35 +616,17 @@ mod tests {
     }
 
     #[test]
-    fn new_split_returns_the_block_ids() {
-        let rex = rex(FakeRunner {
-            stdout:
-                br#"{"anchor_id":"block:a","block_ids":["block:n"],"split_ids":["split:x"],"revision":3}"#
-                    .to_vec(),
-            ..FakeRunner::default()
-        });
-        let ids = rex.new_split(&serde_json::json!({"anchor_id": "block:a"})).expect("split");
-        assert_eq!(ids, ["block:n"]);
-        assert_eq!(strings(&rex.runner.calls.borrow()[0].0)[5], "session.new_split");
-    }
-
-    #[test]
-    fn focus_and_zoom_send_the_block() {
+    fn focus_sends_the_block() {
         let rex = rex(FakeRunner {
             stdout: br#"{"revision":1,"block_id":"block:z","zoomed":true}"#.to_vec(),
             ..FakeRunner::default()
         });
         rex.focus_block("block:f").expect("focus");
-        rex.zoom_toggle("block:z").expect("zoom");
         let calls = rex.runner.calls.borrow();
         assert_eq!(strings(&calls[0].0)[5], "session.focus_block");
         let focus: serde_json::Value =
             serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
         assert_eq!(focus, serde_json::json!({"block_id": "block:f"}));
-        assert_eq!(strings(&calls[1].0)[5], "session.zoom_block");
-        let zoom: serde_json::Value =
-            serde_json::from_slice(calls[1].1.as_deref().expect("stdin")).expect("json");
-        assert_eq!(zoom, serde_json::json!({"block_id": "block:z"}), "no zoom key: toggle");
     }
 
     #[test]
