@@ -6,6 +6,6 @@ mod types;
 
 pub use cli::{Rex, RexError, Runner, SystemRunner};
 pub use types::{
-    BlockInfo, Layer, Mode, Modes, Owner, Proc, ProcessInfo, SessionEntry, SessionList, SessionView, Size,
-    StatusList, StatusRecord, Window,
+    BlockInfo, Layer, LayerKind, LayerState, Located, Mode, Modes, NewLayer, Owner, Proc, ProcessInfo,
+    SessionEntry, SessionList, SessionView, Size, StatusList, StatusRecord, Window,
 };

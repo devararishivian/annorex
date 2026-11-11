@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 
-use super::types::{Modes, ProcessInfo, SessionList, SessionView, Size, StatusList};
+use super::types::{LayerState, Modes, NewLayer, ProcessInfo, SessionList, SessionView, Size, StatusList};
 
 /// Runs one command. Tests replace it with a fake.
 pub trait Runner {
@@ -114,6 +114,8 @@ pub enum RexError {
     BadJson { method: String, source: serde_json::Error },
     #[error("{} {method} did not answer in {} s", call_of(method), REX_TIMEOUT.as_secs())]
     Timeout { method: String },
+    #[error("block {block} is not in a window of the session")]
+    NotInWindow { block: String },
     #[error("cannot run rex: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -297,6 +299,39 @@ impl<R: Runner> Rex<R> {
         Ok(split.block_ids.unwrap_or_default().into_iter().flatten().collect())
     }
 
+    /// The id of the window that holds `block`, from `session.describe_block`.
+    pub fn window_of(&self, block: &str) -> Result<String, RexError> {
+        #[derive(serde::Deserialize)]
+        struct Described {
+            block: DescribedBlock,
+        }
+        #[derive(serde::Deserialize)]
+        struct DescribedBlock {
+            #[serde(default)]
+            window_id: Option<String>,
+        }
+        let described: Described =
+            self.api_typed("session.describe_block", &serde_json::json!({ "block_id": block }))?;
+        described.block.window_id.ok_or_else(|| RexError::NotInWindow { block: block.to_owned() })
+    }
+
+    /// Create a floating layer with `session.new_layer`. `request` holds `window_id`, `bounds`, `focus`,
+    /// and `layout`.
+    pub fn new_layer(&self, request: &serde_json::Value) -> Result<NewLayer, RexError> {
+        self.api_typed("session.new_layer", request)
+    }
+
+    /// Minimize a layer or show it again. With `focus`, Rex also raises it and focuses its block.
+    pub fn set_layer_state(&self, layer: &str, state: LayerState, focus: bool) -> Result<(), RexError> {
+        let args = serde_json::json!({ "layer_id": layer, "state": state, "focus": focus });
+        self.api_call("session.set_layer_state", &args).map(drop)
+    }
+
+    /// Close a floating layer and every block in it.
+    pub fn close_layer(&self, layer: &str) -> Result<(), RexError> {
+        self.api_call("session.close_layer", &serde_json::json!({ "layer_id": layer })).map(drop)
+    }
+
     pub fn focus_block(&self, block: &str) -> Result<(), RexError> {
         self.api_call("session.focus_block", &serde_json::json!({ "block_id": block })).map(drop)
     }
@@ -322,6 +357,7 @@ mod tests {
     use std::process::{ExitStatus, Output};
 
     use super::*;
+    use crate::rex::types::LayerState;
 
     /// One recorded call: argv and standard input.
     type Call = (Vec<OsString>, Option<Vec<u8>>);
@@ -487,6 +523,73 @@ mod tests {
     fn discover_without_session_is_no_session() {
         let env = |key: &str| (key == "REX_SESSION").then(|| OsString::from(""));
         assert!(matches!(Rex::discover_with(env, None), Err(RexError::NoSession)));
+    }
+
+    const DESCRIBE_BLOCK: &str = include_str!("../../tests/fixtures/rex/describe-block.json");
+    const NEW_LAYER_REPLY: &str = include_str!("../../tests/fixtures/rex/new-layer-reply.json");
+
+    #[test]
+    fn window_of_reads_the_window_id_of_describe_block() {
+        let rex = rex(FakeRunner { stdout: DESCRIBE_BLOCK.as_bytes().to_vec(), ..FakeRunner::default() });
+        let window = rex.window_of("block:b1").expect("window");
+        assert!(window.starts_with("window:"), "{window}");
+        let calls = rex.runner.calls.borrow();
+        assert_eq!(
+            strings(&calls[0].0),
+            ["/opt/rex/bin/rex", "api", "call", "-s", "session:s1", "session.describe_block", "-"]
+        );
+        let stdin: serde_json::Value =
+            serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
+        assert_eq!(stdin, serde_json::json!({ "block_id": "block:b1" }));
+    }
+
+    #[test]
+    fn window_of_fails_for_a_block_that_is_in_no_window() {
+        let rex = rex(FakeRunner {
+            stdout: br#"{"block":{"block_id":"block:b1","placement":"detached"}}"#.to_vec(),
+            ..FakeRunner::default()
+        });
+        let error = rex.window_of("block:b1").expect_err("no window");
+        assert!(matches!(error, RexError::NotInWindow { .. }), "{error:?}");
+        assert_eq!(error.to_string(), "block block:b1 is not in a window of the session");
+    }
+
+    #[test]
+    fn new_layer_sends_the_request_and_reads_the_layer_and_block_ids() {
+        let rex = rex(FakeRunner { stdout: NEW_LAYER_REPLY.as_bytes().to_vec(), ..FakeRunner::default() });
+        let request = serde_json::json!({ "window_id": "window:w1", "bounds": [0, 0, 1, 1], "focus": true });
+        let layer = rex.new_layer(&request).expect("layer");
+        assert!(layer.layer_id.starts_with("layer:"));
+        assert_eq!(layer.block_ids.len(), 1);
+        let calls = rex.runner.calls.borrow();
+        assert_eq!(strings(&calls[0].0)[5], "session.new_layer");
+        let stdin: serde_json::Value =
+            serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
+        assert_eq!(stdin, request);
+    }
+
+    #[test]
+    fn layer_state_and_close_send_the_documented_fields() {
+        let rex = rex(FakeRunner { stdout: b"{\"revision\":2}".to_vec(), ..FakeRunner::default() });
+        rex.set_layer_state("layer:l1", LayerState::Normal, true).expect("state");
+        rex.set_layer_state("layer:l1", LayerState::Minimized, false).expect("state");
+        rex.close_layer("layer:l1").expect("close");
+        let calls = rex.runner.calls.borrow();
+        let bodies: Vec<serde_json::Value> = calls
+            .iter()
+            .map(|call| serde_json::from_slice(call.1.as_deref().expect("stdin")).expect("json"))
+            .collect();
+        assert_eq!(strings(&calls[0].0)[5], "session.set_layer_state");
+        assert_eq!(
+            bodies[0],
+            serde_json::json!({ "layer_id": "layer:l1", "state": "normal", "focus": true })
+        );
+        assert_eq!(
+            bodies[1],
+            serde_json::json!({ "layer_id": "layer:l1", "state": "minimized", "focus": false })
+        );
+        assert_eq!(strings(&calls[2].0)[5], "session.close_layer");
+        assert_eq!(bodies[2], serde_json::json!({ "layer_id": "layer:l1" }));
     }
 
     #[test]

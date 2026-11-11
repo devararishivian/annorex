@@ -1,0 +1,73 @@
+{
+  "revision": 4,
+  "session_id": "session:01a1cb5b-3a30-73c0-b581-9572a76a67d8",
+  "label": "annorex-live",
+  "active_window_id": "window:01a1cb5b-3a3d-7340-b971-799ffd13cdd0",
+  "windows": [
+    {
+      "window_id": "window:01a1cb5b-3a3d-7340-b971-799ffd13cdd0",
+      "label": "Window fd13cdd0",
+      "focused_block_id": "block:01a1cb5b-3a30-74c2-8755-0aa37692970d",
+      "layers": [
+        {
+          "layer_id": "layer:01a1cb5b-3a3d-7347-b597-76273c03431f",
+          "kind": "tiled",
+          "bounds": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "layout": {
+            "rect": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "block_id": "block:01a1cb5b-3a30-74c2-8755-0aa37692970d"
+          },
+          "blocks": [
+            {
+              "block_id": "block:01a1cb5b-3a30-74c2-8755-0aa37692970d",
+              "label": "shell",
+              "creator_name": "com.superlogical.terminal",
+              "flavor": "com.superlogical.terminal.shell",
+              "host_id": "f85623fe-d4e1-4988-ac45-c08114e8c3ac",
+              "owner": "client:01a1cb5b-3a2f-7367-a030-219cd42b1c0c"
+            }
+          ]
+        },
+        {
+          "layer_id": "layer:01a1cb5b-3a62-7e3c-9fc8-6cac7783b42f",
+          "kind": "floating",
+          "bounds": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "state": "minimized",
+          "layout": {
+            "rect": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "block_id": "block:01a1cb5b-3a53-7c8e-8215-0f40aff155e4"
+          },
+          "blocks": [
+            {
+              "block_id": "block:01a1cb5b-3a53-7c8e-8215-0f40aff155e4",
+              "label": "annorex:block:01a1cb5b-3a30-74c2-8755-0aa37692970d",
+              "creator_name": "com.superlogical.terminal",
+              "flavor": "com.superlogical.terminal.shell",
+              "host_id": "f85623fe-d4e1-4988-ac45-c08114e8c3ac"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
