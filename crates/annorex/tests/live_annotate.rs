@@ -24,12 +24,12 @@ mod common;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use annorex::agent::Agent;
 use annorex::config::Config;
-use annorex::open::pane_label;
+use annorex::open::open_last;
 use annorex::replies::{Reply, Source, candidates, load_replies, process_table};
 use annorex::rex::{Rex, SystemRunner};
 use annorex::safety::Safety;
@@ -86,24 +86,32 @@ fn expected_export(agent: Agent, reply: &str, note: &str) -> String {
     app.export().trim().to_owned()
 }
 
-/// Open the viewer of `block` in a split. The test starts the viewer itself, so that the viewer
-/// process gets the environment of the wrapper. The Lua action of M1 has its own live test.
-fn open_viewer(session: &str, block: &str, wrapper: &Path) -> Output {
-    Command::new("rex")
-        .args(["split", "-s", session, "-b", block, "--label", &pane_label(block), "--shell", "none", "--"])
-        .arg(wrapper)
-        .args(["last", "--target", block, "--session", session])
-        .output()
-        .expect("rex split runs")
+/// Open the viewer of `block` in a full-window layer, as `annorex rex open` does. The test calls
+/// the library with the wrapper as the program, so that the viewer process gets the environment
+/// of the wrapper. The Lua action has its own live test. The agent is focused first, as it is when
+/// the user presses the key.
+fn open_viewer(
+    rex: &Rex<SystemRunner>,
+    session: &str,
+    block: &str,
+    wrapper: &Path,
+) -> Result<String, String> {
+    rex.focus_block(block).map_err(|error| error.to_string())?;
+    open_last(rex, block, session, wrapper).map(|opened| opened.block_id).map_err(|error| error.to_string())
 }
 
-fn viewers(rex: &Rex<SystemRunner>, target: &str) -> Vec<String> {
-    let label = pane_label(target);
-    rex.view()
-        .map(|view| {
-            view.blocks().filter(|block| block.label == label).map(|block| block.block_id.clone()).collect()
-        })
-        .unwrap_or_default()
+/// S2: the layer of `viewer` is gone and the focus is on a block of the window of `agent`. Rex
+/// chooses that block: after a layer closes, the focus goes to its own remembered block, which is
+/// not always the block that `session.focus_block` set [live, 2026-11-11]. The log tells which.
+fn layer_gone_and_window_focused(rex: &Rex<SystemRunner>, viewer: &str, agent: &str) -> Option<bool> {
+    let view = rex.view().ok()?;
+    let gone = view.blocks().all(|block| block.block_id != viewer);
+    let found = view.locate(|block| block.block_id == agent);
+    let window = found.first()?.window;
+    let focused = window.focused_block_id.as_deref()?;
+    let in_window =
+        window.layers.iter().flat_map(|layer| layer.blocks.iter()).any(|block| block.block_id == focused);
+    (gone && in_window).then_some(focused == agent)
 }
 
 fn pbpaste() -> Vec<u8> {
@@ -194,16 +202,9 @@ fn annotate_and_send_for_each_agent() {
         let reply = newest_reply(&rex, &roots, live).expect("reply");
 
         // 1. Open the viewer.
-        let output = open_viewer(&session, &live.block, &wrapper);
-        let Some(viewer) =
-            wait_until(Duration::from_secs(10), || viewers(&rex, &live.block).into_iter().next())
-                .filter(|_| output.status.success())
-        else {
-            fail(format!(
-                "{name} open: exit {:?}: {}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr)
-            ));
+        let Ok(viewer) = open_viewer(&rex, &session, &live.block, &wrapper).inspect_err(|error| {
+            fail(format!("{name} open: {error}"));
+        }) else {
             continue;
         };
         let shown = wait_until(Duration::from_secs(10), || {
@@ -261,6 +262,13 @@ fn annotate_and_send_for_each_agent() {
             fail(format!("{name} quit: the viewer stays after a send:\n{}", capture(&session, &viewer)));
             continue;
         }
+        // S2: the layer is gone and the focus is on the agent.
+        let back =
+            wait_until(Duration::from_secs(5), || layer_gone_and_window_focused(&rex, &viewer, &live.block));
+        log(start, &format!("{name} S2: layer gone and the window has the focus; on the agent {back:?}"));
+        if back.is_none() {
+            fail(format!("{name} S2: the layer stays or the window has no focused pane"));
+        }
         if live.agent != Agent::ClaudeCode {
             continue;
         }
@@ -276,11 +284,8 @@ fn annotate_and_send_for_each_agent() {
             fail(format!("{name} dialog: the agent did not show a dialog"));
             continue;
         }
-        let output = open_viewer(&session, &live.block, &wrapper);
-        let Some(viewer) =
-            wait_until(Duration::from_secs(10), || viewers(&rex, &live.block).into_iter().next())
-                .filter(|_| output.status.success())
-        else {
+        let opened = open_viewer(&rex, &session, &live.block, &wrapper);
+        let Some(viewer) = opened.clone().ok() else {
             fail(format!("{name} dialog: the viewer did not open"));
             continue;
         };
@@ -374,11 +379,7 @@ fn annotate_and_send_for_each_agent() {
         }
 
         // OSC 52: a viewer without pbcopy on its PATH. Does Rex apply the sequence from the pane?
-        let output = open_viewer(&session, &live.block, &bare);
-        if let Some(viewer) =
-            wait_until(Duration::from_secs(10), || viewers(&rex, &live.block).into_iter().next())
-                .filter(|_| output.status.success())
-        {
+        if let Ok(viewer) = open_viewer(&rex, &session, &live.block, &bare) {
             std::thread::sleep(Duration::from_secs(1));
             pbcopy(b"ANNOREX-SENTINEL");
             keys(&rex, &viewer, "Y");

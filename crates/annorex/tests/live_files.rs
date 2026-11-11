@@ -22,13 +22,12 @@
 mod common;
 
 use std::path::Path;
-use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 use annorex::agent::Agent;
 use annorex::config::Config;
 use annorex::files::{load, resolve};
-use annorex::open::pane_label_files;
+use annorex::open::open_files;
 use annorex::rex::{Rex, SystemRunner};
 use annorex::safety::Safety;
 use annorex::ui::{AgentState, App};
@@ -73,34 +72,19 @@ fn expected_export(agent: Agent, cwd: &Path) -> String {
     app.export().trim().to_owned()
 }
 
-/// Open the files viewer of `block` in a split, with the two files.
-fn open_viewer(session: &str, block: &str, wrapper: &Path) -> Output {
-    Command::new("rex")
-        .args([
-            "split",
-            "-s",
-            session,
-            "-b",
-            block,
-            "--label",
-            &pane_label_files(block),
-            "--shell",
-            "none",
-            "--",
-        ])
-        .arg(wrapper)
-        .args(["files", "--target", block, "--session", session, "one.md", "two.txt"])
-        .output()
-        .expect("rex split runs")
-}
-
-fn viewers(rex: &Rex<SystemRunner>, target: &str) -> Vec<String> {
-    let label = pane_label_files(target);
-    rex.view()
-        .map(|view| {
-            view.blocks().filter(|block| block.label == label).map(|block| block.block_id.clone()).collect()
-        })
-        .unwrap_or_default()
+/// Open the files viewer of `block` in a full-window layer, with the two files. The test calls the
+/// library with the wrapper as the program, so that the viewer gets the private state directory.
+fn open_viewer(
+    rex: &Rex<SystemRunner>,
+    session: &str,
+    block: &str,
+    wrapper: &Path,
+) -> Result<String, String> {
+    rex.focus_block(block).map_err(|error| error.to_string())?;
+    let paths = ["one.md".to_owned(), "two.txt".to_owned()];
+    open_files(rex, block, session, wrapper, &paths)
+        .map(|opened| opened.block_id)
+        .map_err(|error| error.to_string())
 }
 
 /// The drafts of the files, with and without `sent_at`.
@@ -155,16 +139,9 @@ fn review_files_for_each_agent() {
         }
 
         // 1. Start the viewer with the two paths. The list has both. The tree hides ignored.txt.
-        let output = open_viewer(&session, &live.block, &wrapper);
-        let Some(viewer) =
-            wait_until(Duration::from_secs(10), || viewers(&rex, &live.block).into_iter().next())
-                .filter(|_| output.status.success())
-        else {
-            fail(format!(
-                "{name} open: exit {:?}: {}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr)
-            ));
+        let Ok(viewer) = open_viewer(&rex, &session, &live.block, &wrapper).inspect_err(|error| {
+            fail(format!("{name} open: {error}"));
+        }) else {
             continue;
         };
         let shown = wait_until(Duration::from_secs(10), || {
@@ -247,12 +224,9 @@ fn review_files_for_each_agent() {
             fail(format!("{name} banner: the agent did not finish the reply to the export"));
             continue;
         }
-        let output = open_viewer(&session, &live.block, &wrapper);
-        let Some(viewer) =
-            wait_until(Duration::from_secs(10), || viewers(&rex, &live.block).into_iter().next())
-                .filter(|_| output.status.success())
-        else {
-            fail(format!("{name} reopen: the viewer did not open"));
+        let Ok(viewer) = open_viewer(&rex, &session, &live.block, &wrapper).inspect_err(|error| {
+            fail(format!("{name} open: {error}"));
+        }) else {
             continue;
         };
         wait_until(Duration::from_secs(10), || {
