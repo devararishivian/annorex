@@ -57,8 +57,9 @@ fn parse_label(label: &str) -> Option<(&'static str, &str)> {
     }
 }
 
+/// A label of Annorex has a block id after the prefix, so a label such as `annorex: notes` does not count.
 fn is_annorex(block: &BlockInfo) -> bool {
-    parse_label(&block.label).is_some()
+    parse_label(&block.label).is_some_and(|(_, target)| target.starts_with("block:"))
 }
 
 /// The `session.new_layer` request for a viewer of `view`: the full `window`, with focus. File paths
@@ -152,6 +153,21 @@ pub struct Existing {
     pub same_target: bool,
     /// True when the open Annorex is the viewer that the user asked for.
     pub same_viewer: bool,
+}
+
+impl Existing {
+    /// What to tell the user when the open Annorex is not the one that was asked for: the agent it
+    /// serves, the viewer it shows, and how to close it. `None` when it is the one asked for.
+    pub fn notice(&self) -> Option<String> {
+        if self.same_target && self.same_viewer {
+            return None;
+        }
+        let viewer = if self.viewer == "files" { "file viewer" } else { "reply viewer" };
+        let agent = self.agent.as_deref().unwrap_or("an agent");
+        Some(format!(
+            "Annorex is already open in this session, for {agent} ({viewer}). It is in front now; press q there to close it, then start Annorex again."
+        ))
+    }
 }
 
 /// The viewer pane after `open_view`.
@@ -255,19 +271,39 @@ pub fn open_view(
     let cwd = process.foreground.as_ref().and_then(|fg| fg.cwd.as_deref());
     let request = layer_request_for(view, target, session, &window, exe, cwd);
     let layer = api.new_layer(&request)?;
-    let block_id = layer.block_ids.first().cloned().ok_or(OpenError::NoNewBlock)?;
+    let Some(block_id) = layer.block_ids.first().cloned() else {
+        // Do not leave a layer without a known block.
+        let _ = api.close_layer(&layer.layer_id);
+        return Err(OpenError::NoNewBlock);
+    };
     // Two starts at the same time can both find no Annorex. The oldest block stays. The newer one closes
-    // its own layer. Block ids grow with time, so the smaller id is the older block.
+    // its own layer. Block ids are time-ordered, so the smaller id is the older block. Both starts compare
+    // the same ids in the same way, so exactly one stays, also when two ids have the same millisecond.
     if let Ok(after) = api.view() {
         let found = after.locate(is_annorex);
         if let Some(oldest) = found.iter().min_by(|a, b| a.block.block_id.cmp(&b.block.block_id))
             && oldest.block.block_id != block_id
         {
-            api.close_layer(&layer.layer_id)?;
+            // The kept Annorex is the one that matters. A failed close must not hide it.
+            let _ = api.close_layer(&layer.layer_id);
             return focus_existing(api, oldest, view, target);
         }
     }
     Ok(Opened { block_id, focused_existing: false, existing: None })
+}
+
+/// Hand the focus back when the viewer quits: minimize the layer of `own_block` without focus, then
+/// focus `target`. Without this, Rex puts the focus on a block of its own, which can be another
+/// agent [live, 2026-11-11]. Every error is ignored, because the viewer is ending.
+pub fn release_focus(api: &impl OpenApi, own_block: &str, target: &str) {
+    let Ok(view) = api.view() else { return };
+    let Some(layer) =
+        view.locate(|block| block.block_id == own_block).first().map(|found| found.layer.layer_id.clone())
+    else {
+        return;
+    };
+    let _ = api.set_layer_state(&layer, LayerState::Minimized, false);
+    let _ = api.focus_block(target);
 }
 
 #[cfg(test)]
@@ -596,5 +632,54 @@ mod tests {
         assert_eq!(parse_label(&pane_label_files(TARGET)), Some(("files", TARGET)));
         assert_eq!(parse_label(&pane_label(TARGET)), Some(("last", TARGET)));
         assert_eq!(parse_label("claude"), None);
+    }
+
+    // S2: on quit, the viewer hands the focus to the agent. Without this, Rex picks a block of its own.
+    #[test]
+    fn quit_minimizes_the_own_layer_without_focus_and_focuses_the_agent() {
+        let fake = Fake::claude(vec![view(&[("layer:mine", None, &[("block:mine", &pane_label(TARGET))])])]);
+        release_focus(&fake, "block:mine", TARGET);
+        assert_eq!(
+            fake.called(),
+            vec![
+                "view".to_owned(),
+                "set_layer_state layer:mine Minimized false".to_owned(),
+                format!("focus_block {}", &TARGET[TARGET.len() - 4..]),
+            ]
+        );
+    }
+
+    #[test]
+    fn quit_does_nothing_when_the_own_block_is_in_no_layer() {
+        let fake = Fake::claude(vec![agent_only()]);
+        release_focus(&fake, "block:mine", TARGET);
+        assert_eq!(fake.called(), vec!["view".to_owned()]);
+    }
+
+    #[test]
+    fn the_notice_names_the_agent_and_the_viewer_when_they_differ() {
+        let same = Existing {
+            viewer: "last".into(),
+            target: TARGET.into(),
+            agent: Some("pi".into()),
+            same_target: true,
+            same_viewer: true,
+        };
+        assert_eq!(same.notice(), None);
+        let other = Existing { same_target: false, ..same.clone() };
+        let text = other.notice().expect("notice");
+        assert!(text.contains("pi") && text.contains("reply") && text.contains("press q"), "{text}");
+        let files = Existing { viewer: "files".into(), same_viewer: false, ..same };
+        assert!(files.notice().expect("notice").contains("file"));
+    }
+
+    #[test]
+    fn a_label_that_only_starts_with_the_prefix_is_not_an_annorex() {
+        let user =
+            BlockInfo { block_id: "block:u".into(), label: "annorex: notes".into(), creator_name: None };
+        assert!(!is_annorex(&user));
+        let ours =
+            BlockInfo { block_id: "block:o".into(), label: format!("annorex:{TARGET}"), creator_name: None };
+        assert!(is_annorex(&ours));
     }
 }

@@ -36,7 +36,9 @@ annorex rex install
 ```
 
 `annorex rex install` writes the Lua module `annorex.lua` beside the `init.lua` of Rex. It does not change `init.lua`.
-Use `--dir DIR` to write the module to a different directory. Then it runs `rex config check` on a scratch copy and reports errors in the module. Then add these lines to `init.lua`:
+Use `--dir DIR` to write the module to a different directory.
+The command then runs `rex config check` on a scratch copy of the module. It reports errors in the module.
+Then add these lines to `init.lua`:
 
 ```lua
 require("annorex").setup{}
@@ -55,8 +57,10 @@ placement. The key `placement` in `config.toml` and the option `--placement` giv
 
 Only one Annorex runs in each Rex session. If you start Annorex while one is open in the session, Annorex shows the open
 one. It does not open a second one, also for another agent or for the other viewer. Different sessions can each run their
-own Annorex at the same time. Rex ends the zoom of a pane when the layer opens, and it does not restore the zoom when
-you close the viewer.
+own Annorex at the same time. Rex ends the zoom of a pane when the layer opens.
+Rex does not restore the zoom when you close the viewer.
+If the open Annorex is for another agent or viewer, the action shows a message that names it.
+Press `q` there to close it.
 
 ### Review the last reply
 
@@ -175,7 +179,7 @@ annorex files --target block:... README.md docs/guide.md
 annorex rex open files --target block:... README.md
 ```
 
-A path can name a directory. Then the tree opens there. If a file viewer is already open for the agent,
+A path can name a directory. Then the tree opens there. If an Annorex is already open in the session,
 `annorex rex open files` only moves the focus to it and does not open the paths. Open them in that viewer with `ctrl+p`
 or `T`.
 
@@ -297,6 +301,7 @@ These projects are the base of the Annorex idea:
 - [memex](https://github.com/nicosuave/memex) by Nico Ritschel. memex shows how to connect a Rust tool to Rex.
 
 The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the rule of one
-review layer for each session.
+review layer for each session. The check of the Lua module with `rex config check` on a scratch copy, and the lookup of
+the window of the agent pane with `session.describe_block`, follow the same ideas in plannotator-tui.
 
 Annorex is an independent project. It has no connection to these projects, and they do not endorse it.

@@ -114,7 +114,7 @@ pub enum RexError {
     BadJson { method: String, source: serde_json::Error },
     #[error("{} {method} did not answer in {} s", call_of(method), REX_TIMEOUT.as_secs())]
     Timeout { method: String },
-    #[error("block {block} is not in a window of the session")]
+    #[error("block {block} has no window in the session")]
     NotInWindow { block: String },
     #[error("cannot run rex: {0}")]
     Io(#[from] std::io::Error),
@@ -535,7 +535,7 @@ mod tests {
         });
         let error = rex.window_of("block:b1").expect_err("no window");
         assert!(matches!(error, RexError::NotInWindow { .. }), "{error:?}");
-        assert_eq!(error.to_string(), "block block:b1 is not in a window of the session");
+        assert_eq!(error.to_string(), "block block:b1 has no window in the session");
     }
 
     #[test]

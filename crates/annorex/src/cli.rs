@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
 use crate::draft::{DraftStore, drafts_dir};
 use crate::install::{Check, InstallError, check_module, config_dir, install, run_rex_config_check};
-use crate::open::{OpenError, View, open_view};
+use crate::open::{Existing, OpenError, View, open_view};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
@@ -420,6 +420,10 @@ fn rex_open(
     let json = serde_json::to_string(&opened)
         .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
     writeln!(out, "{json}").map_err(|error| io_failure(&error))?;
+    // The Lua action shows the first line of the error to the user.
+    if let Some(message) = opened.existing.as_ref().and_then(Existing::notice) {
+        return Err(Failure { code: EXIT_REFUSED, message });
+    }
     Ok(EXIT_OK)
 }
 

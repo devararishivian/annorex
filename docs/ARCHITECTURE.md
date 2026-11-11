@@ -1,7 +1,7 @@
 # Architecture
 
 > **Current state: review of replies and of many files built.** The Rex adapter, agent detection, dialog check,
-> payload, delivery, transcript readers, Lua module, install, pane placement, reply loading, document model, wrapping,
+> payload, delivery, transcript readers, Lua module, install, layer placement, reply loading, document model, wrapping,
 > layout, UI, terminal loop, config, keys, review, drafts, send, clipboard, file loading, file tree, fuzzy find, and
 > file watch are **built**.
 

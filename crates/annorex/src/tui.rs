@@ -112,6 +112,13 @@ fn start_terminal<T>(init: impl FnOnce() -> io::Result<T>, restore: impl FnOnce(
     init().inspect_err(|_| restore())
 }
 
+/// After the viewer quits, focus the agent. A viewer outside a Rex layer has no `REX_BLOCK` and does nothing.
+fn hand_back_focus(rex: &Rex<SystemRunner>, target: &str) {
+    if let Some(own) = std::env::var_os("REX_BLOCK").and_then(|value| value.into_string().ok()) {
+        crate::open::release_focus(rex, &own, target);
+    }
+}
+
 /// `annorex last`: show the replies of the agent in `target` in this terminal. Every problem after
 /// the Rex discovery shows in the pane, so the user can read it.
 pub fn run_last(
@@ -156,6 +163,7 @@ pub fn run_last(
         &mut |effect, app: &mut App| viewer.apply(effect, app),
     );
     restore_terminal();
+    hand_back_focus(rex, target);
     result
 }
 
@@ -205,6 +213,7 @@ pub fn run_files(
         &mut |effect, app: &mut App| viewer.apply(effect, app),
     );
     restore_terminal();
+    hand_back_focus(rex, target);
     result
 }
 

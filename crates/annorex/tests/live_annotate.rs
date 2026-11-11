@@ -100,9 +100,8 @@ fn open_viewer(
     open_last(rex, block, session, wrapper).map(|opened| opened.block_id).map_err(|error| error.to_string())
 }
 
-/// S2: the layer of `viewer` is gone and the focus is on a block of the window of `agent`. Rex
-/// chooses that block: after a layer closes, the focus goes to its own remembered block, which is
-/// not always the block that `session.focus_block` set [live, 2026-11-11]. The log tells which.
+/// S2: the layer of `viewer` is gone. Gives whether the focus is on `agent`. The viewer hands the
+/// focus back when it quits. Else Rex picks a block of its own [live, 2026-11-11].
 fn layer_gone_and_window_focused(rex: &Rex<SystemRunner>, viewer: &str, agent: &str) -> Option<bool> {
     let view = rex.view().ok()?;
     let gone = view.blocks().all(|block| block.block_id != viewer);
@@ -266,8 +265,8 @@ fn annotate_and_send_for_each_agent() {
         let back =
             wait_until(Duration::from_secs(5), || layer_gone_and_window_focused(&rex, &viewer, &live.block));
         log(start, &format!("{name} S2: layer gone and the window has the focus; on the agent {back:?}"));
-        if back.is_none() {
-            fail(format!("{name} S2: the layer stays or the window has no focused pane"));
+        if back != Some(true) {
+            fail(format!("{name} S2: the layer stays or the focus is not on the agent: {back:?}"));
         }
         if live.agent != Agent::ClaudeCode {
             continue;

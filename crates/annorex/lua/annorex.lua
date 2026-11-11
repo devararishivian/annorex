@@ -75,7 +75,7 @@ function M.setup(opts)
   rex.action{
     name = "annorex_files",
     title = "Annorex: review files",
-    description = "Open the files of the work directory of the agent in the focused pane, next to it.",
+    description = "Open the files of the work directory of the agent in the focused pane, over the full window.",
     category = "Annorex",
     keywords = "annorex review files tree agent claude pi opencode",
     run = function(ctx) return open_files(ctx) end,
