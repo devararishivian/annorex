@@ -413,6 +413,11 @@ impl KeyMap {
             .map_or_else(|| "unbound".to_owned(), |(chord, _)| chord.text())
     }
 
+    /// The key of an action, for a click on its hint. `None` when the action has no key.
+    pub fn chord(&self, action: Action) -> Option<KeyChord> {
+        self.map.iter().find(|(_, bound)| **bound == action).map(|(chord, _)| *chord)
+    }
+
     /// The action of a key event, if the key is bound.
     pub fn action(&self, event: KeyEvent) -> Option<Action> {
         self.map.get(&KeyChord::of_event(event)).copied()

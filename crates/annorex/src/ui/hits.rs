@@ -8,8 +8,6 @@ use crate::keys::Action;
 use crate::review::Kind;
 
 /// A thing that a click can reach.
-// Later tasks push most of these variants.
-#[allow(dead_code, reason = "later tasks push and read these variants")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Hit {
     Block(usize),
@@ -40,7 +38,6 @@ pub(crate) struct HitMap {
     areas: Vec<(Rect, Hit)>,
 }
 
-#[allow(dead_code, reason = "later tasks call push and at")]
 impl HitMap {
     /// Remove all areas.
     pub(crate) fn clear(&mut self) {

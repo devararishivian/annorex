@@ -661,6 +661,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
         .unwrap_or_default();
     let selection = app.selection_range();
     app.width = text_width;
+    app.text_area = Rect::new(area.x + margin + gutter, area.y, text_width, area.height);
     let focused = match app.mode {
         Mode::Block(index) => app.doc.blocks.get(index).cloned(),
         Mode::Text => None,
@@ -668,7 +669,9 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
     let rows = app.cache.get(&app.doc, text_width);
     let first_row = |doc_line: usize| rows.iter().position(|row| row.doc_line >= doc_line);
     let mut top_row = first_row(app.top).unwrap_or(0);
-    if let Some(block) = &focused {
+    if app.scroll.doc {
+        // The wheel moved the view: it does not follow the focus until the next key.
+    } else if let Some(block) = &focused {
         // Block mode: the focused block stays in view. A tall block can scroll inside.
         top_row = View { rows, top: top_row, height }.top_for(top_row, block);
     } else if let Some(cursor_row) = first_row(cursor_line) {
@@ -950,14 +953,24 @@ fn row_spans(
     out
 }
 
-/// The lines of a list: the first line is a header, and the rest scrolls with the cursor. The result
-/// is the index of the first row on the screen and the screen row where it is.
+/// The first row on the screen of a list of `count` rows with `height` rows of room: `wanted` when
+/// the wheel scrolled the list, else the first row that keeps `cursor` in view.
+fn list_top(wanted: Option<usize>, cursor: usize, count: usize, height: usize) -> usize {
+    match wanted {
+        Some(top) => top.min(count.saturating_sub(height)),
+        None => cursor.saturating_sub(height.saturating_sub(1)),
+    }
+}
+
+/// The lines of a list: the first line is a header, and the rest scrolls with the cursor, or from
+/// `wanted` after the wheel. The result is the index of the first row on the screen and the screen
+/// row where it is.
 fn draw_list(
     frame: &mut Frame,
     inner: Rect,
     header: Option<String>,
     rows: &[String],
-    cursor: usize,
+    (cursor, wanted): (usize, Option<usize>),
     marked: bool,
 ) -> (usize, u16) {
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -966,7 +979,7 @@ fn draw_list(
     }
     let first_y = inner.y + u16::try_from(lines.len()).unwrap_or(0);
     let height = usize::from(inner.height).saturating_sub(lines.len());
-    let offset = cursor.saturating_sub(height.saturating_sub(1));
+    let offset = list_top(wanted, cursor, rows.len(), height);
     for (index, text) in rows.iter().enumerate().skip(offset).take(height) {
         let style = if marked && index == cursor {
             Style::new().add_modifier(Modifier::REVERSED)
@@ -1064,7 +1077,9 @@ fn draw_tree(frame: &mut Frame, app: &mut App, area: Rect, borders: Borders) {
         return;
     }
     // Without the focus, the tree shows no cursor.
-    let place = draw_list(frame, inner, header, &rows, app.tree.index, app.focus == Focus::Tree);
+    let cursor = (app.tree.index, app.scroll.tree);
+    let place = draw_list(frame, inner, header, &rows, cursor, app.focus == Focus::Tree);
+    app.tops.tree = place.0;
     push_rows(app, inner, place, rows.len(), Hit::TreeRow);
 }
 
@@ -1095,7 +1110,8 @@ fn draw_finder(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_widget(Paragraph::new(lines), inner);
         return;
     }
-    let place = draw_list(frame, inner, header, &rows, app.finder.index, true);
+    let place = draw_list(frame, inner, header, &rows, (app.finder.index, app.scroll.boxed), true);
+    app.tops.boxed = place.0;
     push_rows(app, inner, place, rows.len(), Hit::ListRow);
 }
 
@@ -1124,7 +1140,8 @@ fn draw_reply_list(frame: &mut Frame, app: &mut App, area: Rect) {
     };
     let first_y = inner.y + u16::try_from(reason.len()).unwrap_or(0);
     let height = usize::from(inner.height).saturating_sub(reason.len()).max(1);
-    let offset = app.panel_index.saturating_sub(height.saturating_sub(1));
+    let offset = list_top(app.scroll.boxed, app.panel_index, app.replies.len(), height);
+    app.tops.boxed = offset;
     let lines: Vec<Line<'static>> = app
         .replies
         .iter()
@@ -1191,7 +1208,7 @@ fn draw_annotation_list(frame: &mut Frame, app: &mut App, area: Rect, borders: B
         return;
     }
     let visible = usize::from(inner.height / 2).max(1);
-    let offset = app.annotation_index.saturating_sub(visible - 1);
+    let offset = list_top(app.scroll.notes, app.annotation_index, items.len(), visible);
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut rows: Vec<usize> = Vec::new();
     for (index, annotation) in items.iter().enumerate().skip(offset).take(visible) {
@@ -1219,6 +1236,7 @@ fn draw_annotation_list(frame: &mut Frame, app: &mut App, area: Rect, borders: B
         rows.push(index);
     }
     frame.render_widget(Paragraph::new(lines), inner);
+    app.tops.notes = offset;
     // Each item has two lines. Both lines reach the item.
     for (position, index) in rows.into_iter().enumerate() {
         let y = inner.y + u16::try_from(position * 2).unwrap_or(u16::MAX);
@@ -1335,7 +1353,8 @@ fn draw_picker(frame: &mut Frame, app: &mut App, area: Rect, candidates: &[Candi
     ];
     // The rows under the two lines of text. Scroll so that the selected row stays visible.
     let rows = usize::from(area.height).saturating_sub(lines.len()).max(1);
-    let offset = index.saturating_sub(rows - 1);
+    let offset = list_top(app.scroll.boxed, index, candidates.len(), rows);
+    app.tops.boxed = offset;
     for (position, candidate) in candidates.iter().enumerate().skip(offset).take(rows) {
         let marker = if position == index { "▸" } else { " " };
         let text = format!("{marker} {} · {}", age(now, candidate.updated), candidate.last_line);

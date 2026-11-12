@@ -79,6 +79,7 @@ pub fn run_loop(
             let effect = match event {
                 Event::Key(key) => Some(app.handle_key(key)),
                 Event::Paste(text) => Some(app.handle_paste(&text)),
+                Event::Mouse(mouse) => Some(app.handle_mouse(mouse)),
                 _ => None,
             };
             if let Some(effect) = effect {
@@ -175,15 +176,27 @@ pub fn run_viewer(
     result
 }
 
-/// Raw mode, the alternate screen, and bracketed paste, so a paste is one event and not keys.
+/// Raw mode, the alternate screen, bracketed paste (so a paste is one event and not keys), and the
+/// mouse. A panic turns the paste mode and the mouse off before the panic hook of ratatui restores
+/// the rest.
 fn init_terminal() -> io::Result<DefaultTerminal> {
     let terminal = ratatui::try_init()?;
-    ratatui::crossterm::execute!(io::stdout(), event::EnableBracketedPaste)?;
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        stop_paste_and_mouse();
+        hook(info);
+    }));
+    ratatui::crossterm::execute!(io::stdout(), event::EnableBracketedPaste, event::EnableMouseCapture)?;
     Ok(terminal)
 }
 
+fn stop_paste_and_mouse() {
+    let _ =
+        ratatui::crossterm::execute!(io::stdout(), event::DisableMouseCapture, event::DisableBracketedPaste);
+}
+
 fn restore_terminal() {
-    let _ = ratatui::crossterm::execute!(io::stdout(), event::DisableBracketedPaste);
+    stop_paste_and_mouse();
     ratatui::restore();
 }
 

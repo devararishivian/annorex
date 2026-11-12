@@ -3,13 +3,16 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::layout::Rect;
 
 use super::cards::MAX_PICK;
 use super::editor::{Editor, EditorResult};
 use super::focus::Mode;
 use super::hits::HitMap;
+use super::mouse::{Scroll, Tops};
 use super::tree::{Finder, Tree};
 use crate::agent::Agent;
 use crate::config::Config;
@@ -210,6 +213,16 @@ pub struct App {
     pub(crate) page: usize,
     /// The clickable areas of the last frame.
     pub(crate) hits: HitMap,
+    /// The time and the cell of the last click in the document text, for the double click.
+    pub(crate) last_click: Option<(Instant, u16, u16)>,
+    /// The anchor of a drag that started in the document text.
+    pub(crate) drag: Option<usize>,
+    /// The scroll of the mouse wheel. Any key ends it.
+    pub(crate) scroll: Scroll,
+    /// The first row of each list in the last frame.
+    pub(crate) tops: Tops,
+    /// The text area of the document in the last frame.
+    pub(crate) text_area: Rect,
     /// The time zone of the times in the reply list. The default is the system zone.
     pub(crate) zone: jiff::tz::TimeZone,
     pub(crate) config: Config,
@@ -296,6 +309,11 @@ impl App {
             status: None,
             page: 20,
             hits: HitMap::default(),
+            last_click: None,
+            drag: None,
+            scroll: Scroll::default(),
+            tops: Tops::default(),
+            text_area: Rect::default(),
             zone: jiff::tz::TimeZone::system(),
             config: config.clone(),
             reviews: HashMap::new(),
@@ -442,7 +460,7 @@ impl App {
     }
 
     /// Read a file of the work directory and show it. A failure goes to the footer.
-    fn open_path(&mut self, relative: &Path) -> Effect {
+    pub(super) fn open_path(&mut self, relative: &Path) -> Effect {
         let Some(root) = self.root.clone() else { return Effect::None };
         match crate::files::load(&root, relative) {
             Ok(loaded) => {
@@ -1062,6 +1080,8 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return Effect::None;
         }
+        // A key brings the views that the wheel scrolled back to their focus.
+        self.scroll = Scroll::default();
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             // Like `q`: an open editor closes first, the first press asks about unsent notes, the
             // second press quits. The draft stays on disk.
@@ -1280,7 +1300,7 @@ impl App {
         }
     }
 
-    fn close_box(&mut self) {
+    pub(super) fn close_box(&mut self) {
         self.boxed = None;
         self.focus = Focus::Doc;
     }
@@ -1341,7 +1361,7 @@ impl App {
     }
 
     /// `enter` in the tree: open a file, or open or close a directory.
-    fn tree_enter(&mut self) -> Effect {
+    pub(super) fn tree_enter(&mut self) -> Effect {
         let Some(entry) = self.tree.selected() else { return Effect::None };
         if entry.is_dir {
             self.tree.toggle();
@@ -1464,7 +1484,7 @@ impl App {
     }
 
     /// `enter` in the reply list: show the reply, or choose the session.
-    fn replies_enter(&mut self) -> Effect {
+    pub(super) fn replies_enter(&mut self) -> Effect {
         if let ReplySource::Pick(candidates) = &self.reply_source {
             return if candidates.is_empty() { Effect::None } else { Effect::PickSession(self.picker_index) };
         }
@@ -1588,7 +1608,7 @@ impl App {
     }
 
     /// `S` and `P`: send or paste the export, when there is something to send.
-    fn request_send(&mut self, mode: DeliveryMode) -> Effect {
+    pub(super) fn request_send(&mut self, mode: DeliveryMode) -> Effect {
         if self.export().is_empty() {
             self.status = Some(self.nothing_to_send());
             return Effect::None;
@@ -1793,7 +1813,7 @@ impl App {
             .or_else(|| self.doc.lines.get(self.cursor_line()).map(|line| line.source.clone()))
     }
 
-    fn begin_new(&mut self, kind: Kind) -> Effect {
+    pub(super) fn begin_new(&mut self, kind: Kind) -> Effect {
         if self.shown_id.is_none() {
             return Effect::None;
         }
@@ -1873,7 +1893,7 @@ impl App {
     }
 
     /// Edit a note, or ask before its removal.
-    fn act_on_note(&mut self, id: u64, remove: bool) -> Effect {
+    pub(super) fn act_on_note(&mut self, id: u64, remove: bool) -> Effect {
         if remove {
             self.confirm = Some(Confirm::Annotation(id));
             Effect::None
@@ -1901,7 +1921,7 @@ impl App {
         }
     }
 
-    fn begin_edit(&mut self, id: u64) -> Effect {
+    pub(super) fn begin_edit(&mut self, id: u64) -> Effect {
         let Some(annotation) =
             self.review().and_then(|review| review.annotations.iter().find(|a| a.id == id))
         else {
@@ -1925,7 +1945,14 @@ impl App {
 
     fn editor_key(&mut self, key: KeyEvent) -> Effect {
         let Some(editor) = &mut self.editor else { return Effect::None };
-        match editor.handle_key(key, &self.config.labels) {
+        let result = editor.handle_key(key, &self.config.labels);
+        self.editor_done(result)
+    }
+
+    /// Act on the result of the editor: a key, or a click on `save` or `cancel`.
+    pub(super) fn editor_done(&mut self, result: EditorResult) -> Effect {
+        let Some(editor) = &self.editor else { return Effect::None };
+        match result {
             EditorResult::Editing => Effect::SaveDraft,
             EditorResult::Cancel => {
                 self.editor = None;
@@ -2132,7 +2159,7 @@ fn overlaps(a: &Range<usize>, b: &Range<usize>) -> bool {
 }
 
 /// A character of a word: a letter, a digit, or an underscore.
-fn is_word(c: char) -> bool {
+pub(super) fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 

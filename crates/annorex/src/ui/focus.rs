@@ -95,6 +95,29 @@ impl View<'_> {
         top.clamp(low, high)
     }
 
+    /// The top row after a scroll by `amount` rows. The view starts at the first row of a `DocLine`,
+    /// and it does not go past the screen that shows the last row.
+    fn scroll_top(&self, forward: bool, amount: usize) -> usize {
+        let max_top = self.start_at_or_before(self.rows.len().saturating_sub(self.height));
+        if forward {
+            self.start_at_or_before((self.top + amount).min(max_top)).max(self.top)
+        } else {
+            self.start_at_or_before(self.top.saturating_sub(amount))
+        }
+    }
+
+    /// The top row after a scroll of the mouse. Unlike [`View::scroll_top`], it always moves while
+    /// it can: a `DocLine` taller than `amount` rows does not stop it.
+    fn wheel_top(&self, forward: bool, amount: usize) -> usize {
+        let next = self.scroll_top(forward, amount);
+        let max_top = self.start_at_or_before(self.rows.len().saturating_sub(self.height));
+        if forward && next == self.top && self.top < max_top {
+            self.start_at_or_after(self.top + 1).min(max_top)
+        } else {
+            next
+        }
+    }
+
     /// The focus and the top row after a move. `focus` is the block that has the focus now.
     pub(crate) fn apply(&self, blocks: &[Block], focus: usize, how: Move) -> (usize, usize) {
         let Some(last) = blocks.len().checked_sub(1) else { return (focus, self.top) };
@@ -129,12 +152,7 @@ impl View<'_> {
                 if focus > 0 { show(focus - 1, top) } else { (focus, top) }
             }
             Move::Scroll { forward, rows: amount } => {
-                let max_top = self.start_at_or_before(self.rows.len().saturating_sub(self.height));
-                let next = if forward {
-                    self.start_at_or_before((self.top + amount).min(max_top)).max(self.top)
-                } else {
-                    self.start_at_or_before(self.top.saturating_sub(amount))
-                };
+                let next = self.scroll_top(forward, amount);
                 let bottom = next + self.height.max(1);
                 let starts_in_view = blocks.iter().position(|b| {
                     let rows = self.block_rows(b);
@@ -195,6 +213,22 @@ impl App {
         if let Some(start) = self.block_start(focus) {
             self.cursor = start;
         }
+    }
+
+    /// The index of the first visual row of the view.
+    pub(super) fn view_top_row(&mut self) -> usize {
+        let width = if self.width == 0 { u16::MAX } else { self.width };
+        let top = self.top;
+        self.cache.get(&self.doc, width).iter().position(|row| row.doc_line >= top).unwrap_or(0)
+    }
+
+    /// Scroll the view by `rows` rows for the mouse. The focus, the cursor, and the selection stay.
+    pub(super) fn wheel_doc(&mut self, forward: bool, rows: usize) {
+        let width = if self.width == 0 { u16::MAX } else { self.width };
+        let top = self.view_top_row();
+        let lines = self.cache.get(&self.doc, width);
+        let next = View { rows: lines, top, height: self.page.max(1) }.wheel_top(forward, rows);
+        self.top = lines.get(next).map_or(self.top, |row| row.doc_line);
     }
 
     /// In block mode, focus the block near `offset` and put it in view.
