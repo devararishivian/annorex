@@ -1,7 +1,7 @@
 //! The file tree and the fuzzy file finder. They hold their own state. The app decides what the
 //! keys do, and the drawing code reads the rows.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::files::{Entry, Scan};
@@ -30,12 +30,22 @@ pub(crate) struct Tree {
     reveal: Option<PathBuf>,
     /// The files that the agent changed in its last turns, newest first.
     changed: Vec<PathBuf>,
+    changed_set: HashSet<PathBuf>,
+    /// The place of each file in `entries`, so a path is found without a search.
+    file_index: HashMap<PathBuf, usize>,
 }
 
 impl Tree {
     /// Put the result of a scan in the tree. The open directories stay open.
     pub(crate) fn load(&mut self, scan: Scan) {
         self.entries = scan.entries;
+        self.file_index = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.is_dir)
+            .map(|(i, e)| (e.path.clone(), i))
+            .collect();
         self.truncated = scan.truncated;
         self.loaded = true;
         self.index = self.index.min(self.visible().len().saturating_sub(1));
@@ -46,6 +56,7 @@ impl Tree {
     /// The cursor stays on the same row when the section grows or shrinks above it.
     pub(crate) fn set_changed(&mut self, changed: Vec<PathBuf>) {
         let before = self.visible().get(self.index).map(|row| (row.entry.path.clone(), row.changed_section));
+        self.changed_set = changed.iter().cloned().collect();
         self.changed = changed;
         let rows = self.visible();
         let same = before.and_then(|(path, section)| {
@@ -56,19 +67,19 @@ impl Tree {
 
     /// True when the scan has the file.
     pub(crate) fn has_file(&self, path: &Path) -> bool {
-        self.entries.iter().any(|entry| !entry.is_dir && entry.path == path)
+        self.file_index.contains_key(path)
     }
 
     /// True when the agent changed the file in its last turns.
     pub(crate) fn is_changed(&self, path: &Path) -> bool {
-        self.changed.iter().any(|changed| changed == path)
+        self.changed_set.contains(path)
     }
 
     /// The changed files that the tree has, in order.
     fn changed_entries(&self) -> Vec<&Entry> {
         self.changed
             .iter()
-            .filter_map(|path| self.entries.iter().find(|entry| !entry.is_dir && &entry.path == path))
+            .filter_map(|path| self.file_index.get(path).and_then(|&index| self.entries.get(index)))
             .collect()
     }
 
@@ -325,6 +336,36 @@ mod tests {
         tree.start_filter();
         assert!(!tree.visible().iter().any(|row| row.changed_section), "no section while the filter is on");
         assert_eq!(tree.visible().len(), 2, "the normal tree stays complete");
+    }
+
+    #[test]
+    fn many_changed_files_in_a_large_tree_keep_their_rows() {
+        let names: Vec<String> = (0..20_000).map(|n| format!("d{}/f{n}.rs", n % 50)).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut tree = tree(&refs);
+        // Every 100th file changed, newest first, and two paths that the scan does not have.
+        let mut changed: Vec<PathBuf> = (0..20_000).step_by(100).map(|n| PathBuf::from(&names[n])).collect();
+        changed.insert(1, PathBuf::from("gone/missing.rs"));
+        changed.push(PathBuf::from("also/missing.rs"));
+        tree.set_changed(changed.clone());
+        let expected: Vec<&PathBuf> =
+            changed.iter().filter(|path| !path.starts_with("gone") && !path.starts_with("also")).collect();
+        let started = std::time::Instant::now();
+        let mut rows = Vec::new();
+        for _ in 0..20 {
+            rows = tree.visible();
+        }
+        let section: Vec<&PathBuf> =
+            rows.iter().filter(|row| row.changed_section).map(|row| &row.entry.path).collect();
+        assert_eq!(section, expected);
+        assert_eq!(tree.changed_count(), expected.len());
+        assert!(tree.is_changed(Path::new(&names[300])) && !tree.is_changed(Path::new("d1/f1.rs")));
+        assert!(tree.has_file(Path::new("d1/f1.rs")) && !tree.has_file(Path::new("nope.rs")));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "visible() is too slow: {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
