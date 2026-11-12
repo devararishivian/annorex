@@ -1116,7 +1116,8 @@ fn cards_show_at_120_columns_and_markers_below() {
     assert_eq!(markers.len(), 1, "{narrow}");
     let (x, y, style) = markers[0];
     assert_eq!((y, style.fg), (row, Some(Color::Yellow)), "a yellow marker at the row of the note");
-    assert!(x > 100, "the marker is in the right margin: {x}");
+    // The document is 100 columns wide at most, so the margin ends there.
+    assert!((90..100).contains(&x), "the marker is in the right margin of the capped document: {x}");
 }
 
 #[test]
@@ -1196,4 +1197,26 @@ fn snapshot_cards_120x40() {
     press(&mut app, "jsThe last line.\n");
     press(&mut app, "k");
     insta::assert_snapshot!(render(&mut app, 120, 40));
+}
+
+#[test]
+fn a_card_starts_on_the_first_row_of_its_block_at_240_columns() {
+    let mut app = app(bar_text());
+    // The blocks are the heading, the paragraph, "- one", "- two", and "The end.": block 3 is "- two".
+    press(&mut app, "jjjcNote on two\n");
+    let screen = render(&mut app, 240, 40);
+    let block = row_of(&screen, "- two");
+    let title = row_of(&screen, "💬 comment");
+    assert_eq!(title, block, "the card top is the first row of its block:\n{screen}");
+    // The card sits beside the text, not 80 columns away.
+    let line = screen.lines().nth(title).expect("row");
+    let card_x = line.find('┌').expect("card border");
+    assert!((100..110).contains(&card_x), "the card is right of the capped document: {card_x}");
+}
+
+#[test]
+fn snapshot_wide_200x40() {
+    let mut app = app(bar_text());
+    press(&mut app, "jcWhich page? The old one or the new one.\n");
+    insta::assert_snapshot!(render(&mut app, 200, 40));
 }

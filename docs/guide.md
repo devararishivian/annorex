@@ -180,6 +180,8 @@ The layout changes with the size of the window:
 
 - 120 columns or more: the file tree on the left (when it shows), the document, and the card rail on the
   right. The tree is 28 columns wide. The rail is 34 columns wide. Each note has a card in the rail.
+  The document is 100 columns wide at most. On a wider pane, the rail sits next to the document, and the
+  space on the right stays empty.
 - 100 to 119 columns: the file tree on the left (when it shows) and the document. There is no rail. A dot in the color of the note
   marks the note in the right margin of the block.
 - Less than 100 columns, or less than 16 rows: one column. The tree and the list of notes open over the document.

@@ -629,7 +629,9 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
     );
     draw_action_bar(frame, text_area, doc_area.x, app);
     if let Side::Rail(rail) = side {
-        app.hits.push(rail, Hit::RailPane);
+        // The empty space right of a capped layout belongs to the rail pane: a click there does nothing
+        // and the wheel scrolls the document.
+        app.hits.push(Rect { width: header.right().saturating_sub(rail.x), ..rail }, Hit::RailPane);
     }
     draw_side(frame, app, side);
     if let Some(tree) = tree {

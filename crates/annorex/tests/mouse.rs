@@ -615,3 +615,16 @@ fn the_wheel_scrolls_without_creating_a_focus() {
     assert_eq!(app.mode(), Mode::Browse);
     assert_eq!(app.focused_block(), None);
 }
+
+#[test]
+fn the_empty_space_right_of_the_cards_does_nothing_and_the_wheel_scrolls() {
+    let mut app = viewer(&paragraphs(60));
+    let size = (240, 40);
+    let _ = frame(&mut app, size);
+    let focus = app.focused_block();
+    let effect = click(&mut app, (size.0 - 3, 10));
+    assert!(matches!(effect, Effect::None));
+    assert_eq!(app.focused_block(), focus, "a click in the empty space moved the focus");
+    wheel_down(&mut app, (size.0 - 3, 10));
+    assert!(app.doc_scrolled(), "the wheel in the empty space scrolled the document");
+}
