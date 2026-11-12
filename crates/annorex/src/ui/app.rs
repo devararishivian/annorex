@@ -312,6 +312,11 @@ impl App {
         );
         self.replies.push(Reply { id, text: loaded.text, at: None });
         self.screen = Screen::Viewer;
+        // A file on the screen is the work now: the choice of a session waits in the reply list.
+        if matches!(self.reply_source, ReplySource::Pick(_)) && self.panel_view == PanelView::Replies {
+            self.panel_open = false;
+            self.focus = Focus::Doc;
+        }
         self.show_reply(self.replies.len() - 1);
         self.sync_watch();
         Effect::None

@@ -9,15 +9,14 @@ text that an agent wrote. Then Annorex sends your notes back to the agent.
 
 ## Available now
 
-- **The reply viewer.** A Rex action opens Annorex in a floating layer over the full window of the agent. Annorex shows
-  the newest reply of the agent as formatted Markdown. You can select one of the 25 newest replies. The layout follows
-  the size of the window.
-- **The file viewer.** A second Rex action opens the files of the work directory of the agent. A tree and a fuzzy find
-  help you to open files. You can open many files and annotate each one.
+- **One viewer for replies and files.** A Rex action opens Annorex in a floating layer over the full window of the
+  agent. Annorex shows the newest reply of the agent as formatted Markdown. You can select one of the 25 newest replies.
+  The layout follows the size of the window. A second Rex action starts the same viewer on the files of the work
+  directory of the agent. A tree and a fuzzy find help you to open files. You can open many files and annotate each one.
 - **Annotations.** Select text in a reply or in a file. Add a comment, mark the text for removal, or give a replacement.
 - **Send, paste, and copy.** Annorex exports your notes as Markdown. It sends them to the agent, pastes them without
-  Enter, or copies them. A send gives only the notes that Annorex did not send before. The notes of all open files go
-  in one message.
+  Enter, or copies them. A send gives only the notes that Annorex did not send before. The notes of all replies and
+  open files go in one message.
 - **Drafts.** Annorex saves your notes to disk after each change.
 - **Change banner.** When the agent changes an open file, a banner shows. Press `r` to read the file again. Your notes
   move to their text.
@@ -56,11 +55,15 @@ Annorex always opens over the full window of the agent. The agent pane keeps its
 placement. The key `placement` in `config.toml` and the option `--placement` give an error.
 
 Only one Annorex runs in each Rex session. If you start Annorex while one is open in the session, Annorex shows the open
-one. It does not open a second one, also for another agent or for the other viewer. Different sessions can each run their
+one. It does not open a second one, also for another agent. Different sessions can each run their
 own Annorex at the same time. Rex ends the zoom of a pane when the layer opens.
 Rex does not restore the zoom when you close the viewer.
-If the open Annorex is for another agent or viewer, the action shows a message that names it.
+If the open Annorex is for another agent, the action shows a message that names it.
 Press `q` there to close it.
+
+The replies of the agent and the files of its work directory are in the same Annorex. `annorex_last` and
+`annorex_files` open the same viewer. They differ only in the first document: the newest reply, or the files that you
+name (the file tree when you name none). One send gives the notes on all replies and files to the agent.
 
 ### Review the last reply
 
@@ -88,10 +91,10 @@ reads the state again every 2 seconds.
 | `M`                     | Write a general note, then send                                  |
 | `P`                     | Paste the notes into the agent input box, without Enter          |
 | `Y`                     | Copy the notes                                                   |
-| `X`                     | Discard the notes of this reply (asks first)                     |
+| `X`                     | Discard the notes of the document on the screen (asks first)     |
 | `/`                     | Find text (the case is ignored)                                  |
 | `n` / `N`               | Go to the next or the previous match                             |
-| `p`                     | Open or close the reply list                                     |
+| `p`                     | Open or close the list of replies and open files                 |
 | `enter` (in the list)   | Show the selected reply, or go to the annotation                 |
 | `e` / `x` (annotation list) | Edit or delete the annotation                                |
 | `esc`                   | Cancel the selection, the editor, or the list                    |
@@ -108,7 +111,8 @@ The layout changes with the size of the window:
 - Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
 
 Pi and OpenCode can have more than one session in the same directory. If Annorex cannot find the session of the agent
-with certainty, it shows the sessions, newest first. Select one with `enter`.
+with certainty, the list shows the sessions, newest first. Select one with `enter`. If Annorex finds no replies (for
+example, the agent has not answered yet), the list says why, and `r` looks again. The files still work.
 
 ### Annotate and send
 
@@ -144,17 +148,17 @@ The viewer starts with the file tree. Open a file with `enter`. Annorex shows a 
 Markdown. It shows all other files as plain text with line numbers. It shows the text of a file with control characters
 removed.
 
-You can open up to 50 files. Each file has its own annotations and its own draft. The keys of the reply viewer work in
-a file too. These keys are new:
+You can open up to 50 files. Each file has its own annotations and its own draft. The keys for replies work in a file
+too. These keys are for files:
 
 | Key        | Function                                                                         |
 |------------|----------------------------------------------------------------------------------|
 | `T`        | Open or close the file tree                                                      |
 | `ctrl+p`   | Open the fuzzy find of files                                                     |
-| `p`        | Open or close the list of open files (`●` marks a file with unsent notes)        |
-| `[` / `]`  | Show the previous or the next open file                                          |
+| `p`        | Open or close the list of replies and open files (`●` marks unsent notes)        |
+| `[` / `]`  | Show the previous or the next document (replies first, then the open files)      |
 | `W`        | Close the file on the screen (asks first when it has unsent notes)               |
-| `r`        | Read the file again                                                              |
+| `r`        | Read the file again, and look for new replies                                    |
 
 In the tree, `j` and `k` move, `l` and `h` open and close a directory, `enter` opens a file or a directory, and `/`
 starts a filter. In the fuzzy find, type to filter by path, move with the arrows or with `ctrl+n` and `ctrl+p`, and
@@ -177,9 +181,10 @@ that the agent wrote and deleted, or that is outside the work directory. Your ow
 holds only what the agent changes next (raise `changes_turns` to look back further). Annorex follows the newest session of
 the agent in the work directory. With two Pi or OpenCode panes in one directory, the list can belong to the other pane.
 
-One send gives the general notes and the annotations of all open files in one message. It has one section
-`# Annotations on PATH` for each file, in the order in which you opened the files. If you press `q` with unsent notes in
-more than one file, the question counts the files.
+One send gives the general notes and the annotations of all documents in one message. It has one section for each
+document: `# Annotations on last reply` (or `earlier reply (HH:MM)`) for a reply, and `# Annotations on PATH` for a
+file. The replies come first. The files follow in the order in which you opened them. If you press `q` with unsent
+notes, the question counts the documents.
 
 You can give files at the start. The paths are relative to the work directory:
 

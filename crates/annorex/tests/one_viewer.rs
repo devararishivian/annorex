@@ -239,3 +239,12 @@ fn the_questions_name_the_document_on_the_screen() {
     press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE);
     assert!(render(&mut app, 120, 24).contains("Unsent notes in 2 documents."));
 }
+
+#[test]
+fn opening_a_file_gives_the_keys_back_to_the_document_when_a_session_choice_waits() {
+    let mut app = files_only();
+    app.set_reply_source(ReplySource::Pick(vec![candidate("first"), candidate("second")]));
+    app.open_file(loaded("a.md", "# Title\n\nalpha text\n"));
+    press(&mut app, "cnote\n");
+    assert!(app.export().contains("> note"), "the keys must reach the file:\n{}", app.export());
+}

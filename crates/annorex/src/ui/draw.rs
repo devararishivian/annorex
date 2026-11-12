@@ -260,9 +260,9 @@ fn prompt_text(app: &App, what: Confirm) -> String {
             let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
             format!("Close {path}? It has unsent notes. y/n")
         }
-        Confirm::Quit if app.has_root() => {
+        Confirm::Quit if app.unsent_file_count() > 1 => {
             let count = app.unsent_file_count();
-            let files = if count == 1 { "document" } else { "documents" };
+            let files = "documents";
             match &app.save_error {
                 Some(error) => format!(
                     "Unsent notes in {count} {files}. The drafts cannot be saved: {error}. s send · d discard · esc back"
