@@ -218,6 +218,12 @@ pub struct App {
     /// The files that are new in the changed list since the user looked at the tree.
     new_changed: usize,
     scan_rx: Option<std::sync::mpsc::Receiver<Scan>>,
+    /// The ids of the newest reply, from the thread of `news::reply_looker`.
+    replies_rx: Option<std::sync::mpsc::Receiver<String>>,
+    /// Keeps the thread of `replies_rx` alive.
+    replies_token: Option<std::sync::Arc<()>>,
+    /// True when the agent has a reply that the viewer has not read.
+    new_reply: bool,
 }
 
 impl App {
@@ -270,6 +276,9 @@ impl App {
             changes_seen: false,
             new_changed: 0,
             scan_rx: None,
+            replies_rx: None,
+            replies_token: None,
+            new_reply: false,
         };
         if !replies.is_empty() {
             app.replies = replies;
@@ -443,6 +452,26 @@ impl App {
         self.changes_token = Some(token);
     }
 
+    /// Watch for new replies on a thread. A new look replaces the old thread.
+    pub fn start_reply_poll(&mut self, look: impl FnMut() -> Option<String> + Send + 'static) {
+        let (receiver, token) = crate::changes::spawn_poll(crate::changes::EVERY, look);
+        self.replies_rx = Some(receiver);
+        self.replies_token = Some(token);
+    }
+
+    /// Stop watching for new replies.
+    pub fn stop_reply_poll(&mut self) {
+        self.replies_rx = None;
+        self.replies_token = None;
+    }
+
+    /// The newest reply of the agent has the id `newest`. The banner shows when the viewer has another one.
+    pub fn reply_polled(&mut self, newest: &str) {
+        let mine =
+            self.replies.iter().find(|reply| !self.files.contains_key(&reply.id)).map(|r| r.id.as_str());
+        self.new_reply = mine != Some(newest);
+    }
+
     /// Take a new list of changed files. A later list that holds files the tree did not have
     /// raises the banner.
     pub fn changed_list(&mut self, list: Vec<PathBuf>) {
@@ -468,6 +497,10 @@ impl App {
         let mut changed = self.poll_scan();
         while let Some(list) = self.changes_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.changed_list(list);
+            changed = true;
+        }
+        while let Some(id) = self.replies_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.reply_polled(&id);
             changed = true;
         }
         while let Some(change) = self.watch_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
@@ -508,10 +541,15 @@ impl App {
     /// The banner for new files that the agent changed, until the user opens the tree.
     fn agent_banner(&self) -> Option<String> {
         let n = self.new_changed;
-        (n > 0).then(|| {
+        let files = (n > 0).then(|| {
             let files = if n == 1 { "file" } else { "files" };
             format!("The agent changed {n} more {files}. They are at the top of the tree (T).")
-        })
+        });
+        let reply = self.new_reply.then(|| "The agent has a new reply. Press r to read it.".to_owned());
+        match (reply, files) {
+            (Some(reply), Some(files)) => Some(format!("{reply}  |  {files}")),
+            (reply, files) => reply.or(files),
+        }
     }
 
     fn file_banner(&self) -> Option<String> {
@@ -669,6 +707,7 @@ impl App {
         self.replies = replies;
         self.screen = Screen::Viewer;
         self.reply_source = ReplySource::Ready;
+        self.new_reply = false;
         match keep {
             Some(index) => {
                 self.show_reply(index);

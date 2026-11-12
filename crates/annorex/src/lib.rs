@@ -13,6 +13,7 @@ pub mod fuzzy;
 pub mod install;
 pub mod keys;
 pub mod layout;
+pub mod news;
 pub mod open;
 pub mod payload;
 pub mod replies;

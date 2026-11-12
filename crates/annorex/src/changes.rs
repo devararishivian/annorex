@@ -77,12 +77,12 @@ fn relative_inside(root: &Path, path: &Path) -> Option<PathBuf> {
 /// How often the thread looks at the transcript.
 pub const EVERY: Duration = Duration::from_secs(2);
 
-/// Run `look` every `every` on a thread. `look` gives `Some(list)` when it has a list to report.
+/// Run `look` every `every` on a thread. `look` gives `Some(value)` when it has a value to report.
 /// The thread ends when the receiver is gone or the returned token is dropped.
-pub fn spawn_poll(
+pub fn spawn_poll<T: Send + 'static>(
     every: Duration,
-    mut look: impl FnMut() -> Option<Vec<PathBuf>> + Send + 'static,
-) -> (Receiver<Vec<PathBuf>>, Arc<()>) {
+    mut look: impl FnMut() -> Option<T> + Send + 'static,
+) -> (Receiver<T>, Arc<()>) {
     let (sender, receiver) = mpsc::channel();
     let token = Arc::new(());
     let held = Arc::clone(&token);

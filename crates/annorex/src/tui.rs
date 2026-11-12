@@ -259,6 +259,7 @@ impl<R: Runner> Viewer<'_, R> {
         app.start_changes(crate::changes::looker(source, Roots::from_env(), root.clone(), turns));
         let (reply_source, replies) = self.find_replies();
         show(&mut app, reply_source, replies);
+        self.watch_replies(&mut app);
         let mut problems: Vec<String> = Vec::new();
         if let Start::Files(paths) = start {
             for input in paths {
@@ -284,6 +285,18 @@ impl<R: Runner> Viewer<'_, R> {
             app.set_status(problems.join("; "));
         }
         app
+    }
+
+    /// Watch the transcript for a new reply. Claude Code finds its session again by pid. Pi and `OpenCode` keep the
+    /// session that the user saw. While the user must choose a session, nothing is watched.
+    fn watch_replies(&self, app: &mut App) {
+        let Some(source) = self.work.clone() else { return };
+        if matches!(app.reply_source(), ReplySource::Pick(_)) {
+            app.stop_reply_poll();
+            return;
+        }
+        let fixed = if self.state.agent == Some(Agent::ClaudeCode) { None } else { self.session.clone() };
+        app.start_reply_poll(crate::news::reply_looker(source, Roots::from_env(), fixed));
     }
 
     /// Read the agent and its state, and find its process and work directory.
@@ -464,6 +477,7 @@ impl<R: Runner> Viewer<'_, R> {
             Effect::PickSession(index) => {
                 let (reply_source, replies) = self.open(index);
                 show(app, reply_source, replies);
+                self.watch_replies(app);
                 self.restore_drafts(app);
             }
         }
@@ -496,6 +510,7 @@ impl<R: Runner> Viewer<'_, R> {
             (reply_source, replies) => {
                 app.cache.clear();
                 show(app, reply_source, replies);
+                self.watch_replies(app);
                 self.restore_drafts(app);
             }
         }

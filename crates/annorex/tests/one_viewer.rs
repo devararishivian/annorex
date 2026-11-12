@@ -266,3 +266,68 @@ fn a_new_reply_does_not_move_the_screen_off_an_open_file() {
     app.set_replies(vec![reply("r1", "hello\n")]);
     assert_eq!(app.shown_file(), Some(std::path::Path::new("a.md")));
 }
+
+const NEW_REPLY: &str = "The agent has a new reply. Press r to read it.";
+
+fn screen_with_banner(app: &mut App) -> String {
+    render(app, 200, 24)
+}
+
+#[test]
+fn a_new_newest_reply_raises_the_banner() {
+    let mut app = both();
+    app.reply_polled("r9");
+    assert!(screen_with_banner(&mut app).contains(NEW_REPLY));
+}
+
+#[test]
+fn the_reply_the_user_already_sees_raises_no_banner() {
+    let mut app = both();
+    app.reply_polled("r1");
+    assert!(!screen_with_banner(&mut app).contains(NEW_REPLY));
+}
+
+#[test]
+fn reading_the_replies_again_clears_the_banner() {
+    let mut app = both();
+    app.reply_polled("r9");
+    app.set_replies(vec![reply("r9", "new\n"), reply("r1", "alpha beta gamma\n")]);
+    assert!(!screen_with_banner(&mut app).contains(NEW_REPLY));
+}
+
+#[test]
+fn the_first_reply_of_an_empty_viewer_raises_the_banner() {
+    let mut app = files_only();
+    app.set_reply_source(ReplySource::Missing("no reply yet".to_owned()));
+    app.reply_polled("r1");
+    assert!(screen_with_banner(&mut app).contains(NEW_REPLY));
+}
+
+#[test]
+fn the_reply_banner_shows_beside_the_banner_of_files() {
+    let mut app = both();
+    app.changed_list(vec!["a.rs".into()]);
+    app.changed_list(vec!["b.rs".into(), "a.rs".into()]);
+    app.reply_polled("r9");
+    let screen = screen_with_banner(&mut app);
+    assert!(screen.contains(NEW_REPLY) && screen.contains("The agent changed 1 more file"), "{screen}");
+}
+
+#[test]
+fn a_poll_of_the_viewer_delivers_the_id_from_the_thread() {
+    let mut app = both();
+    let mut sent = false;
+    app.start_reply_poll(move || {
+        if sent {
+            return None;
+        }
+        sent = true;
+        Some("r9".to_owned())
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !screen_with_banner(&mut app).contains(NEW_REPLY) {
+        app.poll_background();
+        assert!(std::time::Instant::now() < deadline, "the banner never came");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
