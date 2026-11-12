@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::editor::{Editor, EditorResult};
+use super::focus::Mode;
 use super::tree::{Finder, Tree};
 use crate::agent::Agent;
 use crate::config::Config;
@@ -156,8 +157,12 @@ pub struct App {
     pub(crate) cache: WrapCache,
     /// The `DocLine` at the top of the view. A resize keeps it.
     pub(crate) top: usize,
-    /// A byte offset in the source of the document.
+    /// A byte offset in the source of the document. In block mode it is the start of the focused block.
     pub(crate) cursor: usize,
+    /// Block mode (the default) or text mode.
+    pub(crate) mode: Mode,
+    /// The width of the text in the last frame. 0 before the first frame.
+    pub(crate) width: u16,
     pub(crate) panel_open: bool,
     pub(crate) panel_index: usize,
     pub(crate) picker_index: usize,
@@ -195,7 +200,7 @@ pub struct App {
     quit_after: bool,
     exit: bool,
     /// The id of the reply in `doc`.
-    shown_id: Option<String>,
+    pub(super) shown_id: Option<String>,
     /// Why the last save of the draft failed.
     pub(crate) save_error: Option<String>,
     /// The work directory. `None` when the viewer has no files.
@@ -239,6 +244,8 @@ impl App {
             cache: WrapCache::default(),
             top: 0,
             cursor: 0,
+            mode: Mode::Block(0),
+            width: 0,
             panel_open: false,
             panel_index: 0,
             picker_index: 0,
@@ -592,12 +599,13 @@ impl App {
         self.changes.remove(id);
         let changed = if old == new { Vec::new() } else { vec![(id.to_owned(), old, new)] };
         if self.shown_id.as_deref() == Some(id) {
-            let (line, top) = (self.cursor_line(), self.top);
+            let (line, top, focus) = (self.cursor_line(), self.top, self.focus_range());
             self.show_reply(position);
             self.top = top.min(self.doc.lines.len().saturating_sub(1));
             let line = line.min(self.doc.lines.len().saturating_sub(1));
             self.cursor = self.line_start(line).unwrap_or(0);
             self.snap_cursor();
+            self.follow_focus(focus, &changed);
         }
         self.place_again(&changed);
         self.sync_watch();
@@ -650,6 +658,7 @@ impl App {
             self.panel_index = 0;
             self.cursor = 0;
             self.top = 0;
+            self.mode = Mode::Block(0);
         } else {
             self.show_reply(index.min(self.replies.len() - 1));
         }
@@ -671,16 +680,17 @@ impl App {
     }
 
     /// The first cursor position of a `DocLine`.
-    fn line_start(&self, index: usize) -> Option<usize> {
+    pub(super) fn line_start(&self, index: usize) -> Option<usize> {
         let line = self.doc.lines.get(index)?;
         Some(self.doc.stops(index).first().copied().unwrap_or(line.source.start))
     }
 
-    /// Put `doc_line` at the top of the view and the cursor on it.
+    /// Put `doc_line` at the top of the view and the cursor on it, in text mode.
     pub fn jump_to_line(&mut self, doc_line: usize) {
         if let Some(start) = self.line_start(doc_line) {
             self.top = doc_line;
             self.cursor = start;
+            self.mode = Mode::Text;
         }
     }
 
@@ -698,7 +708,7 @@ impl App {
         // Keep an older reply that the user chose. On the newest reply, go to a new newest reply, but
         // keep the position when no new reply came.
         let current = self.replies.get(self.selected).map(|reply| reply.id.clone());
-        let (top, cursor) = (self.top, self.cursor);
+        let (top, cursor, focus) = (self.top, self.cursor, self.focus_range());
         // The open files stay after the replies.
         let mut replies = replies;
         replies.extend(self.replies.iter().filter(|reply| self.files.contains_key(&reply.id)).cloned());
@@ -717,6 +727,7 @@ impl App {
                 self.top = top.min(self.doc.lines.len().saturating_sub(1));
                 self.cursor = cursor.min(self.doc.source.len());
                 self.snap_cursor();
+                self.follow_focus(focus, &changed);
             }
             None => self.show_reply(0),
         }
@@ -857,6 +868,8 @@ impl App {
             }
             self.editing_id = None;
             self.selection = None;
+            self.mode = Mode::Block(0);
+            self.cursor = self.block_start(0).unwrap_or(self.cursor);
             self.confirm = None;
             self.annotation_index = 0;
             self.shown_id = Some(id.clone());
@@ -1059,7 +1072,7 @@ impl App {
     }
 
     /// The action of a key. The arrow keys always move, whatever the config says.
-    fn action_of(&self, key: KeyEvent) -> Option<Action> {
+    pub(super) fn action_of(&self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Down => Some(Action::Down),
             KeyCode::Up => Some(Action::Up),
@@ -1071,6 +1084,9 @@ impl App {
 
     #[allow(clippy::too_many_lines, reason = "one match over the actions of the document")]
     fn doc_key(&mut self, key: KeyEvent) -> Effect {
+        if matches!(self.mode, Mode::Block(_)) && self.block_key(key) {
+            return Effect::None;
+        }
         let half = signed((self.page / 2).max(1));
         match key.code {
             KeyCode::PageDown => self.move_cursor(signed(self.page.max(1))),
@@ -1078,7 +1094,7 @@ impl App {
             KeyCode::Home => self.set_cursor_line(0),
             KeyCode::End => self.set_cursor_line(self.doc.lines.len().saturating_sub(1)),
             KeyCode::Tab if self.panel_open => self.focus = Focus::Panel,
-            KeyCode::Esc => self.selection = None,
+            KeyCode::Esc => self.escape(),
             _ => match self.action_of(key) {
                 Some(Action::Quit) => return self.request_quit(),
                 Some(Action::Reload) => {
@@ -1310,6 +1326,7 @@ impl App {
                     Some((start, false)) => {
                         self.cursor = start;
                         self.snap_cursor();
+                        self.focus_near(start);
                         self.panel_open = false;
                         self.focus = Focus::Doc;
                     }
@@ -1615,10 +1632,22 @@ impl App {
         }
     }
 
-    /// The range of an annotation: the selection, else the `DocLine` of the cursor.
+    /// The range of an annotation: the focused block in block mode; in text mode the selection, else
+    /// the `DocLine` of the cursor.
     fn action_range(&self) -> Option<Range<usize>> {
+        if let Mode::Block(index) = self.mode {
+            return self.doc.blocks.get(index).map(|block| block.range.clone());
+        }
         self.selection_range()
             .or_else(|| self.doc.lines.get(self.cursor_line()).map(|line| line.source.clone()))
+    }
+
+    /// Why a note key does nothing.
+    fn no_text(&self) -> &'static str {
+        match self.mode {
+            Mode::Block(_) => "nothing to annotate",
+            Mode::Text => "there is no text here to annotate",
+        }
     }
 
     fn begin_new(&mut self, kind: Kind) -> Effect {
@@ -1626,7 +1655,7 @@ impl App {
             return Effect::None;
         }
         let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
-            self.status = Some("there is no text here to annotate".to_owned());
+            self.status = Some(self.no_text().to_owned());
             return Effect::None;
         };
         self.editor = Some(Editor::new(kind, range));
@@ -1638,7 +1667,7 @@ impl App {
     pub fn add_looks_good(&mut self) -> Effect {
         let Some(reply) = self.shown_id.clone() else { return Effect::None };
         let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
-            self.status = Some("there is no text here to annotate".to_owned());
+            self.status = Some(self.no_text().to_owned());
             return Effect::None;
         };
         let review = self.reviews.entry(reply.clone()).or_default();
@@ -1814,8 +1843,19 @@ impl App {
                 self.doc.lines.get(index).is_some_and(|line| contains_ignore_case(&line.plain(), &query))
             });
         match found {
-            Some(index) => self.set_cursor_line(index),
+            Some(index) => self.find_at(index, &query),
             None => self.status = Some("no match".to_owned()),
+        }
+    }
+
+    /// Put the cursor on the first match of `query` in the `DocLine` `index`, in text mode.
+    fn find_at(&mut self, index: usize, query: &str) {
+        let plain = self.doc.lines.get(index).map(crate::doc::DocLine::plain).unwrap_or_default();
+        let first = match_ranges(&plain, query).first().map_or(0, |range| range.start);
+        let column = plain.chars().take(first).filter_map(unicode_width::UnicodeWidthChar::width).sum();
+        if let Some(stop) = self.doc.stop_near(index, column).or_else(|| self.line_start(index)) {
+            self.cursor = stop;
+            self.mode = Mode::Text;
         }
     }
 

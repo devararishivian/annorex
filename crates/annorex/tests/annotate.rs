@@ -133,7 +133,8 @@ fn line_selection_makes_a_delete() {
 #[test]
 fn no_selection_uses_the_cursor_line() {
     let mut app = app(LIST);
-    press(&mut app, "jd\n");
+    // Text mode: without a selection a note covers the line of the cursor.
+    press(&mut app, "\njd\n");
     assert_eq!(app.review().expect("review").annotations[0].quote, "- two");
 }
 

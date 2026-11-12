@@ -159,7 +159,8 @@ fn plain_file_selection_gives_exact_ranges() {
     let mut app = files_app();
     let text = "fn main() {\n\tprintln!(\"héllo\");\n}\n";
     app.open_file(loaded("main.rs", text));
-    press(&mut app, "jl");
+    // Text mode: the free cursor moves by line and by character.
+    press(&mut app, "\njl");
     press(&mut app, "vllllllcx\n");
     press(&mut app, "g");
     press(&mut app, "jl");

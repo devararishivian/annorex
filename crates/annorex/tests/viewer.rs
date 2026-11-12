@@ -429,6 +429,8 @@ fn match_split_by_wrap_is_highlighted() {
     let state = state(Agent::ClaudeCode, "idle");
     let mut app = App::new(state, Screen::Viewer, vec![reply("r1", text)], &Config::default());
     press(&mut app, "/the text\n");
+    // The find puts the cursor on the match. Move it to the line start, so no cursor cell hides a match cell.
+    press(&mut app, "0");
     let mut terminal = Terminal::new(TestBackend::new(40, 12)).expect("terminal");
     terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
     let buffer = terminal.backend().buffer();

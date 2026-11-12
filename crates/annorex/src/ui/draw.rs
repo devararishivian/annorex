@@ -10,6 +10,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Confirm, Focus, PanelView, ReplySource, Screen, match_ranges};
+use super::focus::{Mode, View};
 use crate::agent::Agent;
 use crate::doc::{DocSpan, SpanStyle};
 use crate::files::TREE_LIMIT;
@@ -494,10 +495,18 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
         .map(|review| review.annotations.iter().filter(|a| !a.detached).map(|a| a.range.clone()).collect())
         .unwrap_or_default();
     let selection = app.selection_range();
+    app.width = text_width;
+    let focused = match app.mode {
+        Mode::Block(index) => app.doc.blocks.get(index).cloned(),
+        Mode::Text => None,
+    };
     let rows = app.cache.get(&app.doc, text_width);
     let first_row = |doc_line: usize| rows.iter().position(|row| row.doc_line >= doc_line);
     let mut top_row = first_row(app.top).unwrap_or(0);
-    if let Some(cursor_row) = first_row(cursor_line) {
+    if let Some(block) = &focused {
+        // Block mode: the focused block stays in view. A tall block can scroll inside.
+        top_row = View { rows, top: top_row, height }.top_for(top_row, block);
+    } else if let Some(cursor_row) = first_row(cursor_line) {
         if cursor_row < top_row {
             top_row = cursor_row;
         } else if cursor_row >= top_row + height {
