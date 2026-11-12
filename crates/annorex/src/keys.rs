@@ -346,6 +346,9 @@ pub fn parse_key(text: &str) -> Result<KeyChord, String> {
     Ok(KeyChord { code, modifiers })
 }
 
+/// Actions whose default key came after the first release of the `[keys]` table.
+const LATE: [Action; 1] = [Action::Help];
+
 /// The keys of the viewer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyMap {
@@ -369,7 +372,12 @@ impl KeyMap {
             }
         }
         let mut map: HashMap<KeyChord, Action> = HashMap::new();
-        for action in Action::ALL {
+        // The overrides first, then the defaults. A late default (a key added after configs
+        // existed) gives way to an override, so it never breaks an old config. Other collisions
+        // are errors.
+        let overridden = Action::ALL.into_iter().filter(|action| overrides.contains_key(action.name()));
+        let defaults = Action::ALL.into_iter().filter(|action| !overrides.contains_key(action.name()));
+        for action in overridden.chain(defaults) {
             let text = overrides.get(action.name()).map_or(action.default_key(), String::as_str);
             let chord = parse_key(text).map_err(|error| format!("{error} (action `{}`)", action.name()))?;
             if chord.is_fixed() {
@@ -377,6 +385,9 @@ impl KeyMap {
                     "`{text}` is a fixed key and cannot be bound (action `{}`)",
                     action.name()
                 ));
+            }
+            if LATE.contains(&action) && !overrides.contains_key(action.name()) && map.contains_key(&chord) {
+                continue;
             }
             if let Some(other) = map.insert(chord, action) {
                 return Err(format!(
@@ -389,12 +400,12 @@ impl KeyMap {
         Ok(Self { map })
     }
 
-    /// The key of an action as text, for the hints. An action without a key shows its default.
+    /// The key of an action as text, for the hints. An action without a key shows `unbound`.
     pub fn label(&self, action: Action) -> String {
         self.map
             .iter()
             .find(|(_, bound)| **bound == action)
-            .map_or_else(|| action.default_key().to_owned(), |(chord, _)| chord.text())
+            .map_or_else(|| "unbound".to_owned(), |(chord, _)| chord.text())
     }
 
     /// The action of a key event, if the key is bound.
@@ -498,5 +509,21 @@ mod tests {
             let error = KeyMap::with_overrides(&overrides(&[("comment", text)])).expect_err(text);
             assert!(error.contains("fixed"), "{text}: {error}");
         }
+    }
+
+    #[test]
+    fn an_override_can_take_the_default_key_of_another_action() {
+        // `?` had no action before `help` came. A config that gave `?` to `find` must still load.
+        let overrides = BTreeMap::from([("find".to_owned(), "?".to_owned())]);
+        let map = KeyMap::with_overrides(&overrides).expect("loads");
+        assert_eq!(map.action(key(KeyCode::Char('?'), KeyModifiers::NONE)), Some(Action::Find));
+        assert_eq!(map.label(Action::Help), "unbound");
+    }
+
+    #[test]
+    fn two_overrides_on_one_key_are_an_error() {
+        let overrides =
+            BTreeMap::from([("find".to_owned(), "?".to_owned()), ("help".to_owned(), "?".to_owned())]);
+        assert!(KeyMap::with_overrides(&overrides).is_err());
     }
 }

@@ -819,3 +819,13 @@ fn a_note_with_other_text_on_the_same_range_is_added() {
     assert_eq!(app.review().expect("review").annotations.len(), 2);
     assert!(!render(&mut app, 60, 12).contains("Already saved."));
 }
+
+#[test]
+fn a_sent_note_can_be_added_again() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllcWhich page?\n");
+    app.finish_send("2026-11-12T10:00:00+07:00");
+    press(&mut app, "hhhhvllllcWhich page?\n");
+    assert_eq!(app.review().expect("review").annotations.len(), 2);
+    assert_eq!(app.unsent_count(), 1);
+}

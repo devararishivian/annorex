@@ -1398,6 +1398,7 @@ impl App {
 
     /// `q`: quit, but ask first when the reply on the screen has notes that no send covered.
     fn request_quit(&mut self) -> Effect {
+        self.help_open = false;
         if self.unsent_file_count() > 0 {
             self.confirm = Some(Confirm::Quit);
             Effect::None
@@ -1711,11 +1712,9 @@ impl App {
             let same_text = |a: &Annotation| {
                 if kind == Kind::Replace { a.replacement.as_ref() == Some(&text) } else { a.note == text }
             };
-            if review
-                .annotations
-                .iter()
-                .any(|a| a.kind == kind && a.range == range && a.label == label && same_text(a))
-            {
+            if review.annotations.iter().any(|a| {
+                a.sent_at.is_none() && a.kind == kind && a.range == range && a.label == label && same_text(a)
+            }) {
                 self.status = Some("Already saved.".to_owned());
                 self.selection = None;
                 return;
