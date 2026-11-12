@@ -18,6 +18,8 @@ text that an agent wrote. Then Annorex sends your notes back to the agent.
   Enter, or copies them. A send gives only the notes that Annorex did not send before. The notes of all replies and
   open files go in one message.
 - **Drafts.** Annorex saves your notes to disk after each change.
+- **New reply banner.** When the agent answers while Annorex is open, a banner says `The agent has a new reply. Press r
+  to read it.` Annorex looks at the transcript every 2 seconds.
 - **Change banner.** When the agent changes an open file, a banner shows. Press `r` to read the file again. Your notes
   move to their text.
 - `annorex probe` shows the agent in a pane, its state, and whether Annorex can send to it.
