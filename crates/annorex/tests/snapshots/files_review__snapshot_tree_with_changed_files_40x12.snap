@@ -1,0 +1,16 @@
+---
+source: crates/annorex/tests/files_review.rs
+expression: "render(&mut app, 40, 12)"
+---
+Annorex · files · claude (idle)
+┌ Tree ────────────────────────────────┐
+│* changed by the agent: 2             │
+│   *src/main.rs                       │
+│   *README.md                         │
+│  ▸ src/                              │
+│   *README.md                         │
+│                                      │
+│                                      │
+│                                      │
+└──────────────────────────────────────┘
+j/k move  enter open  h/l close/open  /…

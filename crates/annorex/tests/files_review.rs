@@ -605,6 +605,14 @@ fn the_finder_lists_changed_files_first() {
 }
 
 #[test]
+fn snapshot_tree_with_changed_files_40x12() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.set_changed(vec!["src/main.rs".into(), "README.md".into()]);
+    press(&mut app, "T");
+    insta::assert_snapshot!(render(&mut app, 40, 12));
+}
+
+#[test]
 fn snapshot_tree_with_changed_files_80x24() {
     let (_dir, mut app) = tree_app(&Config::default());
     app.set_changed(vec!["src/main.rs".into(), "README.md".into()]);
