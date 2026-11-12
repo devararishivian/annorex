@@ -554,3 +554,56 @@ fn a_directory_on_the_command_line_opens_the_tree_there() {
     press(&mut app, "\n"); // the cursor is on the directory: Enter closes it
     assert!(!render(&mut app, 120, 20).contains("main.rs"));
 }
+
+#[test]
+fn changed_files_are_the_first_rows_with_a_mark() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.set_changed(vec!["src/main.rs".into(), "README.md".into()]);
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("* changed by the agent: 2"), "{screen}");
+    let lines: Vec<&str> = screen.lines().collect();
+    let first = lines.iter().position(|l| l.contains("src/main.rs")).expect("main.rs row");
+    let second = lines.iter().position(|l| l.contains("README.md")).expect("readme row");
+    let dir_row = lines.iter().position(|l| l.contains("▸ src/")).expect("src row");
+    assert!(first < second && second < dir_row, "changed rows come first, newest first: {screen}");
+    assert!(lines[first].contains("*src/main.rs"), "{screen}");
+    // The first row is selectable: enter opens the newest changed file.
+    press(&mut app, "\n");
+    assert_eq!(app.shown_file().and_then(|path| path.to_str()), Some("src/main.rs"));
+}
+
+#[test]
+fn no_header_when_nothing_changed() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.set_changed(Vec::new());
+    press(&mut app, "T");
+    assert!(!render(&mut app, 120, 20).contains("changed by the agent"));
+}
+
+#[test]
+fn a_changed_path_the_scan_lacks_is_not_shown() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.set_changed(vec!["ignored.log".into()]);
+    press(&mut app, "T");
+    assert!(!render(&mut app, 120, 20).contains("changed by the agent"));
+}
+
+#[test]
+fn the_finder_lists_changed_files_first() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.set_changed(vec!["src/lib.rs".into()]);
+    ctrl(&mut app, 'p');
+    let screen = render(&mut app, 120, 20);
+    let lib = screen.lines().position(|l| l.contains("src/lib.rs")).expect("lib");
+    let readme = screen.lines().position(|l| l.contains("README.md")).expect("readme");
+    assert!(lib < readme, "{screen}");
+}
+
+#[test]
+fn snapshot_tree_with_changed_files_80x24() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.set_changed(vec!["src/main.rs".into(), "README.md".into()]);
+    press(&mut app, "T");
+    insta::assert_snapshot!(render(&mut app, 80, 24));
+}

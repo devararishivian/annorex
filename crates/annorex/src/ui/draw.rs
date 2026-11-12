@@ -602,16 +602,20 @@ fn draw_tree(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
                 format!("  {indent}{arrow} {name}/")
             } else {
                 let dot = if app.is_marked(path) { "●" } else { " " };
-                let name = if filtering {
+                let changed = if app.tree.is_changed(path) { "*" } else { " " };
+                let name = if filtering || row.changed_section {
                     path.display().to_string()
                 } else {
                     path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned())
                 };
-                format!("  {indent}{dot} {name}")
+                format!("  {indent}{dot}{changed}{name}")
             }
         })
         .collect();
-    let header = app.tree.filter().map(|text| format!("/{text}"));
+    let header = app.tree.filter().map(|text| format!("/{text}")).or_else(|| {
+        let count = app.tree.changed_count();
+        (count > 0).then(|| format!("* changed by the agent: {count}"))
+    });
     if rows.is_empty() {
         let note = if header.is_some() { "no match" } else { "no files" };
         let mut lines = Vec::new();

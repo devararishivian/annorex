@@ -309,6 +309,12 @@ impl App {
         self.finder.set_paths(self.tree.file_paths());
     }
 
+    /// Set the files that the agent changed in its last turns. The tree and the finder put them first.
+    pub fn set_changed(&mut self, changed: Vec<PathBuf>) {
+        self.tree.set_changed(changed);
+        self.finder.set_paths(self.tree.file_paths());
+    }
+
     /// Scan the work directory on a thread. [`App::poll_scan`] takes the result.
     pub fn start_scan(&mut self) {
         let Some(root) = self.root.clone() else { return };

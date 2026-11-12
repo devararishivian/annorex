@@ -13,6 +13,8 @@ pub(crate) struct Row<'a> {
     pub(crate) entry: &'a Entry,
     /// How many directories lie above the entry. A filtered list has depth 0.
     pub(crate) depth: usize,
+    /// True for a row of the section at the top: a file that the agent changed.
+    pub(crate) changed_section: bool,
 }
 
 /// The tree of the work directory with the open directories and the line under the cursor.
@@ -26,6 +28,8 @@ pub(crate) struct Tree {
     filter: Option<String>,
     /// A directory to show with the cursor on it, when the scan has it.
     reveal: Option<PathBuf>,
+    /// The files that the agent changed in its last turns, newest first.
+    changed: Vec<PathBuf>,
 }
 
 impl Tree {
@@ -36,6 +40,30 @@ impl Tree {
         self.loaded = true;
         self.index = self.index.min(self.visible().len().saturating_sub(1));
         self.place_cursor();
+    }
+
+    /// Set the files that the agent changed. A file that the scan does not have is not shown.
+    pub(crate) fn set_changed(&mut self, changed: Vec<PathBuf>) {
+        self.changed = changed;
+        self.index = self.index.min(self.visible().len().saturating_sub(1));
+    }
+
+    /// True when the agent changed the file in its last turns.
+    pub(crate) fn is_changed(&self, path: &Path) -> bool {
+        self.changed.iter().any(|changed| changed == path)
+    }
+
+    /// The changed files that the tree has, in order.
+    fn changed_entries(&self) -> Vec<&Entry> {
+        self.changed
+            .iter()
+            .filter_map(|path| self.entries.iter().find(|entry| !entry.is_dir && &entry.path == path))
+            .collect()
+    }
+
+    /// The number of rows in the changed section.
+    pub(crate) fn changed_count(&self) -> usize {
+        self.changed_entries().len()
     }
 
     /// Open a directory and its parents, and put the cursor on it. The cursor moves when the scan ends
@@ -106,14 +134,19 @@ impl Tree {
             let names: Vec<String> = files.iter().map(|entry| entry.path.display().to_string()).collect();
             return fuzzy::rank(filter, &names)
                 .into_iter()
-                .filter_map(|(index, _)| files.get(index).map(|&entry| Row { entry, depth: 0 }))
+                .filter_map(|(index, _)| {
+                    files.get(index).map(|&entry| Row { entry, depth: 0, changed_section: false })
+                })
                 .collect();
         }
-        self.entries
-            .iter()
-            .filter(|entry| self.is_shown(&entry.path))
-            .map(|entry| Row { entry, depth: entry.path.components().count().saturating_sub(1) })
-            .collect()
+        let top =
+            self.changed_entries().into_iter().map(|entry| Row { entry, depth: 0, changed_section: true });
+        let all = self.entries.iter().filter(|entry| self.is_shown(&entry.path)).map(|entry| Row {
+            entry,
+            depth: entry.path.components().count().saturating_sub(1),
+            changed_section: false,
+        });
+        top.chain(all).collect()
     }
 
     fn is_shown(&self, path: &Path) -> bool {
@@ -169,12 +202,11 @@ impl Tree {
     }
 
     /// The paths of all files, for the finder.
+    /// The files that the agent changed come first.
     pub(crate) fn file_paths(&self) -> Vec<String> {
-        self.entries
-            .iter()
-            .filter(|entry| !entry.is_dir)
-            .map(|entry| entry.path.display().to_string())
-            .collect()
+        let top = self.changed_entries();
+        let rest = self.entries.iter().filter(|entry| !entry.is_dir && !top.contains(entry));
+        top.iter().copied().chain(rest).map(|entry| entry.path.display().to_string()).collect()
     }
 }
 
