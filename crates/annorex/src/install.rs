@@ -13,12 +13,38 @@ pub const MODULE_MARKER: &str = "-- Installed by `annorex rex install`";
 /// The file name of the module. `require("annorex")` loads it.
 pub const MODULE_FILE: &str = "annorex.lua";
 
-/// The module as installed: the marker line with the version, then the source.
-pub fn module_contents() -> String {
+/// The line in the module source that `module_contents` replaces with the path of the binary.
+pub const INSTALLED_PLACEHOLDER: &str = "local INSTALLED_BIN = nil -- set by annorex rex install\n";
+
+/// The module as installed: the marker line with the version, then the source. `bin` is the
+/// binary that Rex starts when `setup{}` gives no `bin`.
+pub fn module_contents(bin: Option<&Path>) -> String {
+    let installed = match bin {
+        Some(bin) => format!("local INSTALLED_BIN = {}\n", lua_string(&bin.to_string_lossy())),
+        None => "local INSTALLED_BIN = nil\n".to_owned(),
+    };
     format!(
-        "{MODULE_MARKER} (annorex {}); run it again after you upgrade Annorex.\n{MODULE_SOURCE}",
-        env!("CARGO_PKG_VERSION")
+        "{MODULE_MARKER} (annorex {}); run it again after you upgrade Annorex.\n{}",
+        env!("CARGO_PKG_VERSION"),
+        MODULE_SOURCE.replacen(INSTALLED_PLACEHOLDER, &installed, 1)
     )
+}
+
+/// `text` as a Lua string literal in double quotes.
+fn lua_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// The directory of the `init.lua` that Rex reads: the directory of `REX_CONFIG`, else
@@ -50,9 +76,9 @@ pub enum InstallError {
     Io(#[from] std::io::Error),
 }
 
-/// Write the module to `dir`. Create `dir` if necessary. Replace only a file that an earlier
-/// install wrote. Never open `init.lua`.
-pub fn install(dir: &Path) -> Result<Installed, InstallError> {
+/// Write the module to `dir`, with `bin` as the installed binary. Create `dir` if necessary.
+/// Replace only a file that an earlier install wrote. Never open `init.lua`.
+pub fn install(dir: &Path, bin: Option<&Path>) -> Result<Installed, InstallError> {
     let path = dir.join(MODULE_FILE);
     let replaced = match std::fs::read_to_string(&path) {
         Ok(existing) => {
@@ -65,7 +91,7 @@ pub fn install(dir: &Path) -> Result<Installed, InstallError> {
         Err(error) => return Err(error.into()),
     };
     std::fs::create_dir_all(dir)?;
-    std::fs::write(&path, module_contents())?;
+    std::fs::write(&path, module_contents(bin))?;
     Ok(Installed { path, replaced })
 }
 
@@ -89,9 +115,13 @@ pub enum Check {
 /// Check the module with Rex before the user reloads: write the module and an `init.lua` that
 /// loads it into `scratch`, then call `run` with the path of that `init.lua`. The real config
 /// is not touched.
-pub fn check_module(scratch: &Path, run: impl FnOnce(&Path) -> std::io::Result<Probe>) -> Check {
+pub fn check_module(
+    scratch: &Path,
+    bin: Option<&Path>,
+    run: impl FnOnce(&Path) -> std::io::Result<Probe>,
+) -> Check {
     let init = scratch.join("init.lua");
-    let written = std::fs::write(scratch.join(MODULE_FILE), module_contents())
+    let written = std::fs::write(scratch.join(MODULE_FILE), module_contents(bin))
         .and_then(|()| std::fs::write(&init, "require(\"annorex\").setup{}\n"));
     if written.is_err() {
         return Check::Skipped;
@@ -159,14 +189,14 @@ mod tests {
     fn install_writes_marker_first_line() {
         let dir = tempfile::tempdir().expect("temp dir");
         let target = dir.path().join("new");
-        let installed = install(&target).expect("install");
+        let installed = install(&target, None).expect("install");
         assert_eq!(installed.path, target.join("annorex.lua"));
         assert!(!installed.replaced);
         let text = std::fs::read_to_string(&installed.path).expect("module");
         let first = text.lines().next().expect("first line");
         assert!(first.starts_with(MODULE_MARKER), "{first}");
         assert!(first.contains(env!("CARGO_PKG_VERSION")), "{first}");
-        assert!(text.ends_with(MODULE_SOURCE));
+        assert_eq!(text, module_contents(None));
     }
 
     #[test]
@@ -174,9 +204,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("annorex.lua");
         std::fs::write(&path, format!("{MODULE_MARKER} (annorex 0.0.1)\nold\n")).expect("old module");
-        let installed = install(dir.path()).expect("install");
+        let installed = install(dir.path(), None).expect("install");
         assert!(installed.replaced);
-        assert_eq!(std::fs::read_to_string(&path).expect("module"), module_contents());
+        assert_eq!(std::fs::read_to_string(&path).expect("module"), module_contents(None));
     }
 
     #[test]
@@ -184,7 +214,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("annorex.lua");
         std::fs::write(&path, "-- my own annorex.lua\n").expect("foreign");
-        match install(dir.path()) {
+        match install(dir.path(), None) {
             Err(InstallError::Foreign { path: found }) => assert_eq!(found, path),
             other => panic!("expected Foreign, got {other:?}"),
         }
@@ -198,7 +228,7 @@ mod tests {
         std::fs::write(&init, "rex.bind(\"cmd+d\", \"pane.split\")\n").expect("init");
         let before = std::fs::metadata(&init).and_then(|m| m.modified()).expect("mtime");
         std::thread::sleep(std::time::Duration::from_millis(20));
-        install(dir.path()).expect("install");
+        install(dir.path(), None).expect("install");
         assert_eq!(std::fs::read_to_string(&init).expect("init"), "rex.bind(\"cmd+d\", \"pane.split\")\n");
         assert_eq!(std::fs::metadata(&init).and_then(|m| m.modified()).expect("mtime"), before);
     }
@@ -236,17 +266,50 @@ mod tests {
         let path = dir.path().join("annorex.lua");
         let old = format!("{MODULE_MARKER} (annorex 0.1.0); run it again.\nname = \"annorex_last\"\n");
         std::fs::write(&path, old).expect("old module");
-        let installed = install(dir.path()).expect("install");
+        let installed = install(dir.path(), None).expect("install");
         assert!(installed.replaced);
         let text = std::fs::read_to_string(&path).expect("module");
         assert!(text.contains("annorex_files"), "the new module has the files action");
     }
 
     #[test]
+    fn module_contents_puts_the_installed_path_in_the_placeholder() {
+        assert_eq!(MODULE_SOURCE.matches(INSTALLED_PLACEHOLDER).count(), 1, "one placeholder line");
+        let text = module_contents(Some(Path::new("/Users/me/.cargo/bin/annorex")));
+        assert!(text.contains("local INSTALLED_BIN = \"/Users/me/.cargo/bin/annorex\"\n"), "{text}");
+        assert!(!text.contains(INSTALLED_PLACEHOLDER));
+        let none = module_contents(None);
+        assert!(none.contains("local INSTALLED_BIN = nil\n"), "{none}");
+    }
+
+    #[test]
+    fn lua_string_escapes_backslash_quote_and_line_breaks() {
+        assert_eq!(lua_string("/a b/c"), "\"/a b/c\"");
+        assert_eq!(lua_string("a\"b\\c\nd\re"), "\"a\\\"b\\\\c\\nd\\re\"");
+    }
+
+    #[test]
+    fn module_looks_in_the_known_places_in_order() {
+        let order = [
+            "\"/.cargo/bin/annorex\"",
+            "\"/opt/homebrew/bin/annorex\"",
+            "\"/usr/local/bin/annorex\"",
+            "\"/.local/bin/annorex\"",
+        ];
+        let positions: Vec<usize> = order
+            .iter()
+            .map(|needle| MODULE_SOURCE.find(needle).unwrap_or_else(|| panic!("{needle}")))
+            .collect();
+        assert!(positions.is_sorted(), "{positions:?}");
+        assert!(MODULE_SOURCE.contains("os.getenv(\"CARGO_HOME\")"));
+        assert!(MODULE_SOURCE.contains("annorex was not found; tried: "));
+    }
+
+    #[test]
     fn check_passes_when_rex_accepts_the_scratch_config() {
         let scratch = tempfile::tempdir().expect("temp dir");
         let seen = std::cell::RefCell::new(None);
-        let result = check_module(scratch.path(), |init| {
+        let result = check_module(scratch.path(), None, |init| {
             *seen.borrow_mut() = Some((
                 std::fs::read_to_string(init).expect("init"),
                 std::fs::read_to_string(init.with_file_name("annorex.lua")).expect("module"),
@@ -256,13 +319,13 @@ mod tests {
         assert_eq!(result, Check::Passed);
         let (init, module) = seen.into_inner().expect("runner called");
         assert!(init.contains("require(\"annorex\").setup{}"), "{init}");
-        assert_eq!(module, module_contents());
+        assert_eq!(module, module_contents(None));
     }
 
     #[test]
     fn check_fails_with_the_rex_message() {
         let scratch = tempfile::tempdir().expect("temp dir");
-        let result = check_module(scratch.path(), |_| {
+        let result = check_module(scratch.path(), None, |_| {
             Ok(Probe { success: false, message: "error annorex.lua:3: boom".to_owned() })
         });
         assert_eq!(result, Check::Failed("error annorex.lua:3: boom".to_owned()));
@@ -271,7 +334,7 @@ mod tests {
     #[test]
     fn check_is_skipped_when_rex_is_missing() {
         let scratch = tempfile::tempdir().expect("temp dir");
-        let result = check_module(scratch.path(), |_| Err(std::io::ErrorKind::NotFound.into()));
+        let result = check_module(scratch.path(), None, |_| Err(std::io::ErrorKind::NotFound.into()));
         assert_eq!(result, Check::Skipped);
     }
 }

@@ -76,9 +76,12 @@ fn rex_install_prints_setup_lines() {
     assert!(out.contains("rex.bind(\"cmd+shift+a\", \"annorex_last\")"), "{out}");
     assert!(out.contains("rex.bind(\"cmd+shift+f\", \"annorex_files\")"), "{out}");
     assert!(out.contains("rex config reload"), "{out}");
-    // The test binary is not in a PATH directory, so the bin option is shown too.
-    assert!(out.contains("setup{ bin = \""), "{out}");
-    assert!(dir.path().join("annorex.lua").is_file());
+    // The module starts the binary that installed it, so no bin option is needed.
+    let bin = env!("CARGO_BIN_EXE_annorex");
+    assert!(out.contains(&format!("Rex starts: {bin}")), "{out}");
+    assert!(!out.contains("setup{ bin = \""), "{out}");
+    let module = std::fs::read_to_string(dir.path().join("annorex.lua")).expect("module");
+    assert!(module.contains(&format!("local INSTALLED_BIN = \"{bin}\"\n")), "{module}");
 }
 
 #[test]

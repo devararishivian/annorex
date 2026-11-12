@@ -2,7 +2,7 @@
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
@@ -352,7 +352,9 @@ fn rex_install(
             "cannot find the Rex config directory: give --dir, or set REX_CONFIG, XDG_CONFIG_HOME, or HOME"
                 .to_owned(),
     })?;
-    let installed = install(&dir).map_err(|error| Failure {
+    // Rex runs actions with a short PATH, so the module starts this binary by its full path.
+    let exe = std::env::current_exe().ok();
+    let installed = install(&dir, exe.as_deref()).map_err(|error| Failure {
         code: if matches!(error, InstallError::Foreign { .. }) { EXIT_REFUSED } else { EXIT_FAILURE },
         message: error.to_string(),
     })?;
@@ -366,18 +368,19 @@ fn rex_install(
         "  rex.bind(\"cmd+shift+a\", \"annorex_last\")".to_owned(),
         "  rex.bind(\"cmd+shift+f\", \"annorex_files\")".to_owned(),
     ];
-    if let Ok(exe) = std::env::current_exe()
-        && !on_path(&exe, env("PATH"))
-    {
-        lines.push(String::new());
-        lines.push("If Rex cannot find annorex on its PATH, use this line for the setup:".to_owned());
-        lines.push(String::new());
-        lines.push(format!("  require(\"annorex\").setup{{ bin = \"{}\" }}", exe.display()));
+    lines.push(String::new());
+    match &exe {
+        Some(exe) => lines.push(format!("Rex starts: {}", exe.display())),
+        None => lines.push(
+            "Cannot find the path of this binary. Rex looks in ~/.cargo/bin, /opt/homebrew/bin, /usr/local/bin, and ~/.local/bin."
+                .to_owned(),
+        ),
     }
     let scratch = std::env::temp_dir().join(format!("annorex-check-{}", std::process::id()));
     let checked = match crate::rex::find_binary(env) {
-        Ok(rex) => std::fs::create_dir_all(&scratch)
-            .map_or(Check::Skipped, |()| check_module(&scratch, |init| run_rex_config_check(&rex, init))),
+        Ok(rex) => std::fs::create_dir_all(&scratch).map_or(Check::Skipped, |()| {
+            check_module(&scratch, exe.as_deref(), |init| run_rex_config_check(&rex, init))
+        }),
         Err(_) => Check::Skipped,
     };
     let _ = std::fs::remove_dir_all(&scratch);
@@ -393,13 +396,6 @@ fn rex_install(
     lines.push("Then run: rex config reload".to_owned());
     writeln!(out, "{}", lines.join("\n")).map_err(|error| io_failure(&error))?;
     Ok(if matches!(checked, Check::Failed(_)) { EXIT_FAILURE } else { EXIT_OK })
-}
-
-/// True when the directory of `exe` is a directory of `path`.
-fn on_path(exe: &Path, path: Option<OsString>) -> bool {
-    let canonical = |dir: &Path| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    let Some(parent) = exe.parent().map(canonical) else { return false };
-    path.is_some_and(|path| std::env::split_paths(&path).any(|dir| canonical(&dir) == parent))
 }
 
 fn rex_open(
