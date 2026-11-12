@@ -1704,29 +1704,39 @@ impl App {
 
     /// Put the editor into the review: a new annotation, or the change of an old one.
     fn commit_editor(&mut self) {
-        let (Some(Editor { kind, range, text, label, .. }), Some(reply)) =
-            (self.editor.take(), self.shown_id.clone())
-        else {
+        let (Some(editor), Some(reply)) = (self.editor.take(), self.shown_id.clone()) else {
             return;
         };
         let review = self.reviews.entry(reply.clone()).or_default();
         let existing = self.editing_id.take().filter(|id| review.annotations.iter().any(|a| a.id == *id));
         // A new note, or an edit, that makes an exact copy of another unsent note is refused.
         let same_text = |a: &Annotation| {
-            if kind == Kind::Replace { a.replacement.as_ref() == Some(&text) } else { a.note == text }
+            if editor.kind == Kind::Replace {
+                a.replacement.as_ref() == Some(&editor.text)
+            } else {
+                a.note == editor.text
+            }
         };
         if review.annotations.iter().any(|a| {
             Some(a.id) != existing
                 && a.sent_at.is_none()
-                && a.kind == kind
-                && a.range == range
-                && a.label == label
+                && a.kind == editor.kind
+                && a.range == editor.range
+                && a.label == editor.label
                 && same_text(a)
         }) {
-            self.status = Some("Already saved.".to_owned());
-            self.selection = None;
+            if existing.is_some() {
+                // An edit: keep the editor and its text, so the user can change it.
+                self.status = Some("Another note has this text.".to_owned());
+                self.editor = Some(editor);
+                self.editing_id = existing;
+            } else {
+                self.status = Some("Already saved.".to_owned());
+                self.selection = None;
+            }
             return;
         }
+        let Editor { kind, range, text, label, .. } = editor;
         let id = existing.unwrap_or_else(|| review.add(&self.doc.source, kind, range));
         review.update(id, |annotation: &mut Annotation| {
             annotation.label = label;

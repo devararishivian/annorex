@@ -835,8 +835,8 @@ fn an_edit_into_a_copy_of_another_note_is_refused() {
     let notes: Vec<&str> =
         app.review().expect("review").annotations.iter().map(|a| a.note.as_str()).collect();
     assert_eq!(notes, ["Which page?", "Which book?"], "the edited note keeps its old text");
-    assert!(app.editor().is_none());
-    assert!(render(&mut app, 60, 12).contains("Already saved."));
+    assert_eq!(app.editor().expect("the editor stays open").text, "Which book?", "the typed text stays");
+    assert!(render(&mut app, 60, 12).contains("Another note has this text."));
 }
 
 #[test]
