@@ -21,18 +21,21 @@ const PATCH_MARKERS: [&str; 3] = ["*** Add File: ", "*** Update File: ", "*** Mo
 pub fn changed_for_session(db: &Path, session_id: &str, turns: usize) -> Result<Vec<Changed>, HostError> {
     crate::validate_session_id(session_id)?;
     let connection = open_read_only(db, WHAT)?;
-    if let Some(events) = v2_events(&connection, session_id)? {
+    if let Some(events) = v2_events(&connection, session_id, turns)? {
         return Ok(collect(events, turns));
     }
+    // Read only the messages from the Nth last prompt. Older turns cannot change the result.
+    let (from_time, from_id) = v1_bound(&connection, session_id, turns).unwrap_or((i64::MIN, String::new()));
     let mut statement = connection
         .prepare(
             "SELECT m.id, m.data, p.id, p.data FROM message m \
              JOIN part p ON p.message_id = m.id WHERE m.session_id = ?1 \
+             AND (m.time_created > ?2 OR (m.time_created = ?2 AND m.id >= ?3)) \
              ORDER BY m.time_created ASC, m.id ASC, p.time_created ASC, p.id ASC",
         )
         .map_err(|e| sql_error(WHAT, &e))?;
     let rows = statement
-        .query_map(params![session_id], |row| {
+        .query_map(params![session_id, from_time, from_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -57,6 +60,41 @@ pub fn changed_for_session(db: &Path, session_id: &str, turns: usize) -> Result<
     Ok(collect(events, turns))
 }
 
+/// The time and the id of the message with the `turns`-th last prompt of the human. `None` when the
+/// session has fewer prompts, or when the database cannot answer: then the caller reads everything.
+fn v1_bound(connection: &rusqlite::Connection, session_id: &str, turns: usize) -> Option<(i64, String)> {
+    let offset = i64::try_from(turns.max(1) - 1).ok()?;
+    connection
+        .query_row(
+            "SELECT m.time_created, m.id FROM message m WHERE m.session_id = ?1 \
+             AND json_valid(m.data) AND json_extract(m.data, '$.role') = 'user' \
+             AND EXISTS (SELECT 1 FROM part p WHERE p.message_id = m.id AND json_valid(p.data) \
+               AND json_extract(p.data, '$.type') = 'text' \
+               AND coalesce(json_extract(p.data, '$.synthetic'), 0) != 1 \
+               AND coalesce(json_extract(p.data, '$.ignored'), 0) != 1 \
+               AND trim(coalesce(json_extract(p.data, '$.text'), '')) != '') \
+             ORDER BY m.time_created DESC, m.id DESC LIMIT 1 OFFSET ?2",
+            params![session_id, offset],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .ok()
+}
+
+/// The `seq` of the `turns`-th last prompt row in `session_message`. `i64::MIN` when there is none, or
+/// when the database cannot answer: then the caller reads everything.
+fn v2_bound(connection: &rusqlite::Connection, session_id: &str, turns: usize) -> i64 {
+    let Ok(offset) = i64::try_from(turns.max(1) - 1) else { return i64::MIN };
+    connection
+        .query_row(
+            "SELECT seq FROM session_message WHERE session_id = ?1 AND type = 'user' AND json_valid(data) \
+             AND trim(coalesce(json_extract(data, '$.text'), '')) != '' \
+             ORDER BY seq DESC LIMIT 1 OFFSET ?2",
+            params![session_id, offset],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(i64::MIN)
+}
+
 /// A text part that the user typed: not empty, not `synthetic` (injected), not `ignored`.
 fn is_typed_text(part: &Value) -> bool {
     let flagged = |key: &str| part.get(key).and_then(Value::as_bool) == Some(true);
@@ -68,7 +106,11 @@ fn is_typed_text(part: &Value) -> bool {
 
 /// The events of a session in the `OpenCode` 2 tables, or `None` when `session_message` has no
 /// rows for it (the session is then in the `message` and `part` tables).
-fn v2_events(connection: &rusqlite::Connection, session_id: &str) -> Result<Option<Vec<Event>>, HostError> {
+fn v2_events(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+    turns: usize,
+) -> Result<Option<Vec<Event>>, HostError> {
     let has_table = connection
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'session_message'",
@@ -82,11 +124,12 @@ fn v2_events(connection: &rusqlite::Connection, session_id: &str) -> Result<Opti
     let mut statement = connection
         .prepare(
             "SELECT id, type, data FROM session_message WHERE session_id = ?1 \
-             AND type IN ('user', 'assistant') ORDER BY seq ASC",
+             AND type IN ('user', 'assistant') AND seq >= ?2 ORDER BY seq ASC",
         )
         .map_err(|e| sql_error(WHAT, &e))?;
+    let from = v2_bound(connection, session_id, turns);
     let rows = statement
-        .query_map(params![session_id], |row| {
+        .query_map(params![session_id, from], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
         })
         .map_err(|e| sql_error(WHAT, &e))?;
@@ -336,5 +379,59 @@ mod tests {
     fn a_rejected_session_id_is_an_error() {
         let (_d, p) = db(&[]);
         assert!(changed_for_session(&p, "../x", 1).is_err());
+    }
+    #[test]
+    fn v2_a_long_session_is_read_from_the_nth_last_prompt() {
+        let mut rows: Vec<(String, String)> = Vec::new();
+        for n in 0..200 {
+            rows.push(("user".to_owned(), format!(r#"{{"text":"turn {n}"}}"#)));
+            rows.push((
+                "assistant".to_owned(),
+                item("edit", "completed", &format!(r#"{{"filePath":"/w/f{n}.rs"}}"#)),
+            ));
+        }
+        let borrowed: Vec<(&str, &str)> = rows.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let (_d, p) = db_v2(&borrowed);
+        assert_eq!(paths(&p, 1), ["/w/f199.rs"]);
+        assert_eq!(paths(&p, 3), ["/w/f199.rs", "/w/f198.rs", "/w/f197.rs"]);
+        let connection = open_read_only(&p, WHAT).expect("open");
+        // The last prompt is row 398 (0-based), the third last is row 394.
+        assert_eq!(v2_bound(&connection, "s", 1), 398);
+        assert_eq!(v2_bound(&connection, "s", 3), 394);
+        assert_eq!(v2_bound(&connection, "s", 500), i64::MIN, "fewer prompts than turns: read all");
+    }
+
+    #[test]
+    fn v2_a_session_without_a_prompt_reads_everything() {
+        let (_d, p) = db_v2(&[("assistant", &item("edit", "completed", r#"{"filePath":"/w/a.rs"}"#))]);
+        let connection = open_read_only(&p, WHAT).expect("open");
+        assert_eq!(v2_bound(&connection, "s", 1), i64::MIN);
+    }
+
+    #[test]
+    fn v1_a_long_session_is_read_from_the_nth_last_prompt() {
+        let mut owned: Vec<(String, String, String, String)> = Vec::new();
+        for n in 0..200 {
+            owned.push((
+                format!("m{n:03}a"),
+                "user".into(),
+                format!("p{n:03}a"),
+                r#"{"type":"text","text":"go"}"#.into(),
+            ));
+            owned.push((
+                format!("m{n:03}b"),
+                "assistant".into(),
+                format!("p{n:03}b"),
+                part("edit", "completed", &format!(r#"{{"filePath":"/w/f{n}.rs"}}"#)),
+            ));
+        }
+        let rows: Vec<(&str, &str, &str, &str)> =
+            owned.iter().map(|(a, b, c, d)| (a.as_str(), b.as_str(), c.as_str(), d.as_str())).collect();
+        let (_d, p) = db(&rows);
+        assert_eq!(paths(&p, 1), ["/w/f199.rs"]);
+        assert_eq!(paths(&p, 2), ["/w/f199.rs", "/w/f198.rs"]);
+        let connection = open_read_only(&p, WHAT).expect("open");
+        assert_eq!(v1_bound(&connection, "s", 1), Some((398, "m199a".to_owned())));
+        assert_eq!(v1_bound(&connection, "s", 500), None);
     }
 }
