@@ -46,27 +46,27 @@ In the viewer, press `?` to see all keys.
 
 ## Key cheatsheet
 
-| Key                 | Function                                                         |
-|---------------------|------------------------------------------------------------------|
-| `j` / `k`, `h` / `l` | Move by line or by character                                    |
-| `w` / `b`, `g` / `G` | Move by word, or go to the start or the end                     |
-| `v` / `V`           | Select characters or lines                                       |
-| `c` / `d` / `s`     | Annotate: comment, remove, or replace                            |
-| `S`                 | Send the notes to the agent                                      |
-| `M`                 | Write a general note, then send                                  |
-| `P`                 | Paste the notes into the agent input box, without Enter          |
-| `Y`                 | Copy the notes                                                   |
-| `X`                 | Discard the notes of the document on the screen (asks first)     |
-| `a`                 | Open or close the annotation list                                |
-| `p`                 | Open or close the list of replies and open files                 |
-| `T`                 | Open or close the file tree                                      |
-| `ctrl+p`            | Find a file by name                                              |
-| `[` / `]`           | Show the previous or the next open file                          |
-| `W`                 | Close the file on the screen                                     |
-| `/`                 | Find text                                                        |
-| `r`                 | Read the transcript and the files again                          |
-| `?`                 | Show the help screen                                             |
-| `q`                 | Close the viewer                                                 |
+| Key                  | Function                                                     |
+|----------------------|--------------------------------------------------------------|
+| `j` / `k`, `h` / `l` | Move by line or by character                                 |
+| `w` / `b`, `g` / `G` | Move by word, or go to the start or the end                  |
+| `v` / `V`            | Select characters or lines                                   |
+| `c` / `d` / `s`      | Annotate: comment, remove, or replace                        |
+| `S`                  | Send the notes to the agent                                  |
+| `M`                  | Write a general note, then send                              |
+| `P`                  | Paste the notes into the agent input box, without Enter      |
+| `Y`                  | Copy the notes                                               |
+| `X`                  | Discard the notes of the document on the screen (asks first) |
+| `a`                  | Open or close the annotation list                            |
+| `p`                  | Open or close the list of replies and open files             |
+| `T`                  | Open or close the file tree                                  |
+| `ctrl+p`             | Find a file by name                                          |
+| `[` / `]`            | Show the previous or the next open file                      |
+| `W`                  | Close the file on the screen                                 |
+| `/`                  | Find text                                                    |
+| `r`                  | Read the transcript and the files again                      |
+| `?`                  | Show the help screen                                         |
+| `q`                  | Close the viewer                                             |
 
 For all keys and for the config file, see [docs/guide.md](docs/guide.md).
 
@@ -125,7 +125,8 @@ These projects are the base of the Annorex idea:
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - [memex](https://github.com/nicosuave/memex) by Nico Ritschel. memex shows how to connect a Rust tool to Rex.
 
-The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the rule of one
+The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the
+rule of one
 review layer for each session. The check of the Lua module with `rex config check` on a scratch copy, and the lookup of
 the window of the agent pane with `session.describe_block`, follow the same ideas in plannotator-tui.
 
