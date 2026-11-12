@@ -45,10 +45,17 @@ local function fail(message)
   error("Annorex: " .. tostring(message), 0)
 end
 
+-- True when path is a file. io.open also opens a directory, so "path/." is tried too: it opens
+-- only when path is a directory.
 local function exists(path)
   local file = io.open(path, "r")
   if file == nil then return false end
   file:close()
+  local dir = io.open(path .. "/.", "r")
+  if dir ~= nil then
+    dir:close()
+    return false
+  end
   return true
 end
 

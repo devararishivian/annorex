@@ -98,15 +98,19 @@ fn installed_module_works_with_the_environment_of_a_rex_action() {
         let text = std::fs::read_to_string(&module).expect("module");
         let line = format!("local INSTALLED_BIN = \"{BIN}\"\n");
         assert!(text.contains(&line), "the module has the installed path");
-        std::fs::write(&module, text.replace(&line, "local INSTALLED_BIN = \"/nonexistent/annorex\"\n"))
-            .expect("module");
+        // A directory with the name of the binary does not count as found.
+        let dir_bin = work.path().join("annorex");
+        std::fs::create_dir_all(&dir_bin).expect("directory");
+        let dir_line = format!("local INSTALLED_BIN = \"{}\"\n", dir_bin.display());
+        std::fs::write(&module, text.replace(&line, &dir_line)).expect("module");
         let empty_home = work.path().join("home");
         std::fs::create_dir_all(&empty_home).expect("home");
         let output = run_action(&rex, &empty_home, &init, &session, &block);
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         log(start, &format!("not found: exit {:?}, {}", output.status.code(), stderr.trim()));
         let expected = format!(
-            "annorex was not found; tried: /nonexistent/annorex, {home}/.cargo/bin/annorex, /opt/homebrew/bin/annorex, /usr/local/bin/annorex, {home}/.local/bin/annorex",
+            "annorex was not found; tried: {dir}, {home}/.cargo/bin/annorex, /opt/homebrew/bin/annorex, /usr/local/bin/annorex, {home}/.local/bin/annorex",
+            dir = dir_bin.display(),
             home = empty_home.display()
         );
         if output.status.success() || !stderr.contains(&expected) {

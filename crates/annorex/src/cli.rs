@@ -2,7 +2,7 @@
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -369,13 +369,7 @@ fn rex_install(
         "  rex.bind(\"cmd+shift+f\", \"annorex_files\")".to_owned(),
     ];
     lines.push(String::new());
-    match &exe {
-        Some(exe) => lines.push(format!("Rex starts: {}", exe.display())),
-        None => lines.push(
-            "Cannot find the path of this binary. Rex looks in ~/.cargo/bin, /opt/homebrew/bin, /usr/local/bin, and ~/.local/bin."
-                .to_owned(),
-        ),
-    }
+    lines.extend(install_note(exe.as_deref()));
     let scratch = std::env::temp_dir().join(format!("annorex-check-{}", std::process::id()));
     let checked = match crate::rex::find_binary(env) {
         Ok(rex) => std::fs::create_dir_all(&scratch).map_or(Check::Skipped, |()| {
@@ -396,6 +390,27 @@ fn rex_install(
     lines.push("Then run: rex config reload".to_owned());
     writeln!(out, "{}", lines.join("\n")).map_err(|error| io_failure(&error))?;
     Ok(if matches!(checked, Check::Failed(_)) { EXIT_FAILURE } else { EXIT_OK })
+}
+
+/// What `rex install` says about the binary that the module starts.
+fn install_note(exe: Option<&Path>) -> Vec<String> {
+    let Some(exe) = exe.and_then(Path::to_str) else {
+        return vec![
+            "Cannot write the path of this binary into the module. The module looks in $CARGO_HOME/bin or ~/.cargo/bin,"
+                .to_owned(),
+            "then /opt/homebrew/bin, /usr/local/bin, and ~/.local/bin.".to_owned(),
+        ];
+    };
+    let mut lines = vec![format!("Rex starts: {exe}")];
+    let parts: Vec<&str> = exe.split('/').collect();
+    let build = parts.windows(2).any(|pair| matches!(pair, ["target", "debug" | "release"]));
+    if build || parts.contains(&"Cellar") {
+        lines.push(
+            "This path changes with each build or version. Run annorex rex install again from the installed binary."
+                .to_owned(),
+        );
+    }
+    lines
 }
 
 fn rex_open(
@@ -443,6 +458,16 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
         }
+    }
+
+    #[test]
+    fn install_note_names_the_binary_and_warns_for_a_build_or_cellar_path() {
+        let note = |path: &str| install_note(Some(Path::new(path))).join("\n");
+        assert_eq!(note("/Users/me/.cargo/bin/annorex"), "Rex starts: /Users/me/.cargo/bin/annorex");
+        assert!(note("/src/annorex/target/debug/annorex").contains("changes with each build"));
+        assert!(note("/opt/homebrew/Cellar/annorex/0.1.0/bin/annorex").contains("changes with each build"));
+        let unknown = install_note(None).join("\n");
+        assert!(unknown.contains("$CARGO_HOME/bin") && unknown.contains("/opt/homebrew/bin"), "{unknown}");
     }
 
     #[test]

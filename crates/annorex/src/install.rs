@@ -19,8 +19,9 @@ pub const INSTALLED_PLACEHOLDER: &str = "local INSTALLED_BIN = nil -- set by ann
 /// The module as installed: the marker line with the version, then the source. `bin` is the
 /// binary that Rex starts when `setup{}` gives no `bin`.
 pub fn module_contents(bin: Option<&Path>) -> String {
-    let installed = match bin {
-        Some(bin) => format!("local INSTALLED_BIN = {}\n", lua_string(&bin.to_string_lossy())),
+    // A path that is not UTF-8 cannot be written exactly. The module then uses the known places.
+    let installed = match bin.and_then(Path::to_str) {
+        Some(bin) => format!("local INSTALLED_BIN = {}\n", lua_string(bin)),
         None => "local INSTALLED_BIN = nil\n".to_owned(),
     };
     format!(
@@ -280,6 +281,33 @@ mod tests {
         assert!(!text.contains(INSTALLED_PLACEHOLDER));
         let none = module_contents(None);
         assert!(none.contains("local INSTALLED_BIN = nil\n"), "{none}");
+    }
+
+    #[test]
+    fn a_path_that_is_not_utf8_is_not_written() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let bad = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/\xff/annorex"));
+        assert!(module_contents(Some(bad)).contains("local INSTALLED_BIN = nil\n"));
+    }
+
+    #[test]
+    fn check_module_uses_the_installed_path() {
+        let scratch = tempfile::tempdir().expect("temp dir");
+        let bin = Path::new("/opt/x/annorex");
+        let mut module = String::new();
+        check_module(scratch.path(), Some(bin), |init| {
+            module = std::fs::read_to_string(init.with_file_name("annorex.lua")).expect("module");
+            Ok(Probe { success: true, message: String::new() })
+        });
+        assert_eq!(module, module_contents(Some(bin)));
+    }
+
+    #[test]
+    fn module_checks_that_a_found_path_is_a_file() {
+        assert!(
+            MODULE_SOURCE.contains("io.open(path .. \"/.\", \"r\")"),
+            "a directory must not count as found"
+        );
     }
 
     #[test]
