@@ -117,7 +117,7 @@ pub struct Block {
     pub kind: BlockKind,
     /// The bytes in `Doc::source` of the block, without the final line feed. For a list item it
     /// is the item's own text only: from its first character of text to its last, without the
-    /// marker and without a nested list.
+    /// list marker, without a task marker, and without a nested list.
     pub range: Range<usize>,
     /// The `DocLine` indexes of the block. The first and the last line are not blank.
     pub lines: Range<usize>,
@@ -325,7 +325,8 @@ fn plain_blocks(lines: &[DocLine]) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut first = None;
     for index in 0..=lines.len() {
-        let blank = lines.get(index).is_none_or(DocLine::is_blank);
+        // A line of only spaces or tabs separates groups as a blank line does.
+        let blank = lines.get(index).is_none_or(|line| line.plain().trim().is_empty());
         match (first, blank) {
             (None, false) => first = Some(index),
             (Some(start), true) => {
@@ -381,6 +382,8 @@ struct Builder<'a> {
     depth: usize,
     /// The depths of the open list items that open blocks: the items outside any quote.
     items: Vec<usize>,
+    /// The source starts of the task list markers. They are not part of the own text of an item.
+    task_markers: Vec<usize>,
 }
 
 impl<'a> Builder<'a> {
@@ -399,6 +402,7 @@ impl<'a> Builder<'a> {
             open: None,
             depth: 0,
             items: Vec::new(),
+            task_markers: Vec::new(),
         }
     }
 
@@ -423,12 +427,13 @@ impl<'a> Builder<'a> {
         let Some(count) = own.iter().rposition(|line| !line.is_blank()).map(|last| last + 1) else { return };
         let lines = open.first_line..open.first_line + count;
         let range = if open.kind == BlockKind::ListItem {
-            // The item's own text: the source of its text spans, without the marker.
+            // The item's own text: the source of its text spans, without the list and task markers.
             let mut sources = own
                 .iter()
                 .take(count)
                 .flat_map(|line| line.spans.iter())
-                .filter_map(|span| span.source.as_ref().map(|source| source.range.clone()));
+                .filter_map(|span| span.source.as_ref().map(|source| source.range.clone()))
+                .filter(|range| !self.task_markers.contains(&range.start));
             match sources.next() {
                 Some(first) => {
                     sources.fold(first, |all, range| all.start.min(range.start)..all.end.max(range.end))
@@ -721,6 +726,7 @@ impl<'a> Builder<'a> {
                 self.blank();
             }
             Event::TaskListMarker(done) => {
+                self.task_markers.push(range.start);
                 self.push(if done { "[x] " } else { "[ ] " }, self.text_style(), &range);
             }
         }
@@ -1152,6 +1158,23 @@ mod tests {
         assert_eq!(doc.block_at(3), None);
         assert_eq!(doc.block_near(3), Some(1), "between two blocks");
         assert_eq!(doc.block_near(99), Some(1), "after the last block");
+    }
+
+    #[test]
+    fn task_item_range_has_no_task_marker() {
+        let doc = Doc::parse("- [ ] x\n- [x] done\n");
+        assert_eq!(kinds(&doc), [BlockKind::ListItem; 2]);
+        assert_eq!(&doc.source[doc.blocks[0].range.clone()], "x");
+        assert_eq!(&doc.source[doc.blocks[1].range.clone()], "done");
+    }
+
+    #[test]
+    fn a_whitespace_line_splits_plain_blocks() {
+        let doc = Doc::plain("a\n  \nb\n\t\n");
+        assert_eq!(kinds(&doc), [BlockKind::Text; 2]);
+        assert_eq!(doc.blocks[0].lines, 0..1);
+        assert_eq!(doc.blocks[1].lines, 2..3);
+        assert_eq!(Doc::plain("  \n").blocks, []);
     }
 
     #[test]
