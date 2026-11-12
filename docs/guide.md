@@ -144,7 +144,7 @@ Text mode has a free cursor and a character selection.
 | `g` / `G`               | Go to the start or the end                                       |
 | `v` / `V`               | Start a selection of characters or of lines. Press the key again to end the selection and show the action bar. A third press clears the selection |
 | `o` / `c` / `d` / `s`   | Note on the selection, or on the line of the cursor: looks good, comment, remove, or replace |
-| `esc`                   | Clear the selection. Without a selection, go back to block mode. In block mode, remove the focus |
+| `esc`                   | Clear the selection. Without a selection, go back to block mode. In block mode, remove the focus. With nothing selected or focused, quit |
 | `n` / `N`               | Go to the next or the previous match (in text mode)              |
 
 ### The action bar
@@ -269,7 +269,8 @@ Press any key to close it. The config action name is `help`. The footer shows `?
 2. Press `o` to mark the text as good. This needs no text. Press `c` to comment, `d` to mark the text for removal, or
    `s` to replace it. Type the note. Press `enter`.
 3. Press `S` or click the send button in the header. The button shows `[ Send N → agent ▸ ]`, with N the number of
-   notes. After a send, it shows `[ Sent HH:MM ]`.
+   notes. After a send that works, Annorex saves the drafts as sent and closes. If the send fails, Annorex stays open
+   and the footer shows the reason.
 
 The export is Markdown. It starts with `# Annotations on last reply`. For an older reply, the name is
 `earlier reply (HH:MM)` in your local time. Each note has a number, the line numbers, the quoted source text, and
@@ -292,7 +293,11 @@ agent pane. When the agent is busy, Claude Code queues the message. Pi and OpenC
 
 `Y` copies the notes with an OSC 52 sequence and with `pbcopy`. If only the OSC 52 part works, the footer says so.
 
-`q` and `ctrl+c` with unsent notes ask what to do: send (`s`), keep the draft (`k`), discard (`d`), or go back
+`q` quits at any time. `esc` steps back one level: it closes a box, then clears the selection, then removes the focus.
+When nothing is selected or focused, `esc` quits too. The footer ends with `q quit`. It shows `esc unselect` only while
+something is selected or focused. `P` and `Y` do not close Annorex.
+
+`q`, `esc` at the top, and `ctrl+c` with unsent notes ask what to do: send (`s`), keep the draft (`k`), discard (`d`), or go back
 (`esc`).
 
 ## Review files

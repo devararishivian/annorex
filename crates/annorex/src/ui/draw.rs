@@ -147,6 +147,7 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
                     hint(Action::Select, format!("{} text", k(Action::Select))),
                     hint(Action::Comment, notes),
                     hint(Action::Edit, format!("{}/{} edit", k(Action::Edit), k(Action::Remove))),
+                    plain("esc unselect"),
                 ];
                 lists(&mut out);
                 // The least important hint: a narrow footer leaves it out first.
@@ -156,7 +157,7 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
             Mode::Text if app.selection.is_some() => vec![
                 hint(Action::Comment, notes),
                 hint(Action::Select, format!("{} end", k(Action::Select))),
-                plain("esc clear"),
+                plain("esc unselect"),
                 hint(Action::Send, format!("{} send", k(Action::Send))),
             ],
             Mode::Text => {
@@ -165,7 +166,7 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
                     hint(Action::Down, format!("{moves} move")),
                     hint(Action::Select, format!("{} select", k(Action::Select))),
                     hint(Action::Comment, notes),
-                    plain("esc block"),
+                    plain("esc unselect"),
                 ];
                 lists(&mut out);
                 out
@@ -173,6 +174,10 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
         },
     };
     out.push(help);
+    // `q quit` ends the footer of the document views. The footer keeps it before all other hints.
+    if matches!(app.focus, Focus::Doc | Focus::Tree | Focus::Rail) {
+        out.push(hint(Action::Quit, format!("{} quit", k(Action::Quit))));
+    }
     out
 }
 
@@ -311,7 +316,11 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &mut App) {
     let enter =
         Line::from(vec![Span::styled(format!("{:>7}  ", "enter"), bold), Span::raw("show the action bar")]);
     left.insert((HELP_MOVE.len() + 3).min(left.len()), enter);
-    let right = help_column(app, &right);
+    let mut right = help_column(app, &right);
+    // `esc` is not a key of the config either. It steps back, and it quits with nothing selected.
+    for (key, text) in [("esc", "step back; with nothing"), ("", "selected, it quits")] {
+        right.push(Line::from(vec![Span::styled(format!("{key:>7}  "), bold), Span::raw(text)]));
+    }
     let two = area.width >= 78;
     let rows = if two { left.len().max(right.len()) } else { left.len() + 1 + right.len() };
     let width = if two { 80 } else { 44 };
@@ -427,14 +436,22 @@ fn draw_footer(
     let (left, left_style) = left.unwrap_or_default();
     let used = if left.is_empty() { 0 } else { text_width(&left) + 2 };
     let gap = text_width(HINT_GAP);
-    let (help, rest): (Vec<Hint>, Vec<Hint>) =
-        hints.into_iter().partition(|(action, _)| *action == Some(Action::Help));
+    let (keep, rest): (Vec<Hint>, Vec<Hint>) =
+        hints.into_iter().partition(|(action, _)| matches!(action, Some(Action::Help | Action::Quit)));
     let mut room = area.width.saturating_sub(used);
     let mut chosen: Vec<Hint> = Vec::new();
-    let help = help.into_iter().next().filter(|(_, text)| text_width(text) <= room);
-    if let Some((_, text)) = &help {
-        room -= text_width(text);
+    // `q quit` first, then `? help`: both stay while they fit. They show last, with `q quit` at the end.
+    let mut kept: Vec<Hint> = Vec::new();
+    let mut keep_hints = keep;
+    keep_hints.sort_by_key(|(action, _)| u8::from(*action == Some(Action::Help)));
+    for hint in keep_hints {
+        let width = text_width(&hint.1) + if kept.is_empty() { 0 } else { gap };
+        if width <= room {
+            room -= width;
+            kept.push(hint);
+        }
     }
+    kept.sort_by_key(|(action, _)| u8::from(*action == Some(Action::Quit)));
     for hint in rest {
         let width = text_width(&hint.1) + gap;
         if width > room {
@@ -443,7 +460,7 @@ fn draw_footer(
         room -= width;
         chosen.push(hint);
     }
-    chosen.extend(help);
+    chosen.extend(kept);
     let hints_width: u16 = chosen.iter().map(|(_, text)| text_width(text)).sum::<u16>()
         + gap * u16::try_from(chosen.len().saturating_sub(1)).unwrap_or(0);
     let left = fit(&left, area.width.saturating_sub(hints_width + u16::from(hints_width > 0) * 2));

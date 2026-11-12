@@ -1,6 +1,5 @@
 ---
 source: crates/annorex/tests/files_review.rs
-assertion_line: 213
 expression: "render(&mut app, 120, 40)"
 ---
 Annorex · files · claude (idle) · file 1/2 · unsent in 2 files                                     [ Send 2 → claude ▸ ]

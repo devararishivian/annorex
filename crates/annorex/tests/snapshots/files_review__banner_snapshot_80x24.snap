@@ -1,6 +1,5 @@
 ---
 source: crates/annorex/tests/files_review.rs
-assertion_line: 668
 expression: "render(&mut app, 80, 24)"
 ---
 Annorex · files · claude (idle) · file 1/1 · unsent 1 file [ Send 1 → claude ▸ ]
@@ -26,4 +25,4 @@ a.txt changed on disk. Press r to read it again.
 
 
 
-line 1/2 · 1 note    h/j/k/l move · v select · o c d s note · esc block · ? help
+line 1/2 · 1 note       h/j/k/l move · v select · o c d s note · ? help · q quit

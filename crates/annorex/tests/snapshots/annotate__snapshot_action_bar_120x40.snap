@@ -1,6 +1,5 @@
 ---
 source: crates/annorex/tests/annotate.rs
-assertion_line: 1032
 expression: "render(&mut app, 120, 40)"
 ---
 Annorex · last reply · claude (idle) · reply 1/1                                                              [ Send ▸ ]
@@ -42,4 +41,4 @@ Annorex · last reply · claude (idle) · reply 1/1                             
 
 
 
-block 2/5              j/k block · v text · o c d s note · e/x edit · S send · a notes · p list · enter actions · ? help
+block 2/5      j/k block · v text · o c d s note · e/x edit · esc unselect · S send · a notes · p list · ? help · q quit

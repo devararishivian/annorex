@@ -1393,3 +1393,100 @@ fn an_old_looks_good_note_with_text_still_exports_its_text() {
     let export = fresh.export();
     assert!(export.contains("> old text"), "{export}");
 }
+
+#[test]
+fn an_old_o_looks_good_note_with_text_still_exports_its_text() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllo");
+    let mut draft = app.draft(Agent::ClaudeCode, "s").expect("draft");
+    assert_eq!(draft.review.annotations[0].kind, Kind::LooksGood);
+    draft.review.annotations[0].note = "old good text".to_owned();
+    let mut fresh = self::app("alpha beta gamma\n");
+    fresh.restore("r1", draft);
+    let export = fresh.export();
+    assert!(export.contains("> old good text"), "{export}");
+}
+
+#[test]
+fn esc_with_nothing_selected_quits() {
+    let mut app = app("alpha beta gamma\n");
+    // The first esc removes the block focus. The second one quits.
+    assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::None);
+    assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::Quit);
+}
+
+#[test]
+fn esc_with_focus_clears_it() {
+    let mut app = app("alpha beta gamma\n");
+    assert_ne!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::Quit);
+    assert!(!render(&mut app, 80, 12).contains("esc unselect"));
+    // A text selection: the first esc clears it, the second leaves text mode, the third removes the focus.
+    let mut text = self::app("alpha beta gamma\n");
+    press(&mut text, "vll");
+    for _ in 0..3 {
+        assert_eq!(press_key(&mut text, KeyCode::Esc, KeyModifiers::NONE), Effect::None);
+    }
+    assert_eq!(press_key(&mut text, KeyCode::Esc, KeyModifiers::NONE), Effect::Quit);
+}
+
+#[test]
+fn esc_with_unsent_notes_asks_first() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllo");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    let mut guard = 0;
+    while !render(&mut app, 120, 12).contains("Unsent notes") && guard < 5 {
+        assert_ne!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::Quit, "no quit at once");
+        guard += 1;
+    }
+    assert!(render(&mut app, 120, 12).contains("Unsent notes"));
+    assert!(!app.should_exit());
+}
+
+#[test]
+fn footer_always_ends_with_q_quit() {
+    let mut app = app("alpha beta gamma\n");
+    for width in [80, 120] {
+        let screen = render(&mut app, width, 12);
+        let footer = screen.lines().last().expect("footer");
+        assert!(footer.ends_with("q quit"), "{width}: {footer}");
+        assert!(footer.contains("? help"), "{width}: {footer}");
+    }
+    press(&mut app, "vl");
+    let footer_of = |app: &mut App| render(app, 80, 12).lines().last().expect("footer").to_owned();
+    assert!(footer_of(&mut app).ends_with("q quit"), "{}", footer_of(&mut app));
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(footer_of(&mut app).ends_with("q quit"), "{}", footer_of(&mut app));
+}
+
+#[test]
+fn footer_shows_esc_unselect_only_with_focus() {
+    let mut app = app("alpha beta gamma\n");
+    assert!(render(&mut app, 120, 12).contains("esc unselect"));
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(!render(&mut app, 120, 12).contains("esc unselect"));
+    press(&mut app, "vl");
+    assert!(render(&mut app, 120, 12).contains("esc unselect"));
+}
+
+#[test]
+fn successful_send_quits() {
+    use annorex::send::{SendResult, apply_result};
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllo");
+    assert!(!app.should_exit());
+    assert!(apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z"));
+    assert!(app.draft(Agent::ClaudeCode, "s").expect("draft").sent_at.is_some(), "marked sent first");
+    assert!(app.should_exit());
+}
+
+#[test]
+fn failed_send_stays_open() {
+    use annorex::send::{SendResult, apply_result};
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllo");
+    apply_result(&mut app, SendResult::Refused("Not sent: the agent shows a dialog.".to_owned()), "t");
+    assert!(!app.should_exit());
+    assert!(render(&mut app, 120, 12).contains("Not sent: the agent shows a dialog."));
+}

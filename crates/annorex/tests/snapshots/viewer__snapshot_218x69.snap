@@ -1,6 +1,5 @@
 ---
 source: crates/annorex/tests/viewer.rs
-assertion_line: 116
 expression: "render(&mut viewer(), 218, 69)"
 ---
 Annorex · last reply · claude (idle) · reply 1/3                                                                                                                                                                [ Send ▸ ]
@@ -71,4 +70,4 @@ Annorex · last reply · claude (idle) · reply 1/3                             
  Note 14: the text of note 14 has bold words, emphasis, and code. 日本語の文も含みます。
 
  Note 15: the text of note 15 has bold words, emphasis, and code. 日本語の文も含みます。
-block 1/49                                                                                                               j/k block · v text · o c d s note · e/x edit · S send · a notes · p list · enter actions · ? help
+block 1/49                                                                                       j/k block · v text · o c d s note · e/x edit · esc unselect · S send · a notes · p list · enter actions · ? help · q quit

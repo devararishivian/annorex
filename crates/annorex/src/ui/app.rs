@@ -1238,6 +1238,10 @@ impl App {
         if self.action_of(key) == Some(Action::Help) {
             self.bar_open = strip_was_open;
         }
+        // `esc` with nothing selected and nothing focused is the top level: it quits, like `q`.
+        if key.code == KeyCode::Esc && self.mode == Mode::Browse && !strip_was_open {
+            return self.request_quit();
+        }
         if self.in_block_mode() && self.block_key(key) {
             return Effect::None;
         }
@@ -1471,6 +1475,10 @@ impl App {
         }
         match key.code {
             KeyCode::Enter => return self.tree_enter(),
+            // With no document on the screen the tree is the top level, so `esc` quits.
+            KeyCode::Esc if self.shown_file().is_none() && self.shown_id.is_none() => {
+                return self.request_quit();
+            }
             KeyCode::Esc => self.focus = Focus::Doc,
             KeyCode::Tab => self.cycle_focus(),
             _ => {
@@ -1681,7 +1689,7 @@ impl App {
         Effect::Discard
     }
 
-    /// `q`: quit, but ask first when the reply on the screen has notes that no send covered.
+    /// `q` and `esc` at the top level: quit, but ask first when the reply on the screen has notes that no send covered.
     fn request_quit(&mut self) -> Effect {
         self.help_open = false;
         if self.unsent_file_count() > 0 {
@@ -1859,6 +1867,11 @@ impl App {
             (_, Some(time)) => format!("earlier reply ({time})"),
             (_, None) => "earlier reply".to_owned(),
         }
+    }
+
+    /// A successful send closes Annorex. The caller saves the drafts first.
+    pub fn close_after_send(&mut self) {
+        self.exit = true;
     }
 
     /// The reply counts as sent at `at`, and the general note is used up.

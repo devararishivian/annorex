@@ -341,9 +341,19 @@ fn question_mark_shows_every_key_and_any_key_closes_the_help() {
     let mut app = both();
     press(&mut app, "?");
     let screen = render(&mut app, 100, 40);
-    for text in
-        [" Keys ", "S", "send the notes", "c", "comment", "ctrl+p", "find a file", "q", "close the viewer"]
-    {
+    for text in [
+        " Keys ",
+        "S",
+        "send the notes",
+        "c",
+        "comment",
+        "ctrl+p",
+        "find a file",
+        "q",
+        "quit at any time",
+        "step back; with nothing",
+        "selected, it quits",
+    ] {
         assert!(screen.contains(text), "missing {text:?}:\n{screen}");
     }
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
@@ -395,12 +405,12 @@ fn footer_changes_with_the_mode() {
     let mut app = both();
     let block = footer_of(&mut app, 200);
     assert!(
-        block.contains("block 1/1") && block.contains("j/k block") && block.ends_with("? help"),
+        block.contains("block 1/1") && block.contains("j/k block") && block.ends_with("? help · q quit"),
         "{block}"
     );
     press(&mut app, "v");
     let text = footer_of(&mut app, 200);
-    assert!(text.contains("o c d s note") && text.contains("esc clear"), "{text}");
+    assert!(text.contains("o c d s note") && text.contains("esc unselect"), "{text}");
     assert!(!text.contains("j/k block"), "{text}");
     press(&mut app, "c");
     let editor = footer_of(&mut app, 200);
@@ -413,7 +423,10 @@ fn footer_changes_with_the_mode() {
     assert!(rail.contains("enter go") && rail.contains("e edit"), "{rail}");
     press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
     let tree = footer_of(&mut app, 200);
-    assert!(tree.contains("enter open") && tree.contains("/ filter") && tree.ends_with("? help"), "{tree}");
+    assert!(
+        tree.contains("enter open") && tree.contains("/ filter") && tree.ends_with("? help · q quit"),
+        "{tree}"
+    );
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
     press(&mut app, "p");
     let list = footer_of(&mut app, 200);
@@ -435,7 +448,7 @@ fn footer_drops_hints_from_the_end_but_keeps_help() {
     let wide = footer_of(&mut app, 200);
     assert!(wide.contains("ctrl+p find"), "{wide}");
     let narrow = footer_of(&mut app, 60);
-    assert!(narrow.ends_with("? help") && narrow.contains("j/k block"), "{narrow}");
+    assert!(narrow.ends_with("? help · q quit") && narrow.contains("j/k block"), "{narrow}");
     assert!(!narrow.contains("ctrl+p find"), "the last hints go first: {narrow}");
     assert!(narrow.chars().count() <= 60, "{narrow}");
 }
@@ -460,4 +473,15 @@ fn a_new_text_closes_the_numbered_pick() {
     assert!(!render(&mut app, 80, 24).contains(" pick "), "the ids of the pick can be stale");
     press(&mut app, "1");
     assert!(app.editor().is_none(), "1 does not edit a stale note");
+}
+
+#[test]
+fn esc_in_the_tree_with_no_document_quits() {
+    let mut app = files_only();
+    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    let mut effects = Vec::new();
+    for _ in 0..2 {
+        effects.push(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE));
+    }
+    assert!(effects.contains(&Effect::Quit), "{effects:?}");
 }

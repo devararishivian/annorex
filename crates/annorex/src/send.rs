@@ -64,6 +64,10 @@ pub fn apply_result(app: &mut App, result: SendResult, now: &str) -> bool {
             app.finish_send(now);
             app.set_status(format!("{word}. {PROMPT_LIMIT}"));
             app.quit_if_pending();
+            if result == SendResult::Sent {
+                // A sent review is done: Annorex closes after the drafts are saved.
+                app.close_after_send();
+            }
             true
         }
         SendResult::Held(message) => {
