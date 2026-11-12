@@ -925,6 +925,8 @@ impl App {
         };
         self.cache.clear();
         self.top = 0;
+        // The wheel scrolled the old text: the view of the new text follows its focus again.
+        self.scroll.doc = false;
         let first = self.doc.lines.iter().position(|line| !line.is_blank());
         self.cursor = first.and_then(|index| self.line_start(index)).unwrap_or(0);
         if self.shown_id.as_deref() != Some(id.as_str()) {

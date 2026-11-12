@@ -440,3 +440,56 @@ fn click_on_a_row_of_the_numbered_pick_chooses_the_note() {
     click(&mut app, find(&screen, "second"));
     assert_eq!(app.editor().expect("editor").text, "second");
 }
+
+#[test]
+fn wheel_steps_in_one_batch_add_up_in_lists() {
+    // run_loop handles all queued events before it draws, so two steps come without a frame between them.
+    let dir = tempfile::tempdir().expect("dir");
+    for n in 0..40 {
+        std::fs::write(dir.path().join(format!("f{n:02}.txt")), "text\n").expect("write");
+    }
+    let mut app = files_app(dir.path());
+    let screen = frame(&mut app, WIDE);
+    click(&mut app, find(&screen, "f00.txt"));
+    let screen = frame(&mut app, WIDE);
+    let first = find(&screen, "f00.txt");
+    wheel_down(&mut app, first);
+    wheel_down(&mut app, first);
+    let screen = frame(&mut app, WIDE);
+    assert_eq!(find(&screen, "f06.txt").1, first.1, "two steps of the tree: {}", rows(&screen).join("\n"));
+
+    // The reply list in the centered box.
+    let replies: Vec<Reply> = (0..40).map(|n| reply(&format!("r{n}"), &format!("reply-{n:02}\n"))).collect();
+    let mut app = App::new(state(), Screen::Viewer, replies, &Config::default());
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    press(&mut app, "p");
+    let screen = frame(&mut app, NARROW);
+    // The document on the screen shows `reply-00`, so the second row of the box is the mark.
+    let second = find(&screen, "reply-01");
+    wheel_down(&mut app, second);
+    wheel_down(&mut app, second);
+    let screen = frame(&mut app, NARROW);
+    assert_eq!(find(&screen, "reply-07").1, second.1, "two steps of the box: {}", rows(&screen).join("\n"));
+}
+
+#[test]
+fn a_new_document_after_the_wheel_follows_its_focus() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::write(dir.path().join("a.md"), paragraphs(40)).expect("write");
+    let other: String = (0..40).map(|n| format!("bpara {n}\n\n")).collect::<Vec<_>>().concat();
+    std::fs::write(dir.path().join("b.md"), other).expect("write");
+    let mut app = files_app(dir.path());
+    let screen = frame(&mut app, WIDE);
+    click(&mut app, find(&screen, "a.md"));
+    let screen = frame(&mut app, WIDE);
+    let (x, y) = find(&screen, "para 1");
+    for _ in 0..4 {
+        wheel_down(&mut app, (x, y));
+    }
+    let screen = frame(&mut app, WIDE);
+    click(&mut app, find(&screen, "b.md"));
+    // No key came after the wheel: the new document must not keep the wheel state of the old one.
+    let screen = frame(&mut app, WIDE);
+    assert!(rows(&screen).iter().any(|row| row.contains("bpara 0")), "{}", rows(&screen).join("\n"));
+    assert!(!app.doc_scrolled(), "a new document ends the wheel scroll of the old one");
+}

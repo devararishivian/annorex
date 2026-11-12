@@ -59,6 +59,11 @@ impl Canvas for DefaultTerminal {
     }
 }
 
+/// True when an event can change the screen. A pointer move does nothing in the viewer.
+fn needs_draw(event: &Event) -> bool {
+    !matches!(event, Event::Mouse(mouse) if mouse.kind == event::MouseEventKind::Moved)
+}
+
 /// Run the viewer until `q`, a signal (`stop`), or the end of the terminal input. Each turn
 /// waits for one event, applies all queued events and state updates, and then draws one time.
 /// An error from `events` stops the loop with `Ok(())`. The caller restores the terminal.
@@ -75,7 +80,10 @@ pub fn run_loop(
             return Ok(());
         }
         let Ok(mut pending) = events.next(WAIT) else { return Ok(()) };
+        // A timeout draws, so the clock and the background work show. A batch of pointer moves alone does not.
+        let mut redraw = pending.is_none();
         while let Some(event) = pending {
+            redraw |= needs_draw(&event);
             let effect = match event {
                 Event::Key(key) => Some(app.handle_key(key)),
                 Event::Paste(text) => Some(app.handle_paste(&text)),
@@ -99,12 +107,15 @@ pub fn run_loop(
         }
         while let Ok(state) = updates.try_recv() {
             app.set_state(state);
+            redraw = true;
         }
-        app.poll_background();
+        redraw |= app.poll_background();
         if stop.load(Ordering::SeqCst) {
             return Ok(());
         }
-        canvas.draw(app)?;
+        if redraw {
+            canvas.draw(app)?;
+        }
     }
 }
 
@@ -180,12 +191,17 @@ pub fn run_viewer(
 /// mouse. A panic turns the paste mode and the mouse off before the panic hook of ratatui restores
 /// the rest.
 fn init_terminal() -> io::Result<DefaultTerminal> {
+    static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
     let terminal = ratatui::try_init()?;
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        stop_paste_and_mouse();
-        hook(info);
-    }));
+    // `try_init` adds its hook at each call. The hook of this function goes in one time only, so a
+    // second viewer in one process does not stack a second copy.
+    PANIC_HOOK.call_once(|| {
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            stop_paste_and_mouse();
+            hook(info);
+        }));
+    });
     ratatui::crossterm::execute!(io::stdout(), event::EnableBracketedPaste, event::EnableMouseCapture)?;
     Ok(terminal)
 }
@@ -656,6 +672,33 @@ mod tests {
         let stop = AtomicBool::new(false);
         run_loop(&mut app(), &mut events, &mut canvas, &stop, &rx, &mut no_effects()).expect("loop");
         assert_eq!(canvas.draws, 1);
+    }
+
+    #[test]
+    fn pointer_moves_alone_cost_no_draw() {
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mouse = |kind| {
+            Ok(Some(Event::Mouse(MouseEvent { kind, column: 1, row: 1, modifiers: KeyModifiers::NONE })))
+        };
+        let moved = || mouse(MouseEventKind::Moved);
+        let mut events = script(vec![moved(), moved(), moved(), Ok(None)]);
+        let mut canvas = Counting::new();
+        let (_tx, rx) = mpsc::channel();
+        let stop = AtomicBool::new(false);
+        run_loop(&mut app(), &mut events, &mut canvas, &stop, &rx, &mut no_effects()).expect("loop");
+        assert_eq!(canvas.draws, 0, "a batch of pointer moves changes nothing on the screen");
+        let mut events =
+            script(vec![moved(), mouse(MouseEventKind::Up(MouseButton::Left)), Ok(None), Ok(None)]);
+        let mut canvas = Counting::new();
+        run_loop(&mut app(), &mut events, &mut canvas, &stop, &rx, &mut no_effects()).expect("loop");
+        assert_eq!(canvas.draws, 2, "another event and the timeout each draw");
+        assert!(super::needs_draw(&Event::Resize(80, 24)));
+        assert!(!super::needs_draw(&Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE
+        })));
     }
 
     #[test]

@@ -90,6 +90,11 @@ impl App {
         }
     }
 
+    /// True while the wheel holds the view of the document, so the view does not follow the focus.
+    pub fn doc_scrolled(&self) -> bool {
+        self.scroll.doc
+    }
+
     /// A press of the left button.
     fn press(&mut self, (column, row): (u16, u16)) -> Effect {
         let hit = self.hits.at(column, row).copied();
@@ -381,9 +386,17 @@ impl App {
                 self.wheel_doc(forward, WHEEL_LINES);
                 self.scroll.doc = true;
             }
-            Part::Tree => self.scroll.tree = Some(step(self.tops.tree, WHEEL_LINES)),
-            Part::Notes => self.scroll.notes = Some(step(self.tops.notes, (WHEEL_LINES / 2).max(1))),
-            Part::Box => self.scroll.boxed = Some(step(self.tops.boxed, WHEEL_LINES)),
+            // Several steps can come before the next frame: each one starts from the scroll so far.
+            Part::Tree => {
+                self.scroll.tree = Some(step(self.scroll.tree.unwrap_or(self.tops.tree), WHEEL_LINES));
+            }
+            Part::Notes => {
+                let top = self.scroll.notes.unwrap_or(self.tops.notes);
+                self.scroll.notes = Some(step(top, (WHEEL_LINES / 2).max(1)));
+            }
+            Part::Box => {
+                self.scroll.boxed = Some(step(self.scroll.boxed.unwrap_or(self.tops.boxed), WHEEL_LINES));
+            }
         }
     }
 }
