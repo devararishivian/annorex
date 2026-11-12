@@ -750,13 +750,14 @@ fn ctrl_c_asks_once() {
 #[test]
 fn cursor_is_visible_on_a_trailing_space() {
     use ratatui::style::Modifier;
-    let text = format!("{} {}\n", "a".repeat(38), "b".repeat(10));
+    // 40 columns: the margin, 37 columns of text, and the marker margin of 2 columns.
+    let text = format!("{} {}\n", "a".repeat(36), "b".repeat(10));
     let mut app = app(&text);
     press(&mut app, "0");
-    for _ in 0..38 {
+    for _ in 0..36 {
         press(&mut app, "l");
     }
-    assert_eq!(app.cursor(), 38, "the cursor is on the space");
+    assert_eq!(app.cursor(), 36, "the cursor is on the space");
     let mut terminal = Terminal::new(TestBackend::new(40, 12)).expect("terminal");
     terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
     let buffer = terminal.backend().buffer();
@@ -766,7 +767,7 @@ fn cursor_is_visible_on_a_trailing_space() {
             buffer.cell((x, y)).expect("cell").style().add_modifier.contains(Modifier::REVERSED)
         })
         .collect::<Vec<_>>();
-    assert_eq!(reversed, [(39, 1)], "the cursor shows on the trailing space");
+    assert_eq!(reversed, [(37, 1)], "the cursor shows on the trailing space");
 }
 
 #[test]
@@ -1017,4 +1018,175 @@ fn snapshot_editor_floating_80x24() {
     press(&mut app, "Which page?");
     press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
     insta::assert_snapshot!(render(&mut app, 80, 24));
+}
+
+/// Four paragraphs and a last one, so the focus can leave the notes.
+const FIVE: &str = "good part\n\nasked part\n\ngone part\n\nold part\n\nthe end\n";
+
+/// One note of each kind: looks good, comment, remove, replace. The focus ends on the last block.
+fn four_kinds() -> App {
+    let mut app = app(FIVE);
+    press(&mut app, "o");
+    press(&mut app, "jcWhy?\n");
+    press(&mut app, "jd\n");
+    press(&mut app, "jsnew part\n");
+    press(&mut app, "j");
+    assert_eq!(app.review().expect("review").annotations.len(), 4);
+    app
+}
+
+#[test]
+fn range_styles_follow_the_kind() {
+    use ratatui::style::{Color, Modifier};
+    let mut app = four_kinds();
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let screen = render(&mut app, 80, 24);
+    let cell = |text: &str| {
+        let y = u16::try_from(row_of(&screen, text)).expect("row");
+        buffer.cell((2, y)).expect("cell").style()
+    };
+    let good = cell("good part");
+    assert_eq!(good.bg, Some(Color::Green), "looks good: green background");
+    let asked = cell("asked part");
+    assert_eq!(asked.fg, Some(Color::Yellow), "comment: yellow");
+    assert!(asked.add_modifier.contains(Modifier::UNDERLINED), "comment: underlined");
+    let gone = cell("gone part");
+    assert_eq!(gone.fg, Some(Color::Red), "remove: red");
+    assert!(gone.add_modifier.contains(Modifier::CROSSED_OUT), "remove: crossed out");
+    let old = cell("old part");
+    assert_eq!(old.fg, Some(Color::Magenta), "replace: magenta");
+    assert!(old.add_modifier.contains(Modifier::CROSSED_OUT), "replace: crossed out");
+    let end = cell("the end");
+    assert!(!end.add_modifier.contains(Modifier::UNDERLINED | Modifier::CROSSED_OUT), "no note: no style");
+}
+
+/// The cells of the screen as a grid of symbols and styles.
+fn drawn(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    terminal.backend().buffer().clone()
+}
+
+/// The cells that show `symbol`, as (column, row, style).
+fn cells_with(buffer: &ratatui::buffer::Buffer, symbol: &str) -> Vec<(u16, u16, ratatui::style::Style)> {
+    let area = buffer.area;
+    let mut out = Vec::new();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let cell = buffer.cell((x, y)).expect("cell");
+            if cell.symbol() == symbol {
+                out.push((x, y, cell.style()));
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn cards_show_at_120_columns_and_markers_below() {
+    use ratatui::style::Color;
+    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
+    press(&mut app, "jcWhich page?\n");
+    let wide = render(&mut app, 120, 40);
+    let title = row_of(&wide, "💬 comment");
+    assert_eq!(title, row_of(&wide, "We change the login page."), "the card is at its block:\n{wide}");
+    assert!(wide.contains("Which page?"), "{wide}");
+    let line = wide.lines().nth(title).expect("title row");
+    let card_x = line.find('┌').expect("card border");
+    assert!(card_x > 80, "the card is in the rail on the right: {line:?}");
+    let buffer = drawn(&mut app, 120, 40);
+    let corners = cells_with(&buffer, "┌");
+    assert!(corners.iter().any(|(_, _, style)| style.fg == Some(Color::Yellow)), "the border is yellow");
+    assert!(cells_with(&buffer, "●").is_empty(), "no marker with the rail");
+
+    let narrow = render(&mut app, 110, 40);
+    assert!(!narrow.contains("💬 comment"), "no card below 120 columns:\n{narrow}");
+    let buffer = drawn(&mut app, 110, 40);
+    let markers = cells_with(&buffer, "●");
+    let row = u16::try_from(row_of(&narrow, "We change the login page.")).expect("row");
+    assert_eq!(markers.len(), 1, "{narrow}");
+    let (x, y, style) = markers[0];
+    assert_eq!((y, style.fg), (row, Some(Color::Yellow)), "a yellow marker at the row of the note");
+    assert!(x > 100, "the marker is in the right margin: {x}");
+}
+
+#[test]
+fn e_edits_the_note_of_the_focused_block() {
+    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
+    press(&mut app, "jcfirst\n");
+    press(&mut app, "k");
+    press(&mut app, "e");
+    assert!(app.editor().is_none(), "the title has no note");
+    assert!(render(&mut app, 80, 24).contains("no note here"));
+    press(&mut app, "je");
+    assert_eq!(app.editor().expect("editor").text, "first");
+    press(&mut app, "!\n");
+    let review = app.review().expect("review");
+    assert_eq!((review.annotations.len(), review.annotations[0].note.as_str()), (1, "first!"));
+}
+
+#[test]
+fn e_follows_a_rebound_key() {
+    let dir = tempfile::tempdir().expect("dir");
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[keys]\nedit = \"E\"\n").expect("config");
+    let config = Config::load(&file).expect("config");
+    let mut app = app_with("We change the login page.\n", &config);
+    press(&mut app, "cfirst\n");
+    press(&mut app, "E");
+    assert_eq!(app.editor().expect("editor").text, "first");
+}
+
+#[test]
+fn x_asks_then_removes_it() {
+    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
+    press(&mut app, "jcfirst\n");
+    press(&mut app, "x");
+    assert!(render(&mut app, 80, 24).contains("Delete annotation 1? y/n"));
+    press(&mut app, "n");
+    assert_eq!(app.review().expect("review").annotations.len(), 1, "n keeps it");
+    press(&mut app, "xy");
+    assert!(app.review().expect("review").is_empty(), "y removes it");
+}
+
+#[test]
+fn several_notes_show_a_numbered_pick() {
+    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
+    press(&mut app, "jcone\n");
+    press(&mut app, "ctwo\n");
+    press(&mut app, "e");
+    assert!(app.editor().is_none(), "two notes: no editor yet");
+    let screen = render(&mut app, 80, 24);
+    let first = row_of(&screen, "1 💬 one");
+    assert_eq!(row_of(&screen, "2 💬 two"), first + 1, "{screen}");
+    assert!(!screen.contains("[c comment]"), "no action bar under the pick:\n{screen}");
+    press(&mut app, "2");
+    assert_eq!(app.editor().expect("editor").text, "two");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+
+    press(&mut app, "e");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(app.editor().is_none(), "esc closes the pick");
+    assert!(!render(&mut app, 80, 24).contains("1 💬 one"));
+
+    press(&mut app, "x9");
+    assert!(app.editor().is_none() && !render(&mut app, 80, 24).contains("y/n"), "9 is not in the list");
+    press(&mut app, "1");
+    assert!(render(&mut app, 80, 24).contains("Delete annotation 1? y/n"));
+    press(&mut app, "y");
+    let review = app.review().expect("review");
+    assert_eq!((review.annotations.len(), review.annotations[0].note.as_str()), (1, "two"));
+}
+
+#[test]
+fn snapshot_cards_120x40() {
+    let mut app = app(bar_text());
+    press(&mut app, "o");
+    press(&mut app, "jcWhich page? The old one or the new one, after the move of the login form.\n");
+    press(&mut app, "jd\n");
+    press(&mut app, "jsThe last line.\n");
+    press(&mut app, "k");
+    insta::assert_snapshot!(render(&mut app, 120, 40));
 }

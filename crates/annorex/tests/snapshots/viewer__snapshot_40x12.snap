@@ -6,8 +6,8 @@ Annorex · last reply · claude (idle)
 ▍Migration plan
  [o looks good] [c comment] [d remove]
  We change the login page and the
- session store. The work has four steps,
- and each step has a test.
+ session store. The work has four
+ steps, and each step has a test.
 
  Steps
 

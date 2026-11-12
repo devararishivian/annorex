@@ -11,6 +11,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Confirm, Focus, PanelView, ReplySource, Screen, match_ranges};
 use super::bar::{draw_action_bar, shown_rows};
+use super::cards::{Side, draw_pick, draw_side, range_style, rank, split_side};
 use super::focus::{Mode, View};
 use super::hits::Hit;
 use crate::agent::Agent;
@@ -439,7 +440,13 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         }
         _ => doc_area,
     };
-    draw_doc(frame, app, doc_area);
+    let (doc_area, side) = split_side(doc_area);
+    // The focus background also fills the marker margin, so it reaches the end of the row.
+    let fill_width = match side {
+        Side::Markers(column) => doc_area.width + column.width,
+        Side::Rail(_) | Side::Nothing => doc_area.width,
+    };
+    draw_doc(frame, app, doc_area, fill_width);
     let (margin, gutter) = margin_and_gutter(&app.doc, doc_area);
     let text_area = Rect::new(
         doc_area.x + margin + gutter,
@@ -448,6 +455,7 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         doc_area.height,
     );
     draw_action_bar(frame, text_area, app);
+    draw_side(frame, app, side);
     if let Some(panel) = panel_area {
         let borders = match layout {
             Layout::Side { .. } => Borders::LEFT,
@@ -464,6 +472,7 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
             PanelView::Finder => draw_finder(frame, app, panel, borders),
         }
     }
+    draw_pick(frame, app, text_area);
     draw_editor(frame, app, text_area);
     let prompt = app.confirm.map(|what| prompt_text(app, what));
     let message = prompt
@@ -492,7 +501,8 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
     draw_footer(frame, footer, &keys, message);
 }
 
-fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
+/// Draw the document in `area`. The focus background fills `fill_width` columns from the left of `area`.
+fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -501,9 +511,11 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
     let (margin, gutter) = margin_and_gutter(&app.doc, area);
     let text_width = area.width - margin - gutter;
     let cursor_line = app.cursor_line();
-    let annotated: Vec<std::ops::Range<usize>> = app
+    let annotated: Vec<(std::ops::Range<usize>, Kind)> = app
         .review()
-        .map(|review| review.annotations.iter().filter(|a| !a.detached).map(|a| a.range.clone()).collect())
+        .map(|review| {
+            review.annotations.iter().filter(|a| !a.detached).map(|a| (a.range.clone(), a.kind)).collect()
+        })
         .unwrap_or_default();
     let selection = app.selection_range();
     app.width = text_width;
@@ -576,7 +588,8 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
                     .map(|at| at.is_some_and(|at| ranges.iter().any(|range| range.contains(&at))))
                     .collect()
             };
-            let marks = Marks { underline: flags(&annotated), selected: flags(selection.as_slice()) };
+            let marks =
+                Marks { kinds: note_kinds(&offsets, &annotated), selected: flags(selection.as_slice()) };
             spans.extend(row_spans(row, &matches, cursor, &marks));
             Line::from(spans)
         })
@@ -584,7 +597,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
     if let Some(block) = &focused {
         fill_focus(
             frame,
-            area,
+            Rect { width: fill_width, ..area },
             rows.iter().skip(top_row).take(height).map(|row| block.lines.contains(&row.doc_line)),
         );
     }
@@ -725,14 +738,30 @@ fn row_matches(rows: &[VisualLine], index: usize, query: &str) -> Vec<std::ops::
         .collect()
 }
 
-/// Which characters of a row are annotated and which are selected.
+/// For each character of a row: the type of the note over it. Where notes of two types overlap,
+/// the type with the higher rank shows.
+fn note_kinds(offsets: &[Option<usize>], annotated: &[(std::ops::Range<usize>, Kind)]) -> Vec<Option<Kind>> {
+    offsets
+        .iter()
+        .map(|at| {
+            let at = (*at)?;
+            annotated
+                .iter()
+                .filter(|(range, _)| range.contains(&at))
+                .map(|(_, kind)| *kind)
+                .max_by_key(|kind| rank(*kind))
+        })
+        .collect()
+}
+
+/// Which characters of a row are under a note, of which type, and which are selected.
 struct Marks {
-    underline: Vec<bool>,
+    kinds: Vec<Option<Kind>>,
     selected: Vec<bool>,
 }
 
-/// The spans of a row, with the matches marked, the cursor cell reversed, annotated text underlined,
-/// and the selection reversed.
+/// The spans of a row, with the matches marked, the cursor cell reversed, the text under a note in
+/// the style of its type, and the selection reversed.
 fn row_spans(
     row: &VisualLine,
     matches: &[std::ops::Range<usize>],
@@ -745,18 +774,19 @@ fn row_spans(
     for DocSpan { text, style, .. } in &row.spans {
         let base = style_of(*style);
         let style_at = |position: usize| {
+            let noted = match marks.kinds.get(position) {
+                Some(Some(kind)) => base.patch(range_style(*kind)),
+                _ => base,
+            };
             let mut style = if cursor == Some(position) {
-                base.add_modifier(Modifier::REVERSED)
+                noted.add_modifier(Modifier::REVERSED)
             } else if matches.iter().any(|range| range.contains(&position)) {
                 highlight
             } else {
-                base
+                noted
             };
             if marks.selected.get(position) == Some(&true) {
                 style = style.add_modifier(Modifier::REVERSED);
-            }
-            if marks.underline.get(position) == Some(&true) {
-                style = style.add_modifier(Modifier::UNDERLINED);
             }
             style
         };
@@ -1045,7 +1075,7 @@ fn draw_editor(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// The first row of the editor box of `height` rows. `anchor` is the first and the last row of the
 /// range on the screen, as offsets from the top of `area`.
-fn editor_top(area: Rect, height: u16, anchor: Option<(usize, usize)>) -> u16 {
+pub(super) fn editor_top(area: Rect, height: u16, anchor: Option<(usize, usize)>) -> u16 {
     let lowest = area.bottom().saturating_sub(height);
     let Some((first, last)) = anchor else { return lowest };
     let offset = |row: usize| area.y.saturating_add(u16::try_from(row).unwrap_or(u16::MAX));

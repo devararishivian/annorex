@@ -37,10 +37,11 @@ pub(super) fn shown_rows(app: &mut App, range: &Range<usize>) -> Option<(usize, 
     Some((first, last))
 }
 
-/// True when the bar does not show: an editor, the help screen, a question, the find input, a
+/// True when the bar does not show: an editor, the numbered pick, the help screen, a question, the find input, a
 /// list with the focus, or a list over the document is open, or the document is empty.
 fn hidden(app: &App) -> bool {
     app.editor.is_some()
+        || app.pick.is_some()
         || app.help_open
         || app.confirm.is_some()
         || app.find_input.is_some()

@@ -131,7 +131,9 @@ fn list_marks_unsent_files() {
     press(&mut app, "p");
     let screen = render(&mut app, 120, 20);
     assert!(screen.contains("Files") && screen.contains("b.txt") && screen.contains("a.md"), "{screen}");
-    let marked: Vec<&str> = screen.lines().filter(|line| line.contains('●')).collect();
+    // The list is the right part of the screen. The document part has the note marker too.
+    let list: Vec<String> = screen.lines().map(|line| line.chars().skip(80).collect()).collect();
+    let marked: Vec<&String> = list.iter().filter(|line| line.contains('●')).collect();
     assert_eq!(marked.len(), 1, "{screen}");
     assert!(marked[0].contains("a.md"), "{marked:?}");
 }

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use super::cards::MAX_PICK;
 use super::editor::{Editor, EditorResult};
 use super::focus::Mode;
 use super::hits::HitMap;
@@ -201,6 +202,11 @@ pub struct App {
     pub(crate) annotation_index: usize,
     /// The annotation that waits for `y` or `n`.
     pub(crate) confirm: Option<Confirm>,
+    /// The numbered pick: the ids of the notes at the focus, when the edit or remove key found more
+    /// than one. The keys `1` to `9` choose one, `esc` closes it.
+    pub(crate) pick: Option<Vec<u64>>,
+    /// True when the pick removes the chosen note, false when it edits it.
+    pub(crate) pick_removes: bool,
     /// A send or a discard from the quit question. The viewer ends when it works.
     quit_after: bool,
     exit: bool,
@@ -275,6 +281,8 @@ impl App {
             panel_view: PanelView::Replies,
             annotation_index: 0,
             confirm: None,
+            pick: None,
+            pick_removes: false,
             quit_after: false,
             exit: false,
             shown_id: None,
@@ -878,6 +886,7 @@ impl App {
             self.mode = Mode::Block(0);
             self.cursor = self.block_start(0).unwrap_or(self.cursor);
             self.confirm = None;
+            self.pick = None;
             self.annotation_index = 0;
             self.shown_id = Some(id.clone());
             if let Some(editing) = self.parked.remove(&id) {
@@ -1041,6 +1050,9 @@ impl App {
         if let Some(what) = self.confirm {
             return self.confirm_key(key, what);
         }
+        if let Some(effect) = self.pick_key(key) {
+            return effect;
+        }
         if self.find_input.is_some() {
             self.find_key(key);
             return Effect::None;
@@ -1138,6 +1150,8 @@ impl App {
                 Some(Action::Delete) => return self.begin_new(Kind::Delete),
                 Some(Action::Replace) => return self.begin_new(Kind::Replace),
                 Some(Action::Label) => return self.begin_label(),
+                Some(Action::Edit) => return self.note_here(false),
+                Some(Action::Remove) => return self.note_here(true),
                 Some(Action::Send) => return self.request_send(DeliveryMode::Send),
                 Some(Action::Paste) => return self.request_send(DeliveryMode::PasteOnly),
                 Some(Action::SendWithNote) => return self.begin_note(),
@@ -1700,6 +1714,68 @@ impl App {
         match id {
             Some(id) => self.begin_edit(id),
             None => self.begin_new(Kind::Comment),
+        }
+    }
+
+    /// The ids of the notes at the focus, in document order: the notes on the focused block in block
+    /// mode, the notes at the cursor in text mode. Detached notes are left out.
+    fn notes_here(&self) -> Vec<u64> {
+        let Some(review) = self.review() else { return Vec::new() };
+        let block = self.focus_range();
+        review
+            .in_order()
+            .into_iter()
+            .filter(|a| !a.detached)
+            .filter(|a| match &block {
+                Some(block) => a.range.start < block.end && block.start < a.range.end,
+                None => a.range.contains(&self.cursor),
+            })
+            .map(|a| a.id)
+            .collect()
+    }
+
+    /// The edit or the remove key in the document: act on the note at the focus. With several
+    /// notes, open the numbered pick.
+    fn note_here(&mut self, remove: bool) -> Effect {
+        let mut ids = self.notes_here();
+        match ids.as_slice() {
+            [] => self.status = Some("no note here".to_owned()),
+            [id] => return self.act_on_note(*id, remove),
+            _ => {
+                ids.truncate(MAX_PICK);
+                self.pick = Some(ids);
+                self.pick_removes = remove;
+            }
+        }
+        Effect::None
+    }
+
+    /// Edit a note, or ask before its removal.
+    fn act_on_note(&mut self, id: u64, remove: bool) -> Effect {
+        if remove {
+            self.confirm = Some(Confirm::Annotation(id));
+            Effect::None
+        } else {
+            self.begin_edit(id)
+        }
+    }
+
+    /// A key while the numbered pick is open. `1` to `9` choose a note, `esc` closes the pick, a
+    /// number that is not in the list does nothing. Another key closes the pick and then acts as
+    /// usual: the result is `None` then.
+    fn pick_key(&mut self, key: KeyEvent) -> Option<Effect> {
+        let ids = self.pick.take()?;
+        match key.code {
+            KeyCode::Esc => Some(Effect::None),
+            KeyCode::Char(c @ '1'..='9') => {
+                let chosen = c.to_digit(10).and_then(|n| ids.get(usize::try_from(n).ok()? - 1)).copied();
+                if let Some(id) = chosen {
+                    return Some(self.act_on_note(id, self.pick_removes));
+                }
+                self.pick = Some(ids);
+                Some(Effect::None)
+            }
+            _ => None,
         }
     }
 

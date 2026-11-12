@@ -2,6 +2,7 @@
 
 mod app;
 mod bar;
+mod cards;
 mod draw;
 mod editor;
 mod focus;

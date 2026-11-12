@@ -431,7 +431,7 @@ fn ctrl_keys_do_not_type_in_find() {
 #[test]
 fn match_split_by_wrap_is_highlighted() {
     use ratatui::style::Color;
-    let text = "alpha beta gamma delta epsilon pi the text of end";
+    let text = "alpha beta gamma delta epsil pi the text of end";
     let state = state(Agent::ClaudeCode, "idle");
     let mut app = App::new(state, Screen::Viewer, vec![reply("r1", text)], &Config::default());
     press(&mut app, "/the text\n");

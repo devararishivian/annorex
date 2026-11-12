@@ -4,11 +4,11 @@ expression: "render(&mut app, 80, 24)"
 ---
 Annorex · last reply · claude (idle)                                   reply 1/1
  We change the login page.
- ┌ comment · l.1 ──────────────────────────────────────────────────────────────┐
- │Comment on: "the l"                                                          │
- │label: question                                                              │
- │Which page?▏                                                                 │
- └───────────────────────────────────────────────────────────── save ─ cancel ─┘
+ ┌ comment · l.1 ────────────────────────────────────────────────────────────┐
+ │Comment on: "the l"                                                        │
+ │label: question                                                            │
+ │Which page?▏                                                               │
+ └─────────────────────────────────────────────────────────── save ─ cancel ─┘
 
 
 

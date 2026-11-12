@@ -1,0 +1,44 @@
+---
+source: crates/annorex/tests/annotate.rs
+expression: "render(&mut app, 120, 40)"
+---
+Annorex · last reply · claude (idle)                                                    reply 1/1 · unsent 1  [Send 4 ▸]
+ Plan                                                                                  ┌ ✓ looks good ─────────────────┐
+                                                                                       │                               │
+ We change the login page. The old page stays for a week.                              └───────────────────────────────┘
+                                                                                       ┌ 💬 comment ───────────────────┐
+▍- one                                                                                 │ Which page? The old one or    │
+ [o looks good] [c comment] [d remove] [s replace]                                     │ the new one, after the move   │
+                                                                                       │ of the login form.            │
+ The end.                                                                              └───────────────────────────────┘
+                                                                                       ┌ ✕ remove ─────────────────────┐
+                                                                                       │                               │
+                                                                                       └─────────── e edit ─ x remove ─┘
+                                                                                       ┌ ⇄ replace ────────────────────┐
+                                                                                       │ The last line.                │
+                                                                                       └───────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+j/k move  v select  c/d/s annotate  S send  ? help  a list  p replies  / find  q quit
