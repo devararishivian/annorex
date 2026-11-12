@@ -303,7 +303,7 @@ fn restore_checks_the_quotes_against_the_reply() {
 fn a_new_change_makes_a_sent_draft_unsent() {
     let mut app = app("alpha beta gamma\n");
     press(&mut app, "cx\n");
-    app.mark_sent("2026-11-09T10:00:00Z".to_owned());
+    app.mark_sent("2026-11-09T10:00:00Z");
     assert_eq!(
         app.draft(Agent::ClaudeCode, "s").expect("draft").sent_at.as_deref(),
         Some("2026-11-09T10:00:00Z")
@@ -636,7 +636,7 @@ fn idle() -> Safety {
 #[test]
 fn export_skips_sent_annotations_and_a_change_makes_one_unsent() {
     let mut app = annotated(Agent::ClaudeCode, idle());
-    app.finish_send("2026-11-09T11:00:00Z".to_owned());
+    app.finish_send("2026-11-09T11:00:00Z");
     assert!(app.export().is_empty(), "everything was sent");
     press(&mut app, "cother\n");
     let export = app.export();
@@ -651,7 +651,7 @@ fn export_skips_sent_annotations_and_a_change_makes_one_unsent() {
 #[test]
 fn send_with_all_sent_says_nothing_new() {
     let mut app = annotated(Agent::ClaudeCode, idle());
-    app.finish_send("2026-11-09T11:00:00Z".to_owned());
+    app.finish_send("2026-11-09T11:00:00Z");
     let effect = press_key(&mut app, KeyCode::Char('S'), KeyModifiers::SHIFT);
     assert_eq!(effect, Effect::None);
     assert_eq!(app.status(), Some("Nothing new to send. Press Y to copy all notes."));

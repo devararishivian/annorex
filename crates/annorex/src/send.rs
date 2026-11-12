@@ -61,14 +61,14 @@ pub fn apply_result(app: &mut App, result: SendResult, now: &str) -> bool {
     match result {
         SendResult::Sent | SendResult::Pasted => {
             let word = if result == SendResult::Sent { "Sent" } else { "Pasted" };
-            app.finish_send(now.to_owned());
+            app.finish_send(now);
             app.set_status(format!("{word}. {PROMPT_LIMIT}"));
             app.quit_if_pending();
             true
         }
         SendResult::Held(message) => {
             // The notes are in the input box of the agent. Stay open so the message shows.
-            app.finish_send(now.to_owned());
+            app.finish_send(now);
             app.set_status(message);
             app.cancel_pending_quit();
             true

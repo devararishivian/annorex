@@ -393,7 +393,8 @@ impl<R: Runner> Viewer<'_, R> {
             || (Config::default(), Vec::new()),
             |files| (files.config.clone(), files.paths.clone()),
         );
-        let mut app = App::new_files(self.state.clone(), root.to_path_buf(), &config);
+        let mut app =
+            App::new(self.state.clone(), Screen::Viewer, Vec::new(), &config).with_root(root.to_path_buf());
         app.start_scan();
         app.start_watch();
         if let Some(source) = self.files.as_ref().and_then(|files| files.source.clone()) {
@@ -483,7 +484,8 @@ impl<R: Runner> Viewer<'_, R> {
         else {
             return;
         };
-        let error = app.drafts(agent, &session).iter().find_map(|draft| store.save(draft).err());
+        let error =
+            app.drafts(agent, |_| Some(session.clone())).iter().find_map(|draft| store.save(draft).err());
         app.set_save_error(error.map(|error| error.to_string()));
     }
 

@@ -58,7 +58,8 @@ fn write_project(cwd: &Path) {
 /// The export that the viewer must produce: the same keys in a model of the viewer.
 fn expected_export(agent: Agent, cwd: &Path) -> String {
     let state = AgentState { agent: Some(agent), safety: Safety::Clear { state: None } };
-    let mut app = App::new_files(state, cwd.to_path_buf(), &Config::default());
+    let mut app = App::new(state, annorex::ui::Screen::Viewer, Vec::new(), &Config::default())
+        .with_root(cwd.to_path_buf());
     for name in ["one.md", "two.txt"] {
         let relative = resolve(cwd, Path::new(name)).expect("resolve");
         app.open_file(load(cwd, &relative).expect("load"));

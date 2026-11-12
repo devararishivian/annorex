@@ -8,7 +8,7 @@ use annorex::agent::Agent;
 use annorex::config::Config;
 use annorex::files::{LoadedFile, Stamp};
 use annorex::safety::Safety;
-use annorex::ui::{AgentState, App, Effect, draw};
+use annorex::ui::{AgentState, App, Effect, Screen, draw};
 use annorex::watch::{Change, ChangeKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -28,7 +28,8 @@ fn loaded(relative: &str, text: &str) -> LoadedFile {
 }
 
 fn files_app() -> App {
-    let mut app = App::new_files(state(), PathBuf::from("/work"), &Config::default());
+    let mut app =
+        App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(PathBuf::from("/work"));
     app.set_time_zone(jiff::tz::TimeZone::UTC);
     app
 }
@@ -178,7 +179,7 @@ fn send_marks_all_files_sent() {
     press(&mut app, "[");
     press(&mut app, "cnote b\n");
     assert_ne!(app.export(), "");
-    app.finish_send("2026-11-09T12:00:00Z".to_owned());
+    app.finish_send("2026-11-09T12:00:00Z");
     assert!(app.export().is_empty(), "both files were sent");
     assert_eq!(app.unsent_replies(), Vec::<usize>::new());
     assert!(!app.export_all().is_empty(), "copy still has all notes");
@@ -224,7 +225,7 @@ fn tree_app(config: &Config) -> (tempfile::TempDir, App) {
     std::fs::write(dir.path().join("README.md"), "# Readme\n").expect("readme");
     std::fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").expect("main");
     std::fs::write(dir.path().join("src/lib.rs"), "pub fn lib() {}\n").expect("lib");
-    let mut app = App::new_files(state(), dir.path().to_path_buf(), config);
+    let mut app = App::new(state(), Screen::Viewer, Vec::new(), config).with_root(dir.path().to_path_buf());
     app.set_time_zone(jiff::tz::TimeZone::UTC);
     app.set_scan(annorex::files::scan(dir.path()));
     (dir, app)
@@ -388,7 +389,8 @@ fn snapshot_tree_overlay_50x20() {
 fn real_app(name: &str, text: &str) -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().expect("dir");
     std::fs::write(dir.path().join(name), text).expect("write");
-    let mut app = App::new_files(state(), dir.path().to_path_buf(), &Config::default());
+    let mut app =
+        App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(dir.path().to_path_buf());
     app.set_time_zone(jiff::tz::TimeZone::UTC);
     app.open_file(annorex::files::load(dir.path(), std::path::Path::new(name)).expect("load"));
     (dir, app)
@@ -515,7 +517,8 @@ fn stale_watch_message_does_not_bring_the_banner_back_after_r() {
 fn finder_opened_before_the_scan_fills_when_the_scan_ends() {
     let dir = tempfile::tempdir().expect("dir");
     std::fs::write(dir.path().join("README.md"), "# Readme\n").expect("readme");
-    let mut app = App::new_files(state(), dir.path().to_path_buf(), &Config::default());
+    let mut app =
+        App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(dir.path().to_path_buf());
     ctrl(&mut app, 'p');
     assert!(render(&mut app, 80, 12).contains("Scanning…"), "the finder says that the scan is running");
     app.set_scan(annorex::files::scan(dir.path()));
@@ -527,7 +530,7 @@ fn finder_opened_before_the_scan_fills_when_the_scan_ends() {
 fn header_and_nothing_to_send_look_at_all_open_files() {
     let mut app = two_files(); // a.md on the screen
     press(&mut app, "cnote\n");
-    app.mark_sent("2026-11-09T10:00:00Z".to_owned());
+    app.mark_sent("2026-11-09T10:00:00Z");
     assert!(render(&mut app, 100, 12).contains("[Sent 10:00]"));
     // Show b.txt, which has no notes: the notes of a.md were sent, so the header still says so.
     press(&mut app, "[");
@@ -546,7 +549,8 @@ fn a_directory_on_the_command_line_opens_the_tree_there() {
     std::fs::create_dir(dir.path().join("src")).expect("src");
     std::fs::write(dir.path().join("README.md"), "# Readme\n").expect("readme");
     std::fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").expect("main");
-    let mut app = App::new_files(state(), dir.path().to_path_buf(), &Config::default());
+    let mut app =
+        App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(dir.path().to_path_buf());
     app.reveal_dir(std::path::Path::new("src"));
     app.set_scan(annorex::files::scan(dir.path()));
     let screen = render(&mut app, 120, 20);

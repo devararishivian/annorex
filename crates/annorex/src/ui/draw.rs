@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Confirm, Focus, Mode, PanelView, Screen, match_ranges};
+use super::app::{App, Confirm, Focus, PanelView, Screen, match_ranges};
 use crate::agent::Agent;
 use crate::doc::{DocSpan, SpanStyle};
 use crate::files::TREE_LIMIT;
@@ -236,7 +236,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, keys: &str, message: Option<String
 }
 
 fn title_of(app: &App) -> &'static str {
-    if app.mode() == Mode::Files { "files" } else { "last reply" }
+    if app.has_root() { "files" } else { "last reply" }
 }
 
 /// The question in the footer for a pending confirmation.
@@ -249,13 +249,13 @@ fn prompt_text(app: &App, what: Confirm) -> String {
         Confirm::Discard if app.review().is_none_or(Review::is_empty) => {
             "Remove the draft file that Annorex cannot read? y/n".to_owned()
         }
-        Confirm::Discard if app.mode() == Mode::Files => "Discard the notes of this file? y/n".to_owned(),
+        Confirm::Discard if app.has_root() => "Discard the notes of this file? y/n".to_owned(),
         Confirm::Discard => "Discard the notes of this reply? y/n".to_owned(),
         Confirm::CloseFile => {
             let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
             format!("Close {path}? It has unsent notes. y/n")
         }
-        Confirm::Quit if app.mode() == Mode::Files => {
+        Confirm::Quit if app.has_root() => {
             let count = app.unsent_file_count();
             let files = if count == 1 { "file" } else { "files" };
             match &app.save_error {
@@ -278,7 +278,7 @@ fn prompt_text(app: &App, what: Confirm) -> String {
 
 fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
     let (selected, count) = app.reply_position();
-    let files = app.mode() == Mode::Files;
+    let files = app.has_root();
     let position = match (files, count) {
         (true, 0) => "no file open".to_owned(),
         (true, _) => format!("file {}/{count}", selected + 1),
@@ -660,7 +660,7 @@ fn draw_finder(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
 }
 
 fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
-    let files = app.mode() == Mode::Files;
+    let files = app.has_root();
     let block = Block::new().borders(borders).title(if files { " Files " } else { " Replies " });
     let inner = block.inner(area);
     frame.render_widget(block, area);
