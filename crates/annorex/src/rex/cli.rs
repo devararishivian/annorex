@@ -138,20 +138,51 @@ pub struct Rex<R: Runner> {
     pub(crate) runner: R,
 }
 
-/// Find the `rex` binary: `$REX_BIN_DIR/rex` if that file exists, else `rex` in a `PATH` directory.
+/// Find the `rex` binary. See [`find_binary_with`]. The parent is the process that started Annorex.
 pub fn find_binary(env: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, RexError> {
+    find_binary_with(env, || executable_of(std::os::unix::process::parent_id()))
+}
+
+/// Find the `rex` binary, in this order:
+///
+/// 1. `$REX_BIN_DIR/rex`. Rex sets `REX_BIN_DIR` in its terminals.
+/// 2. The executable of the parent process, when its file name is `rex`. A command that a Rex action
+///    starts with `rex.exec` has the server as its parent, and gets neither `REX_BIN_DIR` nor the
+///    `PATH` of the login shell.
+/// 3. `rex` in each `PATH` directory.
+pub(crate) fn find_binary_with(
+    env: impl Fn(&str) -> Option<OsString>,
+    parent: impl FnOnce() -> Option<PathBuf>,
+) -> Result<PathBuf, RexError> {
     let mut tried = Vec::new();
-    let bin_dir = env("REX_BIN_DIR").filter(|dir| !dir.is_empty()).map(PathBuf::from);
+    let bin_dir = env("REX_BIN_DIR").filter(|dir| !dir.is_empty()).map(|dir| PathBuf::from(dir).join("rex"));
+    let parent = parent().filter(|exe| exe.file_name().is_some_and(|name| name == "rex"));
     let path_dirs =
         env("PATH").map(|path| std::env::split_paths(&path).collect::<Vec<_>>()).unwrap_or_default();
-    for dir in bin_dir.into_iter().chain(path_dirs.into_iter().filter(|dir| !dir.as_os_str().is_empty())) {
-        let candidate = dir.join("rex");
+    let in_path = path_dirs.into_iter().filter(|dir| !dir.as_os_str().is_empty()).map(|dir| dir.join("rex"));
+    for candidate in bin_dir.into_iter().chain(parent).chain(in_path) {
         if candidate.is_file() {
             return Ok(candidate);
         }
         tried.push(candidate);
     }
     Err(RexError::BinaryNotFound { tried })
+}
+
+/// The path of the executable of process `pid`, from `ps -o comm=`. On macOS `comm` is the full path.
+fn executable_of(pid: u32) -> Option<PathBuf> {
+    let output = Command::new("/bin/ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let path = text.trim_end_matches(['\n', '\r']);
+    path.starts_with('/').then(|| PathBuf::from(path))
 }
 
 impl Rex<SystemRunner> {
@@ -341,7 +372,7 @@ mod tests {
     use std::cell::RefCell;
     use std::ffi::OsString;
     use std::os::unix::process::ExitStatusExt;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::{ExitStatus, Output};
 
     use super::*;
@@ -676,7 +707,53 @@ mod tests {
         let only_path = |name: &str| (name == "PATH").then(|| second.clone().into_os_string());
         assert_eq!(find_binary(only_path).expect("binary"), second.join("rex"));
         let none = |_: &str| None;
-        assert!(matches!(find_binary(none), Err(RexError::BinaryNotFound { .. })));
+        assert!(matches!(find_binary_with(none, || None), Err(RexError::BinaryNotFound { .. })));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_binary_uses_the_parent_rex_after_rex_bin_dir_and_before_path() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (bin_dir, parent_dir, path_dir) =
+            (dir.path().join("bin"), dir.path().join("Rex Server.app"), dir.path().join("path"));
+        for sub in [&bin_dir, &parent_dir, &path_dir] {
+            std::fs::create_dir_all(sub).expect("dir");
+            std::fs::write(sub.join("rex"), "").expect("file");
+        }
+        let parent = || Some(parent_dir.join("rex"));
+        let path_only = |name: &str| (name == "PATH").then(|| path_dir.clone().into_os_string());
+        assert_eq!(find_binary_with(path_only, parent).expect("binary"), parent_dir.join("rex"));
+        let both = |name: &str| match name {
+            "REX_BIN_DIR" => Some(bin_dir.clone().into_os_string()),
+            "PATH" => Some(path_dir.clone().into_os_string()),
+            _ => None,
+        };
+        assert_eq!(find_binary_with(both, parent).expect("binary"), bin_dir.join("rex"));
+    }
+
+    #[test]
+    fn find_binary_skips_a_parent_that_is_not_rex_or_is_missing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("zsh"), "").expect("file");
+        let none = |_: &str| None;
+        let shell = dir.path().join("zsh");
+        match find_binary_with(none, || Some(shell.clone())) {
+            Err(RexError::BinaryNotFound { tried }) => assert!(tried.is_empty(), "{tried:?}"),
+            other => panic!("expected BinaryNotFound, got {other:?}"),
+        }
+        let gone = dir.path().join("gone").join("rex");
+        match find_binary_with(none, || Some(gone.clone())) {
+            Err(RexError::BinaryNotFound { tried }) => assert_eq!(tried, std::slice::from_ref(&gone)),
+            other => panic!("expected BinaryNotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn executable_of_reads_the_comm_of_a_process() {
+        // This test process is a real process; ps gives the path of its executable.
+        let me = executable_of(std::process::id()).expect("ps gives a path");
+        let exe = std::env::current_exe().expect("exe");
+        let canonical = |path: &Path| std::fs::canonicalize(path).expect("canonical");
+        assert_eq!(canonical(&me), canonical(&exe));
     }
 }
