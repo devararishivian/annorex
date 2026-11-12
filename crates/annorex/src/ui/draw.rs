@@ -587,12 +587,16 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         draw_annotation_list(frame, app, list, Borders::LEFT);
     }
     // In one column, the tree and the annotation list cover the document while they have the focus.
+    // The cover goes in the hit map first, so no click reaches the document below; the rows of the
+    // overlay go in after it and win.
     if narrow && app.focus == Focus::Tree && app.has_root() {
         frame.render_widget(Clear, body);
+        app.hits.push(body, Hit::BoxInside);
         draw_tree(frame, app, body, Borders::ALL);
     }
     if narrow && app.focus == Focus::Rail {
         frame.render_widget(Clear, body);
+        app.hits.push(body, Hit::BoxInside);
         draw_annotation_list(frame, app, body, Borders::ALL);
     }
     draw_pick(frame, app, text_area);
@@ -1174,7 +1178,7 @@ fn kind_word(kind: Kind) -> &'static str {
     }
 }
 
-fn draw_annotation_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
+fn draw_annotation_list(frame: &mut Frame, app: &mut App, area: Rect, borders: Borders) {
     let block = Block::new().borders(borders).title(" Annotations ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1189,6 +1193,7 @@ fn draw_annotation_list(frame: &mut Frame, app: &App, area: Rect, borders: Borde
     let visible = usize::from(inner.height / 2).max(1);
     let offset = app.annotation_index.saturating_sub(visible - 1);
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut rows: Vec<usize> = Vec::new();
     for (index, annotation) in items.iter().enumerate().skip(offset).take(visible) {
         let bang = if annotation.detached { "!" } else { " " };
         let label = annotation.label.as_ref().map_or_else(String::new, |label| format!("  [{label}]"));
@@ -1211,8 +1216,17 @@ fn draw_annotation_list(frame: &mut Frame, app: &App, area: Rect, borders: Borde
         };
         lines.push(Line::styled(fit(&first, inner.width), style));
         lines.push(Line::styled(fit(&second, inner.width), style.add_modifier(Modifier::DIM)));
+        rows.push(index);
     }
     frame.render_widget(Paragraph::new(lines), inner);
+    // Each item has two lines. Both lines reach the item.
+    for (position, index) in rows.into_iter().enumerate() {
+        let y = inner.y + u16::try_from(position * 2).unwrap_or(u16::MAX);
+        let height = 2.min(inner.bottom().saturating_sub(y));
+        if height > 0 {
+            app.hits.push(Rect::new(inner.x, y, inner.width, height), Hit::ListRow(index));
+        }
+    }
 }
 
 /// The editor box. `area` is the text area of the document. The box has the width of the text
@@ -1505,6 +1519,64 @@ mod tests {
         assert_eq!(row.trim(), "", "no gutter number on the bar row: {row:?}");
         assert_eq!(app.hits.at(0, y), Some(&Hit::Bar), "the margin of the bar row");
         assert_eq!(app.hits.at(70, y), Some(&Hit::Bar), "the empty end of the bar row");
+    }
+
+    /// A file viewer at 80 x 24 (one column) with a scanned tree, `a.txt` open with one note, and
+    /// `keys` pressed after the first frame.
+    fn one_column_with(keys: &str) -> (App, ratatui::buffer::Buffer) {
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        let mut app = App::new(state, Screen::Viewer, Vec::new(), &Config::default())
+            .with_root(std::path::PathBuf::from("/work"));
+        app.set_scan(crate::files::Scan {
+            entries: vec![crate::files::Entry { path: "a.txt".into(), is_dir: false }],
+            truncated: false,
+        });
+        app.open_file(crate::files::LoadedFile {
+            relative: std::path::PathBuf::from("a.txt"),
+            text: "one\ntwo\nthree\nfour\n".to_owned(),
+            stamp: crate::files::Stamp { size: 19, modified: None },
+        });
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        for c in "cnote\n".chars() {
+            let code = if c == '\n' { KeyCode::Enter } else { KeyCode::Char(c) };
+            app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        }
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        for c in keys.chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        let screen = terminal.backend().buffer().clone();
+        (app, screen)
+    }
+
+    /// True when no cell of the body (rows 1 to 22) reaches the document below an overlay.
+    fn no_doc_hit_in_the_body(app: &App) -> bool {
+        (1..23u16).all(|y| {
+            (0..80u16).all(|x| !matches!(app.hits.at(x, y), Some(Hit::Block(_) | Hit::DocCell { .. })))
+        })
+    }
+
+    #[test]
+    fn the_tree_over_the_document_covers_the_document_hits() {
+        let (app, screen) = one_column_with("T");
+        let (_, title) = find(&screen, "┌ Tree");
+        assert_eq!(title, 1, "the tree covers the body");
+        assert!(no_doc_hit_in_the_body(&app), "border, rows, and the empty rows below the last row");
+        let (x, y) = find(&screen, "a.txt");
+        assert_eq!(app.hits.at(x, y), Some(&Hit::TreeRow(0)));
+        assert_eq!(app.hits.at(x, y + 3), Some(&Hit::BoxInside), "an empty row under the last tree row");
+    }
+
+    #[test]
+    fn the_annotation_list_over_the_document_covers_the_document_hits() {
+        let (app, screen) = one_column_with("a");
+        let (_, title) = find(&screen, "┌ Annotations");
+        assert_eq!(title, 1);
+        assert!(no_doc_hit_in_the_body(&app));
+        let (x, y) = find(&screen, "l.1  comment");
+        assert_eq!(app.hits.at(x, y), Some(&Hit::ListRow(0)));
+        assert_eq!(app.hits.at(x, y + 1), Some(&Hit::ListRow(0)), "the second line of the item");
     }
 
     #[test]

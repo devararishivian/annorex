@@ -511,3 +511,29 @@ fn the_focus_background_fills_every_row_of_the_block_to_the_last_column() {
     let buffer = buffer_of(&mut app, 80, 24);
     assert_ne!(buffer.cell((79, top)).expect("cell").bg, Color::DarkGray);
 }
+
+#[test]
+fn a_note_key_on_an_empty_range_in_text_mode_says_nothing_to_annotate() {
+    let mut app = open("alpha\n");
+    press(&mut app, "\n");
+    assert_eq!(app.mode(), Mode::Text);
+    // The same reply with no text keeps text mode, so the cursor line is gone.
+    app.set_replies(vec![reply("r1", "")]);
+    assert_eq!(app.mode(), Mode::Text);
+    for key in ["c", "d", "s", "o"] {
+        press(&mut app, key);
+        assert!(app.editor().is_none(), "{key}");
+        assert_eq!(app.status(), Some("nothing to annotate"), "{key}");
+    }
+}
+
+#[test]
+fn a_shown_empty_document_says_block_0_of_0() {
+    let mut app = open("");
+    assert!(app.shown_reply_id().is_some(), "an empty document is on the screen");
+    let screen = render(&mut app, 80, 24);
+    let footer = screen.lines().last().unwrap_or_default();
+    assert!(footer.starts_with("block 0/0"), "{footer}");
+    press(&mut app, "jkGg");
+    assert!(render(&mut app, 80, 24).lines().last().unwrap_or_default().starts_with("block 0/0"));
+}
