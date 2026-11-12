@@ -121,6 +121,25 @@ pub fn candidates(
     roots: &Roots,
     process_table: &[(u32, u32)],
 ) -> Result<Vec<Candidate>, LoadError> {
+    Ok(sessions(source, roots, process_table)?
+        .into_iter()
+        .map(|(session, updated)| {
+            let last_line = load_replies(&session)
+                .ok()
+                .and_then(|replies| replies.first().map(|reply| reply.first_line().to_owned()))
+                .unwrap_or_default();
+            Candidate { session, updated, last_line }
+        })
+        .collect())
+}
+
+/// The sessions of [`candidates`] with their times, without the read of any reply. Claude Code
+/// gives one session; Pi and `OpenCode` give the sessions of the directory, newest first.
+pub fn sessions(
+    source: &Source,
+    roots: &Roots,
+    process_table: &[(u32, u32)],
+) -> Result<Vec<(SessionRef, SystemTime)>, LoadError> {
     let mut found = Vec::new();
     let searched;
     match source.agent {
@@ -161,16 +180,7 @@ pub fn candidates(
     if found.is_empty() {
         return Err(LoadError::NoTranscript { agent: source.agent, cwd: source.cwd.clone(), searched });
     }
-    Ok(found
-        .into_iter()
-        .map(|(session, updated)| {
-            let last_line = load_replies(&session)
-                .ok()
-                .and_then(|replies| replies.first().map(|reply| reply.first_line().to_owned()))
-                .unwrap_or_default();
-            Candidate { session, updated, last_line }
-        })
-        .collect())
+    Ok(found)
 }
 
 fn modified(path: &Path) -> SystemTime {

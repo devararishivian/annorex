@@ -43,9 +43,20 @@ impl Tree {
     }
 
     /// Set the files that the agent changed. A file that the scan does not have is not shown.
+    /// The cursor stays on the same row when the section grows or shrinks above it.
     pub(crate) fn set_changed(&mut self, changed: Vec<PathBuf>) {
+        let before = self.visible().get(self.index).map(|row| (row.entry.path.clone(), row.changed_section));
         self.changed = changed;
-        self.index = self.index.min(self.visible().len().saturating_sub(1));
+        let rows = self.visible();
+        let same = before.and_then(|(path, section)| {
+            rows.iter().position(|row| row.entry.path == path && row.changed_section == section)
+        });
+        self.index = same.unwrap_or_else(|| self.index.min(rows.len().saturating_sub(1)));
+    }
+
+    /// True when the scan has the file.
+    pub(crate) fn has_file(&self, path: &Path) -> bool {
+        self.entries.iter().any(|entry| !entry.is_dir && entry.path == path)
     }
 
     /// True when the agent changed the file in its last turns.
@@ -228,8 +239,13 @@ impl Finder {
 
     /// Give the finder a new list of paths. The query stays.
     pub(crate) fn set_paths(&mut self, paths: Vec<String>) {
+        let selected = self.selected().map(str::to_owned);
         self.paths = paths;
         self.refresh();
+        let position = selected.and_then(|selected| self.results().position(|path| path == selected));
+        if let Some(position) = position {
+            self.index = position;
+        }
     }
 
     fn refresh(&mut self) {
@@ -259,5 +275,53 @@ impl Finder {
 
     pub(crate) fn selected(&self) -> Option<&str> {
         self.results.get(self.index).and_then(|&index| self.paths.get(index)).map(String::as_str)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
+mod tests {
+    use super::*;
+
+    fn file(path: &str) -> Entry {
+        Entry { path: PathBuf::from(path), is_dir: false }
+    }
+    fn tree(paths: &[&str]) -> Tree {
+        let mut tree = Tree::default();
+        tree.load(Scan { entries: paths.iter().map(|p| file(p)).collect(), truncated: false });
+        tree
+    }
+    fn selected(tree: &Tree) -> PathBuf {
+        tree.selected().expect("a row").path.clone()
+    }
+
+    #[test]
+    fn the_cursor_stays_on_its_file_when_changed_rows_appear_above() {
+        let mut tree = tree(&["a.rs", "b.rs", "c.rs"]);
+        tree.index = 2;
+        assert_eq!(selected(&tree), PathBuf::from("c.rs"));
+        tree.set_changed(vec!["b.rs".into(), "a.rs".into()]);
+        assert_eq!(selected(&tree), PathBuf::from("c.rs"));
+        tree.set_changed(Vec::new());
+        assert_eq!(selected(&tree), PathBuf::from("c.rs"));
+    }
+
+    #[test]
+    fn the_cursor_on_a_changed_row_stays_in_the_section() {
+        let mut tree = tree(&["a.rs", "b.rs"]);
+        tree.set_changed(vec!["b.rs".into()]);
+        tree.index = 0;
+        tree.set_changed(vec!["a.rs".into(), "b.rs".into()]);
+        assert_eq!(selected(&tree), PathBuf::from("b.rs"));
+        assert!(tree.visible()[tree.index].changed_section);
+    }
+
+    #[test]
+    fn the_finder_keeps_the_selected_path_when_the_list_changes() {
+        let mut finder = Finder::new(vec!["a.rs".into(), "b.rs".into(), "c.rs".into()]);
+        finder.move_by(2);
+        assert_eq!(finder.selected(), Some("c.rs"));
+        finder.set_paths(vec!["x.rs".into(), "a.rs".into(), "b.rs".into(), "c.rs".into()]);
+        assert_eq!(finder.selected(), Some("c.rs"));
     }
 }

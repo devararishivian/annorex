@@ -25,19 +25,42 @@ fn events(line: &Value) -> Vec<Event> {
             let results: Vec<Event> = blocks.iter().filter_map(result).collect();
             if !results.is_empty() {
                 results
-            } else if is_meta(line) {
+            } else if is_meta(line) || !blocks.iter().any(is_typed_text) {
                 Vec::new()
             } else {
                 vec![Event::Prompt]
             }
         }
-        (Some("user"), Some(Value::String(_))) if !is_meta(line) => vec![Event::Prompt],
+        (Some("user"), Some(Value::String(text))) if !is_meta(line) && !is_injected(text) => {
+            vec![Event::Prompt]
+        }
         _ => Vec::new(),
     }
 }
 
 fn is_meta(line: &Value) -> bool {
-    line.get("isMeta").and_then(Value::as_bool) == Some(true)
+    let flag = |key: &str| line.get(key).and_then(Value::as_bool) == Some(true);
+    flag("isMeta") || flag("isCompactSummary")
+}
+
+/// Text that the user did not type: an interrupt notice or a wrapper of a slash command.
+fn is_injected(text: &str) -> bool {
+    let text = text.trim_start();
+    text.is_empty()
+        || [
+            "[Request interrupted",
+            "<command-name>",
+            "<command-message>",
+            "<local-command",
+            "<system-reminder>",
+        ]
+        .iter()
+        .any(|prefix| text.starts_with(prefix))
+}
+
+fn is_typed_text(block: &Value) -> bool {
+    block.get("type").and_then(Value::as_str) == Some("text")
+        && block.get("text").and_then(Value::as_str).is_some_and(|text| !is_injected(text))
 }
 
 fn call(block: &Value) -> Option<Event> {
@@ -150,6 +173,26 @@ mod tests {
             res("2", false),
         ];
         assert_eq!(run(&lines, 1).len(), 2);
+    }
+
+    #[test]
+    fn lines_that_are_not_a_human_prompt_do_not_start_a_turn() {
+        let interrupted = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#.to_owned();
+        let command =
+            r#"{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#
+                .to_owned();
+        let stdout = r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>ok</local-command-stdout>"}}"#.to_owned();
+        let summary = r#"{"type":"user","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued"}}"#.to_owned();
+        let lines = [
+            prompt("go"),
+            tool("1", "Edit", "file_path", "/w/a.rs"),
+            res("1", false),
+            interrupted,
+            command,
+            stdout,
+            summary,
+        ];
+        assert_eq!(run(&lines, 1), ["/w/a.rs"]);
     }
 
     #[test]

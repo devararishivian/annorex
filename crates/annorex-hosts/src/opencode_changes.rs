@@ -48,13 +48,22 @@ pub fn changed_for_session(db: &Path, session_id: &str, turns: usize) -> Result<
         let part: Value = serde_json::from_str(&part).unwrap_or(Value::Null);
         let is_user = serde_json::from_str::<Value>(&message)
             .is_ok_and(|m| m.get("role").and_then(Value::as_str) == Some("user"));
-        if is_user && last_user.as_deref() != Some(&message_id) {
+        if is_user && is_typed_text(&part) && last_user.as_deref() != Some(&message_id) {
             last_user = Some(message_id);
             events.push(Event::Prompt);
         }
         events.extend(part_events(&part_id, &part));
     }
     Ok(collect(events, turns))
+}
+
+/// A text part that the user typed: not empty, not `synthetic` (injected), not `ignored`.
+fn is_typed_text(part: &Value) -> bool {
+    let flagged = |key: &str| part.get(key).and_then(Value::as_bool) == Some(true);
+    part.get("type").and_then(Value::as_str) == Some("text")
+        && !flagged("synthetic")
+        && !flagged("ignored")
+        && part.get("text").and_then(Value::as_str).is_some_and(|text| !text.trim().is_empty())
 }
 
 /// The events of a session in the `OpenCode` 2 tables, or `None` when `session_message` has no
@@ -86,11 +95,13 @@ fn v2_events(connection: &rusqlite::Connection, session_id: &str) -> Result<Opti
     for row in rows {
         let (id, kind, data) = row.map_err(|e| sql_error(WHAT, &e))?;
         any = true;
+        let data: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
         if kind == "user" {
-            events.push(Event::Prompt);
+            if data.get("text").and_then(Value::as_str).is_some_and(|text| !text.trim().is_empty()) {
+                events.push(Event::Prompt);
+            }
             continue;
         }
-        let data: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
         for (index, item) in data.get("content").and_then(Value::as_array).into_iter().flatten().enumerate() {
             if item.get("type").and_then(Value::as_str) != Some("tool") {
                 continue;
@@ -289,6 +300,36 @@ mod tests {
             ("assistant", &item("write", "completed", r#"{"path":"/w/p.rs"}"#)),
         ]);
         assert_eq!(paths(&p, 1), ["/w/p.rs", "n.rs"]);
+    }
+
+    #[test]
+    fn v1_a_synthetic_user_message_does_not_start_a_turn() {
+        let (_d, p) = db(&[
+            ("m1", "user", "p1", r#"{"type":"text","text":"go"}"#),
+            ("m2", "assistant", "p2", &part("edit", "completed", r#"{"filePath":"/w/a.rs"}"#)),
+            ("m3", "user", "p3", r#"{"type":"text","text":"injected","synthetic":true}"#),
+        ]);
+        assert_eq!(paths(&p, 1), ["/w/a.rs"]);
+    }
+
+    #[test]
+    fn v1_two_text_parts_of_one_prompt_are_one_turn() {
+        let (_d, p) = db(&[
+            ("m1", "user", "p1", r#"{"type":"text","text":"a"}"#),
+            ("m1", "user", "p2", r#"{"type":"text","text":"b"}"#),
+            ("m2", "assistant", "p3", &part("edit", "completed", r#"{"filePath":"/w/a.rs"}"#)),
+        ]);
+        assert_eq!(paths(&p, 1), ["/w/a.rs"]);
+    }
+
+    #[test]
+    fn v2_an_empty_user_row_does_not_start_a_turn() {
+        let (_d, p) = db_v2(&[
+            ("user", r#"{"text":"go"}"#),
+            ("assistant", &item("edit", "completed", r#"{"filePath":"/w/a.rs"}"#)),
+            ("user", r#"{"text":"  "}"#),
+        ]);
+        assert_eq!(paths(&p, 1), ["/w/a.rs"]);
     }
 
     #[test]

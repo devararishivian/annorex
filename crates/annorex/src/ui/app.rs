@@ -434,10 +434,18 @@ impl App {
     /// raises the banner.
     pub fn changed_list(&mut self, list: Vec<PathBuf>) {
         let fresh = list.iter().filter(|path| !self.tree.is_changed(path)).count();
-        if self.changes_seen {
+        let tree_open = self.panel_open && self.panel_view == PanelView::Tree;
+        if self.changes_seen && !tree_open {
             self.new_changed += fresh;
         }
         self.changes_seen = true;
+        // A file that the agent created after the scan is not in the tree: scan again.
+        if self.tree.is_loaded()
+            && self.scan_rx.is_none()
+            && list.iter().any(|path| !self.tree.has_file(path))
+        {
+            self.start_scan();
+        }
         self.set_changed(list);
     }
 
@@ -478,7 +486,10 @@ impl App {
 
     /// The banner for the file on the screen, when it changed on disk.
     pub(crate) fn banner(&self) -> Option<String> {
-        self.file_banner().or_else(|| self.agent_banner())
+        match (self.file_banner(), self.agent_banner()) {
+            (Some(file), Some(agent)) => Some(format!("{file}  |  {agent}")),
+            (file, agent) => file.or(agent),
+        }
     }
 
     /// The banner for new files that the agent changed, until the user opens the tree.

@@ -29,8 +29,8 @@ pub fn resolve(
     roots: &Roots,
     process_table: &[(u32, u32)],
 ) -> Result<SessionRef, LoadError> {
-    let candidates = replies::candidates(source, roots, process_table)?;
-    candidates.into_iter().next().map(|candidate| candidate.session).ok_or_else(|| LoadError::NoTranscript {
+    let found = replies::sessions(source, roots, process_table)?;
+    found.into_iter().next().map(|(session, _)| session).ok_or_else(|| LoadError::NoTranscript {
         agent: source.agent,
         cwd: source.cwd.clone(),
         searched: String::new(),
@@ -103,37 +103,70 @@ pub fn spawn_poll(
     (receiver, token)
 }
 
-/// The look of the thread of a files viewer. It finds the session of `source` when it can, reads
-/// the transcript only when the file changed, and reports a list only when it differs from the
-/// last one. A failure gives `None`: the next look tries again.
+/// The looks between two searches for the session. A new session (`/clear`, `/new`, a restart)
+/// replaces the old one within this many looks.
+const RESOLVE_EVERY: usize = 3;
+
+/// The look of the thread of a files viewer for `source`. See [`looker_with`].
 pub fn looker(
     source: Source,
     roots: Roots,
     root: PathBuf,
     turns: usize,
 ) -> impl FnMut() -> Option<Vec<PathBuf>> + Send + 'static {
+    looker_with(
+        move || {
+            let table = replies::process_table().unwrap_or_default();
+            resolve(&source, &roots, &table).ok()
+        },
+        root,
+        turns,
+    )
+}
+
+/// A look that finds the session with `find`, again every [`RESOLVE_EVERY`] looks, and reads the
+/// transcript only when it changed. The first look and each look that has a new list give
+/// `Some(list)`. A failure gives `None`: the next look tries again. A new session starts again.
+pub fn looker_with(
+    mut find: impl FnMut() -> Option<SessionRef> + Send + 'static,
+    root: PathBuf,
+    turns: usize,
+) -> impl FnMut() -> Option<Vec<PathBuf>> + Send + 'static {
     let mut session: Option<SessionRef> = None;
     let mut stamp: Option<(u64, SystemTime)> = None;
+    let mut raw: Option<Vec<Changed>> = None;
     let mut last: Option<Vec<PathBuf>> = None;
+    let mut looks = 0usize;
     move || {
-        if session.is_none() {
-            let table = replies::process_table().unwrap_or_default();
-            session = resolve(&source, &roots, &table).ok();
+        if session.is_none() || looks.is_multiple_of(RESOLVE_EVERY) {
+            match find() {
+                Some(fresh) if session.as_ref().map(SessionRef::id) != Some(fresh.id()) => {
+                    session = Some(fresh);
+                    stamp = None;
+                    raw = None;
+                    last = None;
+                }
+                Some(_) | None => {}
+            }
         }
+        looks += 1;
         let current = session.as_ref()?;
+        let mut unchanged = false;
         if let SessionRef::Claude(path) | SessionRef::Pi(path) = current {
             let meta = std::fs::metadata(path).ok()?;
             let now = (meta.len(), meta.modified().ok()?);
-            if stamp == Some(now) && last.is_some() {
-                return None;
-            }
+            unchanged = stamp == Some(now) && raw.is_some();
             stamp = Some(now);
         }
-        let Ok(raw) = read(current, turns) else {
-            session = None;
-            return None;
-        };
-        let files = normalize(&root, &raw);
+        if !unchanged {
+            let Ok(fresh) = read(current, turns) else {
+                session = None;
+                return None;
+            };
+            raw = Some(fresh);
+        }
+        // A file that the agent changed and then removed leaves the list, also when the transcript is the same.
+        let files = normalize(&root, raw.as_deref().unwrap_or_default());
         if last.as_ref() == Some(&files) {
             return None;
         }
@@ -205,6 +238,67 @@ mod tests {
         let dir = root_with(&["a.rs"]);
         assert_eq!(normalize(dir.path(), &changed(&["../a.rs", "x/../../a.rs"])), Vec::<PathBuf>::new());
         assert_eq!(normalize(dir.path(), &changed(&["x/../a.rs"])), [PathBuf::from("a.rs")]);
+    }
+
+    fn claude_line(kind: &str, body: &str) -> String {
+        format!(r#"{{"type":"{kind}","message":{{"role":"{kind}","content":{body}}}}}"#)
+    }
+    fn edit_lines(id: &str, path: &str) -> String {
+        format!(
+            "{}\n{}\n",
+            claude_line(
+                "assistant",
+                &format!(
+                    r#"[{{"type":"tool_use","id":"{id}","name":"Edit","input":{{"file_path":"{path}"}}}}]"#
+                )
+            ),
+            claude_line(
+                "user",
+                &format!(r#"[{{"type":"tool_result","tool_use_id":"{id}","content":"ok"}}]"#)
+            ),
+        )
+    }
+
+    #[test]
+    fn the_looker_reports_a_new_list_only_and_drops_a_removed_file() {
+        let root = root_with(&["a.rs", "b.rs"]);
+        let log = tempfile::tempdir().expect("dir");
+        let transcript = log.path().join("s1.jsonl");
+        let mut text = format!("{}\n{}", claude_line("user", r#""go""#), edit_lines("1", "a.rs"));
+        std::fs::write(&transcript, &text).expect("transcript");
+        let session = SessionRef::Claude(transcript.clone());
+        let mut look = looker_with(move || Some(session.clone()), root.path().to_path_buf(), 1);
+        assert_eq!(look(), Some(vec![PathBuf::from("a.rs")]));
+        assert_eq!(look(), None, "the same list is not sent again");
+        text.push_str(&edit_lines("2", "b.rs"));
+        std::fs::write(&transcript, &text).expect("append");
+        assert_eq!(look(), Some(vec![PathBuf::from("b.rs"), PathBuf::from("a.rs")]));
+        std::fs::remove_file(root.path().join("a.rs")).expect("remove");
+        assert_eq!(look(), Some(vec![PathBuf::from("b.rs")]), "a removed file leaves the list");
+    }
+
+    #[test]
+    fn the_looker_switches_to_a_new_session() {
+        let root = root_with(&["a.rs", "b.rs"]);
+        let log = tempfile::tempdir().expect("dir");
+        for (name, file) in [("old.jsonl", "a.rs"), ("new.jsonl", "b.rs")] {
+            let text = format!("{}\n{}", claude_line("user", r#""go""#), edit_lines("1", file));
+            std::fs::write(log.path().join(name), text).expect("transcript");
+        }
+        let current = Arc::new(std::sync::Mutex::new(log.path().join("old.jsonl")));
+        let chosen = Arc::clone(&current);
+        let mut look = looker_with(
+            move || Some(SessionRef::Claude(chosen.lock().expect("lock").clone())),
+            root.path().to_path_buf(),
+            1,
+        );
+        assert_eq!(look(), Some(vec![PathBuf::from("a.rs")]));
+        *current.lock().expect("lock") = log.path().join("new.jsonl");
+        let mut got = None;
+        for _ in 0..RESOLVE_EVERY {
+            got = got.or_else(&mut look);
+        }
+        assert_eq!(got, Some(vec![PathBuf::from("b.rs")]));
     }
 
     #[test]

@@ -592,12 +592,12 @@ fn a_changed_path_the_scan_lacks_is_not_shown() {
 #[test]
 fn the_finder_lists_changed_files_first() {
     let (_dir, mut app) = tree_app(&Config::default());
-    app.set_changed(vec!["src/lib.rs".into()]);
+    app.set_changed(vec!["README.md".into()]);
     ctrl(&mut app, 'p');
     let screen = render(&mut app, 120, 20);
     let lib = screen.lines().position(|l| l.contains("src/lib.rs")).expect("lib");
     let readme = screen.lines().position(|l| l.contains("README.md")).expect("readme");
-    assert!(lib < readme, "{screen}");
+    assert!(readme < lib, "a changed file ranks before files that sort earlier: {screen}");
 }
 
 #[test]
@@ -632,4 +632,46 @@ fn the_same_list_again_raises_no_banner() {
     app.changed_list(vec!["src/main.rs".into()]);
     app.changed_list(vec!["src/main.rs".into()]);
     assert!(!render(&mut app, 120, 20).contains("The agent changed"));
+}
+
+#[test]
+fn a_file_the_agent_creates_after_the_scan_reaches_the_tree() {
+    let (dir, mut app) = tree_app(&Config::default());
+    app.changed_list(vec!["src/main.rs".into()]);
+    std::fs::write(dir.path().join("new.rs"), "fn new() {}\n").expect("new file");
+    app.changed_list(vec!["new.rs".into(), "src/main.rs".into()]);
+    press(&mut app, "T");
+    let mut screen = String::new();
+    for _ in 0..40 {
+        app.poll_background();
+        screen = render(&mut app, 120, 20);
+        if screen.contains("*new.rs") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(screen.contains("* changed by the agent: 2") && screen.contains("*new.rs"), "{screen}");
+}
+
+#[test]
+fn new_files_raise_no_banner_while_the_tree_is_open() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.changed_list(vec!["src/main.rs".into()]);
+    press(&mut app, "T");
+    app.changed_list(vec!["README.md".into(), "src/main.rs".into()]);
+    press(&mut app, "T");
+    assert!(!render(&mut app, 120, 20).contains("The agent changed"));
+}
+
+#[test]
+fn the_agent_banner_shows_beside_the_banner_of_the_open_file() {
+    let mut app = two_files();
+    app.changed_list(vec!["a.md".into()]);
+    app.changed_list(vec!["b.txt".into(), "a.md".into()]);
+    app.file_changed(&Change { path: "a.md".into(), kind: ChangeKind::Modified });
+    let screen = render(&mut app, 160, 20);
+    assert!(
+        screen.contains("a.md was deleted") && screen.contains("The agent changed 1 more file."),
+        "{screen}"
+    );
 }
