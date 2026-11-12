@@ -15,7 +15,7 @@ use crate::open::{Existing, OpenError, View, open_view};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
-use crate::tui::{run_files, run_last};
+use crate::tui::{Start, run_viewer};
 
 /// Exit code: sent, pasted, or probe complete.
 pub const EXIT_OK: i32 = 0;
@@ -317,7 +317,7 @@ fn last(
     let config = load_config(env)?;
     let store = drafts_dir(env).map(|dir| DraftStore { dir });
     let rex = Rex::discover_with(env, session)?;
-    run_last(&rex, target, &config, store).map_err(|error| Failure {
+    run_viewer(&rex, target, &Start::Last, &config, store).map_err(|error| Failure {
         code: EXIT_FAILURE,
         message: format!("cannot use the terminal: {error}"),
     })?;
@@ -333,7 +333,7 @@ fn files(
     let config = load_config(env)?;
     let store = drafts_dir(env).map(|dir| DraftStore { dir });
     let rex = Rex::discover_with(env, session)?;
-    run_files(&rex, target, paths, &config, store).map_err(|error| Failure {
+    run_viewer(&rex, target, &Start::Files(paths), &config, store).map_err(|error| Failure {
         code: EXIT_FAILURE,
         message: format!("cannot use the terminal: {error}"),
     })?;
