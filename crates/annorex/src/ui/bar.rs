@@ -1,4 +1,4 @@
-//! The action bar: one row with a button for each note type, at the focused block or the selection.
+//! The action bar: one row with a chip for each note type, at the focused block or the selection.
 
 use std::ops::Range;
 
@@ -78,10 +78,13 @@ pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, row_start: u16, app
     let mut x = area.x;
     for (index, (action, kind, word, color)) in BUTTONS.into_iter().enumerate() {
         let key = app.config.keys.label(action);
+        // A chip: bright black background, the key bold in the note color, the word plain. The gap
+        // between two chips has no background.
+        let chip = Style::new().bg(Color::DarkGray);
         let line = Line::from(vec![
-            Span::raw("["),
-            Span::styled(key, Style::new().fg(color).add_modifier(Modifier::BOLD)),
-            Span::raw(format!(" {word}]")),
+            Span::styled(" ", chip),
+            Span::styled(key, chip.fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" {word} "), chip),
         ]);
         let Ok(width) = u16::try_from(line.width()) else { break };
         let start = if index == 0 { x } else { x + 1 };

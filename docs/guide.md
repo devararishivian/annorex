@@ -102,15 +102,20 @@ Annorex has two modes in the document. Block mode is the default. Text mode is f
 
 ### Block mode
 
-One block has the focus. A block is a heading, a paragraph, a list item (a nested item is its own block), a whole code
+At the start, no block has the focus, and the action bar does not show. Press `j` to focus the first block on the
+screen. Press `k` to focus the last block on the screen. A click on a block also focuses it. A note key without a focus
+shows `choose a block first (j/k or a click)`. Press `esc` to remove the focus. A new document starts without a focus.
+After a reload, the same document keeps its focus, or keeps no focus.
+
+With a focus, one block has it. A block is a heading, a paragraph, a list item (a nested item is its own block), a whole code
 block, a whole table, a whole quote, or a rule. In a plain text or code file, a block is a group of lines between blank
 lines. The focused block has a bar in the left margin. The action bar shows below it.
 
 | Key                     | Function                                                         |
 |-------------------------|------------------------------------------------------------------|
 | `j` / `k`, arrows       | Go to the next or the previous block                             |
-| `g` / `G`, `home` / `end` | Go to the first or the last block                              |
-| `ctrl+d` / `ctrl+u`     | Scroll half a page, then focus the first block in the view       |
+| `g` / `G`, `home` / `end` | Go to the first or the last block. Without a focus, only scroll to the top or the end |
+| `ctrl+d` / `ctrl+u`     | Scroll half a page, then focus the first block in the view. Without a focus, only scroll |
 | `PageDown` / `PageUp`   | Scroll one page, then focus the first block in the view          |
 | `o`                     | Note on the block: looks good (no text, no editor)               |
 | `c` / `d` / `s`         | Note on the block: comment, remove, or replace (opens the editor) |
@@ -138,7 +143,7 @@ Text mode has a free cursor and a character selection.
 | `g` / `G`               | Go to the start or the end                                       |
 | `v` / `V`               | Start a selection of characters or of lines                      |
 | `o` / `c` / `d` / `s`   | Note on the selection, or on the line of the cursor: looks good, comment, remove, or replace |
-| `esc`                   | Clear the selection. Without a selection, go back to block mode  |
+| `esc`                   | Clear the selection. Without a selection, go back to block mode. In block mode, remove the focus |
 | `n` / `N`               | Go to the next or the previous match (in text mode)              |
 
 ### Keys in both modes

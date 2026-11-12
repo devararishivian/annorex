@@ -16,6 +16,9 @@ use crate::wrap::VisualLine;
 /// How the keys move in the document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
+    /// Block mode without a focus: no block is chosen yet. The view starts so. `j` and `k` choose a
+    /// block on the screen, a click chooses one, and `esc` in block mode comes back here.
+    Browse,
     /// One block has the focus: its index in `Doc::blocks`. The keys move from block to block.
     Block(usize),
     /// A free cursor and a character selection, as in a text editor.
@@ -118,6 +121,29 @@ impl View<'_> {
         }
     }
 
+    /// The top row after a move when no block has the focus: the keys only scroll the view.
+    fn browse_top(&self, how: Move) -> usize {
+        let max_top = self.start_at_or_before(self.rows.len().saturating_sub(self.height));
+        match how {
+            Move::First => 0,
+            Move::Last => max_top,
+            Move::Scroll { forward, rows } => self.scroll_top(forward, rows),
+            Move::Down | Move::Up | Move::Show => self.top,
+        }
+    }
+
+    /// The block to choose when no block has the focus: the first block (or the last block) whose
+    /// first row is on the screen. A block that holds the top row is the second choice.
+    pub(crate) fn browse_pick(&self, blocks: &[Block], last: bool) -> Option<usize> {
+        let bottom = self.top + self.height.max(1);
+        let starts = |b: &Block| {
+            let rows = self.block_rows(b);
+            !rows.is_empty() && rows.start >= self.top && rows.start < bottom
+        };
+        let found = if last { blocks.iter().rposition(starts) } else { blocks.iter().position(starts) };
+        found.or_else(|| blocks.iter().position(|b| self.block_rows(b).contains(&self.top)))
+    }
+
     /// The focus and the top row after a move. `focus` is the block that has the focus now.
     pub(crate) fn apply(&self, blocks: &[Block], focus: usize, how: Move) -> (usize, usize) {
         let Some(last) = blocks.len().checked_sub(1) else { return (focus, self.top) };
@@ -180,8 +206,22 @@ impl App {
     pub fn focused_block(&self) -> Option<usize> {
         match self.mode {
             Mode::Block(index) => (index < self.doc.blocks.len()).then_some(index),
+            Mode::Browse => None,
             Mode::Text => self.doc.block_near(self.cursor),
         }
+    }
+
+    /// True in block mode, with or without a focused block.
+    pub(super) fn in_block_mode(&self) -> bool {
+        matches!(self.mode, Mode::Block(_) | Mode::Browse)
+    }
+
+    /// The first (or the last) block whose first row is on the screen. `None` for an empty document.
+    fn block_on_screen(&mut self, last: bool) -> Option<usize> {
+        let width = if self.width == 0 { u16::MAX } else { self.width };
+        let top = self.view_top_row();
+        let rows = self.cache.get(&self.doc, width);
+        View { rows, top, height: self.page.max(1) }.browse_pick(&self.doc.blocks, last)
     }
 
     /// The source range of the focused block in block mode.
@@ -203,11 +243,31 @@ impl App {
 
     /// Do a move of block mode on the rows of the last frame. The cursor goes to the focused block.
     pub(super) fn block_move(&mut self, how: Move) {
-        let Mode::Block(focus) = self.mode else { return };
         let width = if self.width == 0 { u16::MAX } else { self.width };
         let rows = self.cache.get(&self.doc, width);
         let top = rows.iter().position(|row| row.doc_line >= self.top).unwrap_or(0);
-        let (focus, top) = View { rows, top, height: self.page.max(1) }.apply(&self.doc.blocks, focus, how);
+        let view = View { rows, top, height: self.page.max(1) };
+        let focus = match self.mode {
+            Mode::Block(focus) => focus,
+            Mode::Browse => {
+                // No focus: `j` and `k` choose a block on the screen. The other moves only scroll.
+                let chosen = match how {
+                    Move::Down => view.browse_pick(&self.doc.blocks, false),
+                    Move::Up => view.browse_pick(&self.doc.blocks, true),
+                    _ => None,
+                };
+                if let Some(index) = chosen {
+                    self.mode = Mode::Block(index);
+                    self.block_move(Move::Show);
+                } else {
+                    let next = view.browse_top(how);
+                    self.top = rows.get(next).map_or(0, |row| row.doc_line);
+                }
+                return;
+            }
+            Mode::Text => return,
+        };
+        let (focus, top) = view.apply(&self.doc.blocks, focus, how);
         self.top = rows.get(top).map_or(0, |row| row.doc_line);
         self.mode = Mode::Block(focus);
         if let Some(start) = self.block_start(focus) {
@@ -233,7 +293,7 @@ impl App {
 
     /// In block mode, focus the block near `offset` and put it in view.
     pub(super) fn focus_near(&mut self, offset: usize) {
-        if matches!(self.mode, Mode::Block(_)) {
+        if self.in_block_mode() {
             self.mode = Mode::Block(self.doc.block_near(offset).unwrap_or(0));
             self.block_move(Move::Show);
         }
@@ -241,6 +301,10 @@ impl App {
 
     /// After a new read in block mode: focus the old focused text again, else the block near its old offset.
     pub(super) fn follow_focus(&mut self, old: Option<Range<usize>>, changed: &[(String, String, String)]) {
+        // No focus before the read: no focus after it.
+        if self.mode == Mode::Browse {
+            return;
+        }
         let shown = self.shown_id.as_deref();
         let moved = old.as_ref().and_then(|old| {
             let (_, before, after) = changed.iter().find(|(id, ..)| Some(id.as_str()) == shown)?;
@@ -251,6 +315,11 @@ impl App {
 
     /// Leave block mode with the cursor at the start of the focused block. False without a block.
     pub(super) fn enter_text(&mut self) -> bool {
+        if self.mode == Mode::Browse {
+            // The text mode starts at the first block on the screen.
+            let Some(index) = self.block_on_screen(false) else { return false };
+            self.mode = Mode::Block(index);
+        }
         let Mode::Block(index) = self.mode else { return true };
         let Some(start) = self.block_start(index) else { return false };
         self.cursor = start;
@@ -272,7 +341,13 @@ impl App {
                 self.enter_text();
                 return true;
             }
-            KeyCode::Esc => return true,
+            KeyCode::Esc => {
+                // `esc` removes the focus. Without a focus, it does nothing.
+                if matches!(self.mode, Mode::Block(_)) {
+                    self.mode = Mode::Browse;
+                }
+                return true;
+            }
             _ => match self.action_of(key) {
                 Some(Action::Down) => Move::Down,
                 Some(Action::Up) => Move::Up,
@@ -296,6 +371,11 @@ impl App {
                     return true;
                 }
                 Some(Action::SelectLines) => {
+                    if self.mode == Mode::Browse
+                        && let Some(index) = self.block_on_screen(false)
+                    {
+                        self.mode = Mode::Block(index);
+                    }
                     let last = self
                         .focused_block()
                         .and_then(|index| self.doc.blocks.get(index))

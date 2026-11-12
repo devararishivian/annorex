@@ -134,6 +134,11 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
             plain("esc back"),
         ],
         Focus::Doc => match app.mode {
+            Mode::Browse => {
+                let mut out = vec![hint(Action::Down, format!("{up_down} choose a block"))];
+                lists(&mut out);
+                out
+            }
             Mode::Block(_) => {
                 let mut out = vec![
                     hint(Action::Down, format!("{up_down} block")),
@@ -521,6 +526,10 @@ fn doc_status(app: &App) -> String {
             0 => "block 0/0".to_owned(),
             count => format!("block {}/{count}", index.min(count - 1) + 1),
         },
+        Mode::Browse => match app.doc.blocks.len() {
+            0 => "block 0/0".to_owned(),
+            count => format!("block -/{count}"),
+        },
         Mode::Text => {
             let lines = app.doc.source.lines().count().max(1);
             format!("line {}/{lines}", app.doc.line_of(app.cursor))
@@ -685,13 +694,14 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
     app.text_area = Rect::new(area.x + margin + gutter, area.y, text_width, area.height);
     let focused = match app.mode {
         Mode::Block(index) => app.doc.blocks.get(index).cloned(),
-        Mode::Text => None,
+        Mode::Browse | Mode::Text => None,
     };
+    let block_mode = matches!(app.mode, Mode::Block(_) | Mode::Browse);
     let rows = app.cache.get(&app.doc, text_width);
     let first_row = |doc_line: usize| rows.iter().position(|row| row.doc_line >= doc_line);
     let mut top_row = first_row(app.top).unwrap_or(0);
-    if app.scroll.doc {
-        // The wheel moved the view: it does not follow the focus until the next key.
+    if app.scroll.doc || app.mode == Mode::Browse {
+        // The wheel moved the view, or no block has the focus: the view follows nothing.
     } else if let Some(block) = &focused {
         // Block mode: the focused block stays in view. A tall block can scroll inside.
         top_row = View { rows, top: top_row, height }.top_for(top_row, block);
@@ -712,7 +722,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
     let query = app.query.clone();
     // The cursor cell: the first row of the cursor line that shows the cursor stop.
     // Block mode has no cursor cell: the focus bar is the only focus mark.
-    let cursor_cell = (app.focus == Focus::Doc && focused.is_none())
+    let cursor_cell = (app.focus == Focus::Doc && !block_mode)
         .then(|| {
             let start = first_row(cursor_line)?;
             rows.iter()
@@ -730,7 +740,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
         .map(|(offset, row)| {
             let matches =
                 query.as_deref().map(|query| row_matches(rows, top_row + offset, query)).unwrap_or_default();
-            let number_style = if focused.is_none() && row.doc_line == cursor_line {
+            let number_style = if !block_mode && row.doc_line == cursor_line {
                 Style::new().add_modifier(Modifier::REVERSED)
             } else {
                 Style::new().add_modifier(Modifier::DIM)
@@ -1433,6 +1443,8 @@ mod tests {
         let reply = Reply { id: "r".to_owned(), text: "# T\n\none\ntwo\n\nthree\n".to_owned(), at: None };
         let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
         let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        // The view starts without a focus: `j` focuses the first block.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
         let screen = terminal.backend().buffer().clone();
@@ -1479,6 +1491,8 @@ mod tests {
         let reply = Reply { id: "r".to_owned(), text: text.to_owned(), at: None };
         let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
         let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        // The view starts without a focus: `j` focuses the first block, then come the `keys`.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         for c in keys.chars() {
             app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
@@ -1492,10 +1506,10 @@ mod tests {
     fn the_bar_buttons_are_in_the_hit_map() {
         let (app, screen) = drawn("# T\n\none\n\ntwo\n", "j");
         for (text, kind) in [
-            ("[o looks good]", Kind::LooksGood),
-            ("[c comment]", Kind::Comment),
-            ("[d remove]", Kind::Delete),
-            ("[s replace]", Kind::Replace),
+            ("o looks good", Kind::LooksGood),
+            ("c comment", Kind::Comment),
+            ("d remove", Kind::Delete),
+            ("s replace", Kind::Replace),
         ] {
             let (x, y) = find(&screen, text);
             let last = x + u16::try_from(text.len()).expect("len") - 1;
@@ -1533,7 +1547,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
         let screen = terminal.backend().buffer().clone();
-        let (_, bar) = find(&screen, "[c comment]");
+        let (_, bar) = find(&screen, "c comment");
         let (_, last) = find(&screen, "p39");
         assert_eq!(bar + 1, last, "no row below the block, so the bar is above it");
     }
@@ -1547,10 +1561,10 @@ mod tests {
                     (0..80u16).map(|x| screen.cell((x, y)).map_or(" ", |c| c.symbol())).collect::<String>()
                 })
                 .collect();
-            assert!(!text.contains("[c comment]"), "after {keys:?}");
+            assert!(!text.contains("c comment"), "after {keys:?}");
         }
         let (_, screen) = drawn("# T\n\none\n", "");
-        assert_eq!(find(&screen, "[c comment]").1, 2, "the bar shows in block mode");
+        assert_eq!(find(&screen, "c comment").1, 2, "the bar shows in block mode");
     }
 
     #[test]
@@ -1564,10 +1578,11 @@ mod tests {
             text: "one\ntwo\nthree\n".to_owned(),
             stamp: crate::files::Stamp { size: 14, modified: None },
         });
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
         let screen = terminal.backend().buffer().clone();
-        let (x, y) = find(&screen, "[o looks good]");
+        let (x, y) = find(&screen, "o looks good");
         let row: String = (0..x).map(|column| screen.cell((column, y)).map_or(" ", |c| c.symbol())).collect();
         assert_eq!(row.trim(), "", "no gutter number on the bar row: {row:?}");
         assert_eq!(app.hits.at(0, y), Some(&Hit::Bar), "the margin of the bar row");
@@ -1590,7 +1605,7 @@ mod tests {
             stamp: crate::files::Stamp { size: 19, modified: None },
         });
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
-        for c in "cnote\n".chars() {
+        for c in "jcnote\n".chars() {
             let code = if c == '\n' { KeyCode::Enter } else { KeyCode::Char(c) };
             app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
         }

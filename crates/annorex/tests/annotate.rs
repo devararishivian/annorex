@@ -24,6 +24,8 @@ fn reply(id: &str, text: &str) -> Reply {
 fn app_with(text: &str, config: &Config) -> App {
     let mut app = App::new(state(), Screen::Viewer, vec![reply("r1", text)], config);
     app.set_time_zone(jiff::tz::TimeZone::UTC);
+    // The view starts without a focus: `j` focuses the first block.
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
     app
 }
 
@@ -39,6 +41,8 @@ fn three_replies() -> App {
     ];
     let mut app = App::new(state(), Screen::Viewer, replies, &Config::default());
     app.set_time_zone(jiff::tz::TimeZone::UTC);
+    // The view starts without a focus: `j` focuses the first block.
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
     app
 }
 
@@ -349,7 +353,8 @@ fn header_lists_unsent_replies() {
     press(&mut app, "cone\n");
     press(&mut app, "pjj");
     press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-    press(&mut app, "cthree\np");
+    // The reply that opens has no focus yet: `j` focuses its block.
+    press(&mut app, "jcthree\np");
     let screen = render(&mut app, 120, 24);
     let header = screen.lines().next().expect("header");
     assert!(header.contains("unsent 1,3"), "{header}");
@@ -413,7 +418,7 @@ fn annotated(agent: Agent, safety: Safety) -> App {
         &Config::default(),
     );
     app.set_time_zone(jiff::tz::TimeZone::UTC);
-    press(&mut app, "cnote\n");
+    press(&mut app, "jcnote\n");
     app
 }
 
@@ -906,7 +911,7 @@ fn row_of(screen: &str, needle: &str) -> usize {
         .unwrap_or_else(|| panic!("no {needle:?} in\n{screen}"))
 }
 
-const BAR: &str = "[o looks good] [c comment] [d remove] [s replace]";
+const BAR: &str = " o looks good   c comment   d remove   s replace";
 
 #[test]
 fn the_bar_shows_under_the_focused_block_with_live_keys() {
@@ -917,11 +922,11 @@ fn the_bar_shows_under_the_focused_block_with_live_keys() {
     let mut app = app_with("# Title\n\nfirst para\n\nsecond para\n", &config);
     press(&mut app, "j");
     let screen = render(&mut app, 120, 40);
-    let bar = row_of(&screen, "[y looks good] [c comment] [d remove] [s replace]");
+    let bar = row_of(&screen, " y looks good   c comment   d remove   s replace");
     assert_eq!(bar, row_of(&screen, "first para") + 1, "{screen}");
-    assert!(!screen.contains("[o looks good]"), "{screen}");
+    assert!(!screen.contains("o looks good"), "{screen}");
     let line = screen.lines().nth(bar).expect("bar row");
-    assert!(line.starts_with(" [y looks good]"), "the bar starts at the text column: {line:?}");
+    assert!(line.starts_with("  y looks good"), "the bar starts at the text column: {line:?}");
 }
 
 #[test]
@@ -943,12 +948,12 @@ fn no_bar_while_the_editor_is_open() {
     let mut app = app("alpha beta\n\nsecond\n");
     assert!(render(&mut app, 80, 24).contains(BAR));
     press(&mut app, "c");
-    assert!(!render(&mut app, 80, 24).contains("[c comment]"));
+    assert!(!render(&mut app, 80, 24).contains("c comment"));
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
     press(&mut app, "?");
-    assert!(!render(&mut app, 80, 24).contains("[c comment]"), "no bar under the help screen");
+    assert!(!render(&mut app, 80, 24).contains("c comment"), "no bar under the help screen");
     let mut empty = self::app("");
-    assert!(!render(&mut empty, 80, 24).contains("[c comment]"), "no bar for an empty document");
+    assert!(!render(&mut empty, 80, 24).contains("c comment"), "no bar for an empty document");
 }
 
 /// Thirty paragraphs: more than one screen of 80x24.
@@ -1163,7 +1168,7 @@ fn several_notes_show_a_numbered_pick() {
     let screen = render(&mut app, 80, 24);
     let first = row_of(&screen, "1 💬 one");
     assert_eq!(row_of(&screen, "2 💬 two"), first + 1, "{screen}");
-    assert!(!screen.contains("[c comment]"), "no action bar under the pick:\n{screen}");
+    assert!(!screen.contains("c comment"), "no action bar under the pick:\n{screen}");
     press(&mut app, "2");
     assert_eq!(app.editor().expect("editor").text, "two");
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);

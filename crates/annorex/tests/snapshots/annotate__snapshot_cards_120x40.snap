@@ -8,7 +8,7 @@ Annorex · last reply · claude (idle) · reply 1/1 · unsent 1                 
  We change the login page. The old page stays for a week.                              └───────────────────────────────┘
                                                                                        ┌ 💬 comment ───────────────────┐
 ▍- one                                                                                 │ Which page? The old one or    │
- [o looks good] [c comment] [d remove] [s replace]                                     │ the new one, after the move   │
+  o looks good   c comment   d remove   s replace                                      │ the new one, after the move   │
                                                                                        │ of the login form.            │
  The end.                                                                              └───────────────────────────────┘
                                                                                        ┌ ✕ remove ─────────────────────┐

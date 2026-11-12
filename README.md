@@ -48,8 +48,8 @@ require("annorex").setup{ bin = "/path/to/annorex" }
 
 1. Focus the pane of Claude Code, Pi, or OpenCode.
 2. Press `cmd+shift+a` to review the last reply. Press `cmd+shift+f` to review the files.
-3. Move from block to block with `j` and `k`. A block is a paragraph, a list item, a heading, a code block, or a table.
-   The action bar shows below the block.
+3. At the start, no block has the focus. Press `j` or `k` to choose a block, or click one. A block is a paragraph, a
+   list item, a heading, a code block, or a table. The action bar shows below the block.
 4. Press `o` to mark the block as good, `c` to comment, `d` to mark it for removal, or `s` to replace it. `o` needs no
    text. The other keys open an editor. Type the note. Press `enter`.
 5. To annotate a part of a block, press `v` and move to select text. This is text mode. Press `esc` twice to go back
@@ -61,7 +61,8 @@ In the viewer, press `?` to see all keys.
 ## The action bar and notes
 
 The block with the focus has a bar in the left margin. Below it, the action bar shows four buttons:
-`[o looks good] [c comment] [d remove] [s replace]`. A click on a button does the same as its key.
+`o looks good`, `c comment`, `d remove`, and `s replace`. Each button is a gray chip. Its key is bold and has the color
+of the note. A click on a button does the same as its key.
 
 The export of `o looks good` has the text `Looks good:` and the quote. The note needs no text. Press `e` later to add
 text.
@@ -101,7 +102,7 @@ The list of replies (`p`), the file finder (`ctrl+p`), and the session picker op
 | `o`                  | Note: looks good (no text needed)                                        |
 | `c` / `d` / `s`      | Note: comment, remove, or replace                                        |
 | `e` / `x`            | Edit or delete the note at the focus                                     |
-| `esc`                | Clear the selection. A second press goes back to block mode              |
+| `esc`                | Clear the selection. A second press goes back to block mode. In block mode, remove the focus |
 | `S`                  | Send the notes to the agent                                              |
 | `M`                  | Write a general note, then send                                          |
 | `P`                  | Paste the notes into the agent input box, without Enter                  |

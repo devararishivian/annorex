@@ -38,6 +38,8 @@ fn viewer() -> App {
     let mut app = App::new(state(Agent::ClaudeCode, "idle"), Screen::Viewer, replies(), &Config::default());
     // The snapshots must not depend on the time zone of the machine.
     app.set_time_zone(jiff::tz::TimeZone::UTC);
+    // The view starts without a focus: `j` focuses the first block.
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
     app
 }
 
@@ -499,7 +501,8 @@ fn l_stops_at_the_last_char_and_h_at_the_first() {
 #[test]
 fn g_and_capital_g_go_to_the_first_and_last_line() {
     let mut app = small("one\n\ntwo\n");
-    press(&mut app, "G");
+    // Without a focus, `g` and `G` only scroll: `j` focuses the first block first.
+    press(&mut app, "jG");
     assert_eq!(app.cursor(), 5);
     press(&mut app, "g");
     assert_eq!(app.cursor(), 0);

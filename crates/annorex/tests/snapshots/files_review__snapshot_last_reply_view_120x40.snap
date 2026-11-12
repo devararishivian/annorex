@@ -3,8 +3,8 @@ source: crates/annorex/tests/files_review.rs
 expression: "render(&mut app, 120, 40)"
 ---
 Annorex · last reply · claude (idle) · reply 1/1                                                              [ Send ▸ ]
-▍Reply
- [o looks good] [c comment] [d remove] [s replace]
+ Reply
+
  The reply text.
 
 
@@ -41,4 +41,4 @@ Annorex · last reply · claude (idle) · reply 1/1                             
 
 
 
-block 1/2                     j/k block · v text · o c d s note · e/x edit · S send · a notes · p list · T tree · ? help
+block -/2                                               j/k choose a block · S send · a notes · p list · T tree · ? help

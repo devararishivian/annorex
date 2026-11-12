@@ -75,9 +75,9 @@ fn render(app: &mut App, width: u16, height: u16) -> String {
 #[test]
 fn export_joins_files_in_open_order() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n"); // a.md is on the screen: annotate it first
+    press(&mut app, "jcnote a\n"); // a.md is on the screen: annotate it first
     press(&mut app, "[");
-    press(&mut app, "cnote b\n");
+    press(&mut app, "jcnote b\n");
     let export = app.export();
     let b = export.find("# Annotations on b.txt").expect("b.txt section");
     let a = export.find("# Annotations on a.md").expect("a.md section");
@@ -85,7 +85,7 @@ fn export_joins_files_in_open_order() {
     assert!(export.contains("> note a") && export.contains("> note b"), "{export}");
     assert!(export.contains("## Annotation 1 (line 1)"), "line numbers come from each file:\n{export}");
     let mut with_note = two_files();
-    press(&mut with_note, "cnote a\n");
+    press(&mut with_note, "jcnote a\n");
     press(&mut with_note, "M");
     press(&mut with_note, "Please fix all.");
     assert_eq!(press_key(&mut with_note, KeyCode::Enter, KeyModifiers::NONE), Effect::SendWithNote);
@@ -100,7 +100,7 @@ fn export_joins_files_in_open_order() {
 fn each_file_keeps_its_own_review() {
     let mut app = two_files();
     press(&mut app, "[");
-    press(&mut app, "cnote b\n");
+    press(&mut app, "jcnote b\n");
     assert_eq!(app.review().expect("review").annotations.len(), 1);
     press(&mut app, "]");
     assert!(app.review().is_none_or(annorex::review::Review::is_empty), "a.md has no note");
@@ -126,7 +126,7 @@ fn brackets_select_the_previous_and_next_file() {
 #[test]
 fn list_marks_unsent_files() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n");
+    press(&mut app, "jcnote a\n");
     let screen = render(&mut app, 120, 20);
     assert!(screen.lines().next().expect("header").contains("unsent 2"), "{screen}");
     press(&mut app, "p");
@@ -141,7 +141,7 @@ fn list_marks_unsent_files() {
 #[test]
 fn closing_a_file_with_unsent_notes_asks() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n");
+    press(&mut app, "jcnote a\n");
     press(&mut app, "W");
     assert!(render(&mut app, 120, 12).contains("Close a.md? It has unsent notes. y/n"));
     press(&mut app, "n");
@@ -178,9 +178,9 @@ fn plain_file_selection_gives_exact_ranges() {
 #[test]
 fn send_marks_all_files_sent() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n");
+    press(&mut app, "jcnote a\n");
     press(&mut app, "[");
-    press(&mut app, "cnote b\n");
+    press(&mut app, "jcnote b\n");
     assert_ne!(app.export(), "");
     app.finish_send("2026-11-09T12:00:00Z");
     assert!(app.export().is_empty(), "both files were sent");
@@ -192,9 +192,9 @@ fn send_marks_all_files_sent() {
 #[test]
 fn quit_question_counts_files() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n");
+    press(&mut app, "jcnote a\n");
     press(&mut app, "[");
-    press(&mut app, "cnote b\n");
+    press(&mut app, "jcnote b\n");
     press(&mut app, "q");
     let screen = render(&mut app, 120, 12);
     assert!(
@@ -208,7 +208,7 @@ fn quit_question_counts_files() {
 #[test]
 fn snapshot_files_side_120x40() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n[cnote b\n");
+    press(&mut app, "jcnote a\n[jcnote b\n");
     press(&mut app, "p");
     insta::assert_snapshot!(render(&mut app, 120, 40));
 }
@@ -216,7 +216,7 @@ fn snapshot_files_side_120x40() {
 #[test]
 fn snapshot_files_bottom_80x24() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n");
+    press(&mut app, "jcnote a\n");
     press(&mut app, "p");
     insta::assert_snapshot!(render(&mut app, 80, 24));
 }
@@ -527,7 +527,7 @@ fn open_files_with_unsent_notes_are_marked_too() {
     let (_dir, mut app) = tree_app(&Config::default());
     ctrl(&mut app, 'p');
     press(&mut app, "main\n");
-    press(&mut app, "cnote\n");
+    press(&mut app, "jcnote\n");
     press(&mut app, "T");
     press(&mut app, "\n"); // expand src
     let screen = render(&mut app, 120, 20);
@@ -687,7 +687,7 @@ fn restored_m2_draft_with_sent_at_has_no_unsent_notes() {
 #[test]
 fn closing_a_file_is_refused_when_the_draft_cannot_be_saved() {
     let mut app = two_files();
-    press(&mut app, "cnote\n");
+    press(&mut app, "jcnote\n");
     app.set_save_error(Some("disk full".to_owned()));
     press(&mut app, "W");
     press(&mut app, "y");
@@ -723,7 +723,7 @@ fn finder_opened_before_the_scan_fills_when_the_scan_ends() {
 #[test]
 fn header_and_nothing_to_send_look_at_all_open_files() {
     let mut app = two_files(); // a.md on the screen
-    press(&mut app, "cnote\n");
+    press(&mut app, "jcnote\n");
     app.mark_sent("2026-11-09T10:00:00Z");
     assert!(render(&mut app, 100, 12).contains("[ Sent 10:00 ]"));
     // Show b.txt, which has no notes: the notes of a.md were sent, so the header still says so.
@@ -732,7 +732,7 @@ fn header_and_nothing_to_send_look_at_all_open_files() {
     press(&mut app, "S");
     assert_eq!(app.status(), Some("Nothing new to send. Press Y to copy all notes."));
     // A new note in b.txt makes the header a send button again.
-    press(&mut app, "cmore\n");
+    press(&mut app, "jcmore\n");
     let screen = render(&mut app, 100, 12);
     assert!(screen.contains("[ Send 1") && !screen.contains("[ Sent"), "{screen}");
 }
@@ -948,7 +948,7 @@ fn t_hides_and_shows_the_tree() {
 #[test]
 fn tab_cycles_tree_doc_rail() {
     let (_dir, mut app) = tree_with_file();
-    press(&mut app, "cnote\n");
+    press(&mut app, "jcnote\n");
     let footer = |app: &mut App| render(app, 120, 20).lines().last().unwrap_or_default().to_owned();
     assert!(footer(&mut app).contains("j/k block"));
     tab(&mut app);
@@ -960,6 +960,8 @@ fn tab_cycles_tree_doc_rail() {
     // Without the tree and the rail, tab stays on the document.
     let mut narrow = files_app();
     narrow.open_file(loaded("a.md", "# Title\n"));
+    // A new document starts without a focus: `j` focuses its block, so the footer names the blocks.
+    press(&mut narrow, "j");
     let _ = render(&mut narrow, 80, 20);
     tab(&mut narrow);
     assert!(render(&mut narrow, 80, 20).lines().last().unwrap_or_default().contains("j/k block"));
@@ -968,7 +970,7 @@ fn tab_cycles_tree_doc_rail() {
 #[test]
 fn a_focuses_the_rail_at_120_columns() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n");
+    press(&mut app, "jcnote a\n");
     let _ = render(&mut app, 120, 30);
     press(&mut app, "a");
     let screen = render(&mut app, 120, 30);
@@ -982,7 +984,7 @@ fn a_focuses_the_rail_at_120_columns() {
 #[test]
 fn a_opens_the_list_at_110_columns() {
     let mut app = two_files();
-    press(&mut app, "cnote a\n");
+    press(&mut app, "jcnote a\n");
     let _ = render(&mut app, 110, 30);
     press(&mut app, "a");
     let screen = render(&mut app, 110, 30);
@@ -1050,7 +1052,7 @@ fn folder_rows_show_note_counts() {
     let mut app =
         App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(dir.path().to_path_buf());
     app.set_scan(annorex::files::scan(dir.path()));
-    for (name, keys) in [("docs/a.md", "cx\njcy\n"), ("docs/b.md", "cz\n"), ("top.md", "cw\n")] {
+    for (name, keys) in [("docs/a.md", "jcx\njcy\n"), ("docs/b.md", "jcz\n"), ("top.md", "jcw\n")] {
         app.open_file(annorex::files::load(dir.path(), std::path::Path::new(name)).expect("load"));
         press(&mut app, keys);
     }
@@ -1061,7 +1063,7 @@ fn folder_rows_show_note_counts() {
 #[test]
 fn one_column_below_100() {
     let (_dir, mut app) = tree_with_file();
-    press(&mut app, "cnote\n");
+    press(&mut app, "jcnote\n");
     let screen = render(&mut app, 80, 20);
     assert!(!screen.contains("Tree") && !screen.contains("Annotations"), "{screen}");
     press(&mut app, "T");

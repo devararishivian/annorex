@@ -38,6 +38,8 @@ fn both() -> App {
     let mut app =
         App::new(state(), Screen::Viewer, replies, &Config::default()).with_root(PathBuf::from("/work"));
     app.set_time_zone(jiff::tz::TimeZone::UTC);
+    // The view starts without a focus: `j` focuses the first block.
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
     app
 }
 
@@ -57,7 +59,8 @@ fn noted() -> App {
     let mut app = both();
     press(&mut app, "cnote reply\n");
     app.open_file(loaded("a.md", "# Title\n\nalpha text\n"));
-    press(&mut app, "cnote file\n");
+    // A new document starts without a focus: `j` focuses its first block.
+    press(&mut app, "jcnote file\n");
     app
 }
 
@@ -245,7 +248,7 @@ fn opening_a_file_gives_the_keys_back_to_the_document_when_a_session_choice_wait
     let mut app = files_only();
     app.set_reply_source(ReplySource::Pick(vec![candidate("first"), candidate("second")]));
     app.open_file(loaded("a.md", "# Title\n\nalpha text\n"));
-    press(&mut app, "cnote\n");
+    press(&mut app, "jcnote\n");
     assert!(app.export().contains("> note"), "the keys must reach the file:\n{}", app.export());
 }
 
@@ -381,7 +384,7 @@ fn header_send_button_names_the_agent() {
     let mut app = App::new(pi, Screen::Viewer, vec![reply("r1", "one\n\ntwo\n")], &Config::default());
     let header = header_of(&mut app, 100);
     assert!(header.ends_with("[ Send ▸ ]"), "a dim button with no notes: {header}");
-    press(&mut app, "cfirst\n");
+    press(&mut app, "jcfirst\n");
     press(&mut app, "jcsecond\n");
     let header = header_of(&mut app, 100);
     assert!(header.ends_with("[ Send 2 → pi ▸ ]"), "{header}");
@@ -427,6 +430,8 @@ fn footer_drops_hints_from_the_end_but_keeps_help() {
         text: "alpha\n".to_owned(),
         stamp: Stamp { size: 6, modified: None },
     });
+    // A new document starts without a focus: `j` focuses its first block, so the footer names the blocks.
+    press(&mut app, "j");
     let wide = footer_of(&mut app, 200);
     assert!(wide.contains("ctrl+p find"), "{wide}");
     let narrow = footer_of(&mut app, 60);

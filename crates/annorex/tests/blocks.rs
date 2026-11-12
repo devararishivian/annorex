@@ -24,6 +24,14 @@ fn reply(id: &str, text: &str) -> Reply {
 }
 
 fn open(text: &str) -> App {
+    let mut app = open_raw(text);
+    // The view starts without a focus: `j` focuses the first block.
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    app
+}
+
+/// The viewer as it starts: no block has the focus.
+fn open_raw(text: &str) -> App {
     let mut app = App::new(state(), Screen::Viewer, vec![reply("r1", text)], &Config::default());
     app.set_time_zone(jiff::tz::TimeZone::UTC);
     app
@@ -389,6 +397,8 @@ fn plain_files_keep_line_numbers_and_the_bar_is_at_column_zero() {
         text: "fn a() {}\n\nfn b() {}\n".to_owned(),
         stamp: annorex::files::Stamp { size: 22, modified: None },
     });
+    // A new document starts without a focus.
+    press(&mut app, "j");
     let screen = render(&mut app, 80, 24);
     let line = screen.lines().find(|line| line.contains("fn b()")).expect("line");
     assert!(line.trim_start_matches(['\u{258d}', ' ']).starts_with("3 fn b()"), "{screen}");
@@ -536,4 +546,186 @@ fn a_shown_empty_document_says_block_0_of_0() {
     assert!(footer.starts_with("block 0/0"), "{footer}");
     press(&mut app, "jkGg");
     assert!(render(&mut app, 80, 24).lines().last().unwrap_or_default().starts_with("block 0/0"));
+}
+
+// ---- No focus at the start (block mode without a focused block) ----
+
+const CHOOSE: &str = "choose a block first (j/k or a click)";
+
+/// A document of `count` paragraphs `para 0`, `para 1`, and so on: every block has two rows.
+fn paragraphs(count: usize) -> String {
+    (0..count).map(|n| format!("para {n}\n\n")).collect::<Vec<_>>().concat()
+}
+
+/// The numbers `N` of the `para N` words that the screen shows, in order.
+fn shown_paragraphs(screen: &str) -> Vec<usize> {
+    screen
+        .lines()
+        .filter_map(|line| line.split("para ").nth(1)?.split_whitespace().next()?.parse().ok())
+        .collect()
+}
+
+fn cells(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    terminal.backend().buffer().clone()
+}
+
+#[test]
+fn nothing_is_focused_at_the_start() {
+    let mut app = open_raw(DOC);
+    assert_eq!(app.mode(), Mode::Browse);
+    assert_eq!(app.focused_block(), None);
+    let screen = render(&mut app, 100, 30);
+    assert!(!screen.contains('\u{258d}'), "no focus bar:\n{screen}");
+    assert!(!screen.contains("looks good"), "no action bar:\n{screen}");
+}
+
+#[test]
+fn a_new_document_starts_without_a_focus() {
+    let mut app = open_raw(DOC);
+    press(&mut app, "jjj");
+    assert_eq!(app.focused_block(), Some(2));
+    app.set_replies(vec![reply("r2", "other\n\ntext\n"), reply("r1", DOC)]);
+    assert_eq!(app.mode(), Mode::Browse, "another reply starts without a focus");
+}
+
+#[test]
+fn j_focuses_the_first_block_on_the_screen_and_k_the_last() {
+    let mut app = open_raw(DOC);
+    press(&mut app, "j");
+    assert_eq!(app.mode(), Mode::Block(0));
+    let mut app = open_raw(DOC);
+    press(&mut app, "k");
+    assert_eq!(app.mode(), Mode::Block(5), "k focuses the last block of a document that fits");
+
+    let mut app = open_raw(&paragraphs(30));
+    render(&mut app, 80, 12);
+    press_key(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+    let screen = render(&mut app, 80, 12);
+    assert_eq!(app.mode(), Mode::Browse, "ctrl+d only scrolls");
+    let shown = shown_paragraphs(&screen);
+    assert!(shown[0] > 0, "the view scrolled:\n{screen}");
+    press(&mut app, "j");
+    assert_eq!(app.focused_block(), shown.first().copied(), "{screen}");
+
+    let mut app = open_raw(&paragraphs(30));
+    render(&mut app, 80, 12);
+    press_key(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+    let screen = render(&mut app, 80, 12);
+    press(&mut app, "k");
+    assert_eq!(app.focused_block(), shown_paragraphs(&screen).last().copied(), "{screen}");
+}
+
+#[test]
+fn g_and_shift_g_scroll_without_a_focus() {
+    let mut app = open_raw(&paragraphs(30));
+    render(&mut app, 80, 12);
+    press(&mut app, "G");
+    let screen = render(&mut app, 80, 12);
+    assert_eq!(app.mode(), Mode::Browse);
+    assert!(screen.contains("para 29"), "{screen}");
+    press(&mut app, "g");
+    let screen = render(&mut app, 80, 12);
+    assert_eq!(app.mode(), Mode::Browse);
+    assert!(screen.contains("para 0"), "{screen}");
+}
+
+#[test]
+fn esc_removes_the_focus_and_a_second_esc_changes_nothing() {
+    let mut app = open_raw(DOC);
+    press(&mut app, "jjj");
+    press(&mut app, "\u{1b}");
+    assert_eq!(app.mode(), Mode::Browse);
+    assert_eq!(app.focused_block(), None);
+    let screen = render(&mut app, 100, 30);
+    assert!(!screen.contains('\u{258d}'), "{screen}");
+    press(&mut app, "\u{1b}");
+    assert_eq!(app.mode(), Mode::Browse);
+    press(&mut app, "j");
+    assert_eq!(app.mode(), Mode::Block(0), "j chooses a block again");
+}
+
+#[test]
+fn a_note_key_without_a_focus_asks_for_a_block() {
+    for key in "codsex".chars() {
+        let mut app = open_raw(DOC);
+        press(&mut app, &key.to_string());
+        assert_eq!(app.status(), Some(CHOOSE), "key {key}");
+        assert!(app.editor().is_none(), "key {key}");
+        assert!(app.review().is_none_or(|review| review.annotations.is_empty()), "key {key}");
+        assert_eq!(app.mode(), Mode::Browse, "key {key}");
+    }
+    let mut app = open_raw("");
+    press(&mut app, "c");
+    assert_eq!(app.status(), Some("nothing to annotate"), "an empty document has no block to choose");
+}
+
+#[test]
+fn the_text_keys_start_at_the_first_block_on_the_screen() {
+    let mut app = open_raw(DOC);
+    press(&mut app, "l");
+    assert_eq!(app.mode(), Mode::Text);
+    assert_eq!(app.cursor(), app.doc().source.find("Title").expect("title") + 1);
+}
+
+#[test]
+fn a_reload_of_the_same_document_keeps_the_focus_or_the_lack_of_it() {
+    let changed = DOC.replace("Second paragraph.", "Second paragraph, new.");
+    let mut app = open_raw(DOC);
+    app.set_replies(vec![reply("r1", &changed)]);
+    assert_eq!(app.mode(), Mode::Browse, "no focus stays no focus");
+    let mut app = open_raw(DOC);
+    press(&mut app, "jjj");
+    app.set_replies(vec![reply("r1", &changed)]);
+    assert_eq!(app.mode(), Mode::Block(2), "a focus stays");
+}
+
+#[test]
+fn the_footer_without_a_focus_names_the_choice() {
+    let mut app = open_raw(DOC);
+    let screen = render(&mut app, 120, 30);
+    let footer = screen.lines().last().expect("footer").to_owned();
+    let choose = footer.find("j/k choose a block").unwrap_or_else(|| panic!("{footer}"));
+    let send = footer.find("send").unwrap_or_else(|| panic!("{footer}"));
+    let help = footer.find("? help").unwrap_or_else(|| panic!("{footer}"));
+    assert!(choose < send && send < help, "{footer}");
+    assert!(footer.contains("block -/6") || footer.contains("no block"), "{footer}");
+    press(&mut app, "j");
+    let footer = render(&mut app, 120, 30).lines().last().expect("footer").to_owned();
+    assert!(footer.contains("block 1/6") && !footer.contains("choose a block"), "{footer}");
+}
+
+#[test]
+fn the_action_bar_buttons_are_chips() {
+    let mut app = open_raw(DOC);
+    press(&mut app, "j");
+    let buffer = cells(&mut app, 100, 30);
+    let row = (0..30u16)
+        .find(|&y| {
+            (0..100u16)
+                .map(|x| buffer.cell((x, y)).map_or(" ", |c| c.symbol()))
+                .collect::<String>()
+                .contains("looks good")
+        })
+        .expect("the bar row");
+    let text: Vec<&str> = (0..100u16).map(|x| buffer.cell((x, row)).map_or(" ", |c| c.symbol())).collect();
+    let joined = text.concat();
+    let o = joined.find(" o looks good ").expect("first chip") + 1;
+    let style = |x: usize| buffer.cell((u16::try_from(x).expect("column"), row)).expect("cell").style();
+    // The padding, the key, and the word of the first chip.
+    for x in (o - 1)..(o + "o looks good ".len()) {
+        assert_eq!(style(x).bg, Some(Color::DarkGray), "chip cell {x}");
+    }
+    assert!(style(o).add_modifier.contains(Modifier::BOLD) && style(o).fg == Some(Color::Green));
+    assert_ne!(style(o + 2).fg, Some(Color::Green), "the word has the default color");
+    assert!(!style(o + 2).add_modifier.contains(Modifier::BOLD));
+    // The gap between two chips and the rest of the row have no background.
+    let gap = o + "o looks good ".len();
+    assert_ne!(style(gap).bg, Some(Color::DarkGray), "the gap has no background");
+    let second = joined.find(" c comment ").expect("second chip") + 1;
+    assert_eq!(style(second).fg, Some(Color::Yellow));
+    assert_eq!(style(second - 1).bg, Some(Color::DarkGray));
+    assert_ne!(style(second - 2).bg, Some(Color::DarkGray));
+    assert_ne!(style(99).bg, Some(Color::DarkGray), "the end of the row");
 }

@@ -177,6 +177,9 @@ pub(crate) enum Selection {
 /// The footer message when a note key finds no text, in block mode and in text mode.
 const NOTHING_TO_ANNOTATE: &str = "nothing to annotate";
 
+/// The footer message when a note key finds no focused block in block mode.
+const CHOOSE_A_BLOCK: &str = "choose a block first (j/k or a click)";
+
 /// The footer message when the text under a note is gone after a new read.
 const MOVED_TEXT: &str = "The text under your note is gone after the new read, so the editor closed.";
 
@@ -307,7 +310,7 @@ impl App {
             cache: WrapCache::default(),
             top: 0,
             cursor: 0,
-            mode: Mode::Block(0),
+            mode: Mode::Browse,
             width: 0,
             top_row: 0,
             tree_open: true,
@@ -774,7 +777,7 @@ impl App {
             self.panel_index = 0;
             self.cursor = 0;
             self.top = 0;
-            self.mode = Mode::Block(0);
+            self.mode = Mode::Browse;
         } else {
             self.show_reply(index.min(self.replies.len() - 1));
         }
@@ -993,7 +996,7 @@ impl App {
             }
             self.editing_id = None;
             self.selection = None;
-            self.mode = Mode::Block(0);
+            self.mode = Mode::Browse;
             self.cursor = self.block_start(0).unwrap_or(self.cursor);
             self.confirm = None;
             self.annotation_index = 0;
@@ -1216,7 +1219,7 @@ impl App {
 
     #[allow(clippy::too_many_lines, reason = "one match over the actions of the document")]
     fn doc_key(&mut self, key: KeyEvent) -> Effect {
-        if matches!(self.mode, Mode::Block(_)) && self.block_key(key) {
+        if self.in_block_mode() && self.block_key(key) {
             return Effect::None;
         }
         let half = signed((self.page / 2).max(1));
@@ -1877,11 +1880,32 @@ impl App {
     /// The range of an annotation: the focused block in block mode; in text mode the selection, else
     /// the `DocLine` of the cursor.
     pub(crate) fn action_range(&self) -> Option<Range<usize>> {
-        if let Mode::Block(index) = self.mode {
-            return self.doc.blocks.get(index).map(|block| block.range.clone());
+        match self.mode {
+            Mode::Block(index) => return self.doc.blocks.get(index).map(|block| block.range.clone()),
+            Mode::Browse => return None,
+            Mode::Text => {}
         }
         self.selection_range()
             .or_else(|| self.doc.lines.get(self.cursor_line()).map(|line| line.source.clone()))
+    }
+
+    /// The footer message when a note key finds no range: ask for a block when there are blocks
+    /// but none has the focus.
+    fn no_range_message(&self) -> &'static str {
+        if self.mode == Mode::Browse && !self.doc.blocks.is_empty() {
+            CHOOSE_A_BLOCK
+        } else {
+            NOTHING_TO_ANNOTATE
+        }
+    }
+
+    /// True, with the footer message, when block mode has no focus and the keys of a note cannot act.
+    fn needs_a_block(&mut self) -> bool {
+        let needs = self.mode == Mode::Browse && !self.doc.blocks.is_empty();
+        if needs {
+            self.status = Some(CHOOSE_A_BLOCK.to_owned());
+        }
+        needs
     }
 
     pub(super) fn begin_new(&mut self, kind: Kind) -> Effect {
@@ -1889,7 +1913,7 @@ impl App {
             return Effect::None;
         }
         let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
-            self.status = Some(NOTHING_TO_ANNOTATE.to_owned());
+            self.status = Some(self.no_range_message().to_owned());
             return Effect::None;
         };
         self.editor = Some(Editor::new(kind, range));
@@ -1901,7 +1925,7 @@ impl App {
     pub fn add_looks_good(&mut self) -> Effect {
         let Some(reply) = self.shown_id.clone() else { return Effect::None };
         let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
-            self.status = Some(NOTHING_TO_ANNOTATE.to_owned());
+            self.status = Some(self.no_range_message().to_owned());
             return Effect::None;
         };
         let review = self.reviews.entry(reply.clone()).or_default();
@@ -1923,6 +1947,9 @@ impl App {
 
     /// `L`: the editor of the annotation at the cursor, else a new comment.
     fn begin_label(&mut self) -> Effect {
+        if self.needs_a_block() {
+            return Effect::None;
+        }
         let id = self.review().and_then(|review| review.at(self.cursor).first().map(|a| a.id));
         match id {
             Some(id) => self.begin_edit(id),
@@ -1935,6 +1962,9 @@ impl App {
     pub(super) fn notes_here(&self) -> Vec<u64> {
         let Some(review) = self.review() else { return Vec::new() };
         let block = self.focus_range();
+        if self.mode == Mode::Browse {
+            return Vec::new();
+        }
         review
             .in_order()
             .into_iter()
@@ -1950,6 +1980,9 @@ impl App {
     /// The edit or the remove key in the document: act on the note at the focus. With several
     /// notes, open the numbered pick.
     fn note_here(&mut self, remove: bool) -> Effect {
+        if self.needs_a_block() {
+            return Effect::None;
+        }
         let mut ids = self.notes_here();
         match ids.as_slice() {
             [] => self.status = Some("no note here".to_owned()),

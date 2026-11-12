@@ -753,7 +753,8 @@ mod tests {
     fn a_send_from_the_quit_question_ends_the_loop() {
         use crate::send::{SendResult, apply_result};
         let enter = Ok(Some(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))));
-        let mut events = script(vec![key('c'), key('x'), enter, key('q'), key('s'), key('j'), Ok(None)]);
+        let mut events =
+            script(vec![key('j'), key('c'), key('x'), enter, key('q'), key('s'), key('j'), Ok(None)]);
         let mut canvas = Counting::new();
         let (_tx, rx) = mpsc::channel();
         let stop = AtomicBool::new(false);

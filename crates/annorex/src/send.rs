@@ -248,7 +248,8 @@ mod tests {
         let state = AgentState { agent: Some(Agent::ClaudeCode), safety: Safety::Clear { state: None } };
         let reply = Reply { id: "r1".to_owned(), text: "alpha beta\n".to_owned(), at: None };
         let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
-        for c in "cnote\n".chars() {
+        // The view starts without a focus: `j` focuses the first block.
+        for c in "jcnote\n".chars() {
             let code = if c == '\n' { KeyCode::Enter } else { KeyCode::Char(c) };
             app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
         }

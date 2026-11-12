@@ -29,9 +29,17 @@ fn reply(id: &str, text: &str) -> Reply {
     Reply { id: id.to_owned(), text: text.to_owned(), at: Some("2026-11-09T10:30:30.000Z".to_owned()) }
 }
 
-fn viewer(text: &str) -> App {
+/// The viewer as it starts: no block has the focus.
+fn viewer_raw(text: &str) -> App {
     let mut app = App::new(state(), Screen::Viewer, vec![reply("r1", text)], &Config::default());
     app.set_time_zone(jiff::tz::TimeZone::UTC);
+    app
+}
+
+fn viewer(text: &str) -> App {
+    let mut app = viewer_raw(text);
+    // The view starts without a focus: `j` focuses the first block.
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
     app
 }
 
@@ -122,9 +130,10 @@ fn two_notes() -> App {
 
 #[test]
 fn click_on_a_block_focuses_it() {
-    let mut app = viewer(THREE);
+    let mut app = viewer_raw(THREE);
     let screen = frame(&mut app, NARROW);
-    assert_eq!(app.focused_block(), Some(0));
+    assert_eq!(app.mode(), Mode::Browse, "no block has the focus at the start");
+    assert_eq!(app.focused_block(), None);
     click(&mut app, find(&screen, "para three"));
     assert_eq!(app.mode(), Mode::Block(2));
     // A click in the left margin of a block also focuses it.
@@ -137,13 +146,13 @@ fn click_on_a_block_focuses_it() {
 fn click_on_an_action_button_does_it() {
     let mut app = viewer(THREE);
     let screen = frame(&mut app, NARROW);
-    assert_eq!(click(&mut app, find(&screen, "looks good]")), Effect::SaveDraft);
+    assert_eq!(click(&mut app, find(&screen, "looks good")), Effect::SaveDraft);
     let review = app.review().expect("review");
     assert_eq!(review.annotations.len(), 1);
     assert_eq!(review.annotations[0].kind, Kind::LooksGood);
     assert!(app.editor().is_none(), "looks good saves at once");
     let screen = frame(&mut app, NARROW);
-    click(&mut app, find(&screen, "comment]"));
+    click(&mut app, find(&screen, "comment"));
     assert_eq!(app.editor().expect("editor").kind, Kind::Comment);
 }
 
@@ -158,7 +167,7 @@ fn drag_selects_text_and_shows_the_bar() {
     app.handle_mouse(event(MouseEventKind::Up(MouseButton::Left), (x + 3, y)));
     assert_eq!(app.mode(), Mode::Text);
     let screen = frame(&mut app, NARROW);
-    assert!(rows(&screen).iter().any(|row| row.contains("looks good]")), "the bar shows after the release");
+    assert!(rows(&screen).iter().any(|row| row.contains("looks good")), "the bar shows after the release");
     press(&mut app, "c");
     assert_eq!(app.editor().expect("editor").range, 6..10, "the drag selected `beta`");
 }
@@ -594,4 +603,15 @@ fn showing_a_document_ends_a_drag_and_a_double_click() {
     let _ = frame(&mut app, NARROW);
     app.handle_mouse(event(MouseEventKind::Drag(MouseButton::Left), (x + 4, y)));
     assert!(app.mode() != Mode::Text, "the drag of the old text ended");
+}
+
+#[test]
+fn the_wheel_scrolls_without_creating_a_focus() {
+    let mut app = viewer_raw(&paragraphs(30));
+    let screen = frame(&mut app, NARROW);
+    wheel_down(&mut app, find(&screen, "para 1"));
+    let screen = frame(&mut app, NARROW);
+    assert!(find_from(&screen, "para 0", 0).is_none(), "the wheel scrolled:\n{}", rows(&screen).join("\n"));
+    assert_eq!(app.mode(), Mode::Browse);
+    assert_eq!(app.focused_block(), None);
 }
