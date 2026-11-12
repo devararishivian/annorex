@@ -93,7 +93,7 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
-    use crate::rex::{Mode, Modes, Proc, ProcessInfo, RexError, StatusList, StatusRecord};
+    use crate::rex::{Mode, Modes, Owner, Proc, ProcessInfo, RexError, StatusList, StatusRecord};
 
     /// A Rex that answers like a pane with Claude Code. `states` are the answers of the status
     /// checks in order; the last one repeats.
@@ -137,7 +137,7 @@ mod tests {
                 app: Some("claude-code".to_owned()),
                 msg: None,
                 updated_at: "2026-11-09T15:00:00+07:00".to_owned(),
-                owner: None,
+                owner: Some(Owner { pid: 10, name: "claude".to_owned() }),
             });
             Ok(StatusList { records: record.into_iter().collect() })
         }
@@ -221,7 +221,8 @@ mod tests {
 
     #[test]
     fn other_errors_keep_the_notes() {
-        let mut fake = Fake::new(&["idle"]);
+        // No agent: no record and no agent name in argv0.
+        let mut fake = Fake::new(&[]);
         fake.argv0 = None;
         match run(&fake, DeliveryMode::Send) {
             SendResult::Failed(message) => {

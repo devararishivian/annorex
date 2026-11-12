@@ -193,6 +193,7 @@ impl From<DeliverError> for Failure {
             DeliverError::NoAgent
             | DeliverError::Blocked { .. }
             | DeliverError::EnterWithheld { .. }
+            | DeliverError::NoStatus
             | DeliverError::NoBracketedPaste => EXIT_REFUSED,
             DeliverError::EmptyPayload => EXIT_USAGE,
             DeliverError::Rex(_) => EXIT_REX,

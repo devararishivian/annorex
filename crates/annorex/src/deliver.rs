@@ -79,6 +79,8 @@ pub enum DeliverError {
         dialog_text(.kind.as_deref(), .msg.as_deref())
     )]
     EnterWithheld { kind: Option<String>, msg: Option<String> },
+    #[error("the agent has not reported its state yet; wait until it is ready")]
+    NoStatus,
     #[error("the target pane has not turned on bracketed paste")]
     NoBracketedPaste,
     #[error("the payload is empty")]
@@ -99,7 +101,8 @@ fn dialog_text(kind: Option<&str>, msg: Option<&str>) -> String {
 ///
 /// The order is: process, status, modes, status again, paste, wait `enter_delay`, status a
 /// third time, Enter. Nothing is written when there is no agent, when the agent shows a dialog
-/// at the first two checks, or when bracketed paste is off. When the paste fails, or a dialog
+/// at the first two checks, when the agent process does not own the status record, or when
+/// bracketed paste is off. When the paste fails, or a dialog
 /// opens after the paste, Enter is not pressed. Delivery never tries again.
 pub fn deliver(
     api: &impl RexApi,
@@ -117,12 +120,15 @@ pub fn deliver(
     if detect(&process, &status).is_none() {
         return Err(DeliverError::NoAgent);
     }
+    refuse_unowned(&process, &status)?;
     refuse_dialog(&status)?;
     if !api.modes(block)?.bracketed_paste() {
         return Err(DeliverError::NoBracketedPaste);
     }
     // A dialog can open while Annorex checks. Check again immediately before the paste.
-    refuse_dialog(&api.program_status(block)?)?;
+    let status = api.program_status(block)?;
+    refuse_unowned(&process, &status)?;
+    refuse_dialog(&status)?;
     api.write(block, &bracketed(payload))?;
     if mode == DeliveryMode::PasteOnly {
         return Ok(Outcome::Pasted);
@@ -134,6 +140,15 @@ pub fn deliver(
     }
     api.write(block, "\r")?;
     Ok(Outcome::Sent)
+}
+
+/// An agent reports its state in a root record that its own process owns. Without that record,
+/// the agent can show a prompt that reports nothing (the trust prompt of Claude Code at startup),
+/// and Enter would answer it. A record of an agent that exited has another owner.
+fn refuse_unowned(process: &ProcessInfo, status: &StatusList) -> Result<(), DeliverError> {
+    let foreground = process.foreground.as_ref().map(|proc| proc.pid);
+    let owner = status.root().and_then(|root| root.owner.as_ref()).map(|owner| owner.pid);
+    if owner.is_some() && owner == foreground { Ok(()) } else { Err(DeliverError::NoStatus) }
 }
 
 fn refuse_dialog(status: &StatusList) -> Result<(), DeliverError> {
@@ -150,7 +165,7 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
-    use crate::rex::{Mode, Modes, Proc, ProcessInfo, StatusList, StatusRecord};
+    use crate::rex::{Mode, Modes, Owner, Proc, ProcessInfo, StatusList, StatusRecord};
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {
@@ -167,6 +182,7 @@ mod tests {
         states: RefCell<VecDeque<Option<&'static str>>>,
         paste_mode: bool,
         fail_first_write: bool,
+        owner_pid: Option<u32>,
     }
 
     impl Fake {
@@ -177,6 +193,7 @@ mod tests {
                 states: RefCell::new(states.iter().copied().collect()),
                 paste_mode: true,
                 fail_first_write: false,
+                owner_pid: Some(10),
             }
         }
 
@@ -192,7 +209,7 @@ mod tests {
         }
     }
 
-    fn status_record(state: &str) -> StatusRecord {
+    fn status_record(state: &str, owner_pid: Option<u32>) -> StatusRecord {
         StatusRecord {
             id: None,
             state: state.to_owned(),
@@ -200,7 +217,7 @@ mod tests {
             app: Some("claude-code".to_owned()),
             msg: (state == "blocked").then(|| "answer: Pick a color.".to_owned()),
             updated_at: "2026-11-09T15:00:00+07:00".to_owned(),
-            owner: None,
+            owner: owner_pid.map(|pid| Owner { pid, name: "claude".to_owned() }),
         }
     }
 
@@ -220,7 +237,9 @@ mod tests {
         fn program_status(&self, _block: &str) -> Result<StatusList, RexError> {
             self.log.borrow_mut().push(Call::Status);
             let state = self.states.borrow_mut().pop_front().flatten();
-            Ok(StatusList { records: state.map(status_record).into_iter().collect() })
+            Ok(StatusList {
+                records: state.map(|state| status_record(state, self.owner_pid)).into_iter().collect(),
+            })
         }
 
         fn modes(&self, _block: &str) -> Result<Modes, RexError> {
@@ -254,7 +273,7 @@ mod tests {
 
     #[test]
     fn enter_delay_comes_from_the_caller() {
-        let fake = Fake::new(&[]);
+        let fake = Fake::new(&[Some("idle"), Some("idle"), Some("idle")]);
         let delay = Duration::from_millis(120);
         deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, delay).expect("sent");
         assert!(fake.calls().contains(&Call::Sleep(delay)), "{:?}", fake.calls());
@@ -280,6 +299,27 @@ mod tests {
                 Call::Write("\r".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn refuses_without_a_status_record() {
+        // Claude Code shows a trust prompt at startup and reports no state. Enter would pick "No, exit".
+        for mode in [DeliveryMode::Send, DeliveryMode::PasteOnly] {
+            let fake = Fake::new(&[None, None, None]);
+            let result = deliver(&fake, &fake, BLOCK, "note", mode, ENTER_DELAY);
+            assert!(matches!(result, Err(DeliverError::NoStatus)), "{result:?}");
+            assert_eq!(fake.writes(), Vec::<String>::new());
+        }
+    }
+
+    #[test]
+    fn refuses_when_the_record_belongs_to_another_process() {
+        // Rex keeps the `idle` record of an agent that exited. A new process does not own it.
+        let mut fake = Fake::new(&[Some("idle"), Some("idle"), Some("idle")]);
+        fake.owner_pid = Some(99);
+        let result = deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY);
+        assert!(matches!(result, Err(DeliverError::NoStatus)), "{result:?}");
+        assert_eq!(fake.writes(), Vec::<String>::new());
     }
 
     #[test]
