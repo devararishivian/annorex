@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "annorex-hosts",
  "clap",
+ "crossterm",
  "ignore",
  "insta",
  "jiff",
