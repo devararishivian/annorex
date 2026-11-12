@@ -331,3 +331,37 @@ fn a_poll_of_the_viewer_delivers_the_id_from_the_thread() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
+
+#[test]
+fn question_mark_shows_every_key_and_any_key_closes_the_help() {
+    let mut app = both();
+    press(&mut app, "?");
+    let screen = render(&mut app, 100, 40);
+    for text in
+        [" Keys ", "S", "send the notes", "c", "comment", "ctrl+p", "find a file", "q", "close the viewer"]
+    {
+        assert!(screen.contains(text), "missing {text:?}:\n{screen}");
+    }
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    let screen = render(&mut app, 100, 40);
+    assert!(!screen.contains(" Keys "), "{screen}");
+}
+
+#[test]
+fn the_key_that_closes_the_help_does_nothing_else() {
+    let mut app = both();
+    press(&mut app, "?");
+    assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::None);
+    assert!(!render(&mut app, 100, 40).contains(" Keys "));
+}
+
+#[test]
+fn the_footer_shows_send_and_help_first() {
+    let mut app = both();
+    let screen = render(&mut app, 100, 30);
+    let footer = screen.lines().last().unwrap_or_default();
+    let annotate = footer.find("annotate").unwrap_or(usize::MAX);
+    let send = footer.find("S send").unwrap_or(0);
+    let help = footer.find("? help").unwrap_or(0);
+    assert!(annotate < send && send < help, "{footer}");
+}

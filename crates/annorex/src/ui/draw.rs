@@ -24,13 +24,15 @@ use crate::wrap::{VisualLine, fit, gutter_width};
 fn viewer_keys(keys: &KeyMap) -> String {
     let k = |action| keys.label(action);
     format!(
-        "{}/{} move  {} select  {}/{}/{} annotate  {} list  {} replies  {} find  {} quit",
+        "{}/{} move  {} select  {}/{}/{} annotate  {} send  {} help  {} list  {} replies  {} find  {} quit",
         k(Action::Down),
         k(Action::Up),
         k(Action::Select),
         k(Action::Comment),
         k(Action::Delete),
         k(Action::Replace),
+        k(Action::Send),
+        k(Action::Help),
         k(Action::Annotations),
         k(Action::Replies),
         k(Action::Find),
@@ -42,13 +44,15 @@ fn viewer_keys(keys: &KeyMap) -> String {
 fn files_keys(keys: &KeyMap) -> String {
     let k = |action| keys.label(action);
     format!(
-        "{}/{} move  {} select  {}/{}/{} annotate  {} files  {} tree  {} find file  {}/{} switch  {} quit",
+        "{}/{} move  {} select  {}/{}/{} annotate  {} send  {} help  {} files  {} tree  {} find file  {}/{} switch  {} quit",
         k(Action::Down),
         k(Action::Up),
         k(Action::Select),
         k(Action::Comment),
         k(Action::Delete),
         k(Action::Replace),
+        k(Action::Send),
+        k(Action::Help),
         k(Action::Replies),
         k(Action::Tree),
         k(Action::FindFile),
@@ -147,7 +151,95 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_picker(frame, body, &candidates, app.picker_index);
             draw_footer(frame, footer, &picker_keys(&app.config.keys), None);
         }
-        Screen::Viewer => draw_viewer(frame, app, layout, header, footer),
+        Screen::Viewer => {
+            draw_viewer(frame, app, layout, header, footer);
+            if app.help_open {
+                draw_help(frame, area, app);
+            }
+        }
+    }
+}
+
+/// The groups of the help screen. The file group shows only when the viewer has a work directory.
+const HELP_MOVE: &[Action] = &[
+    Action::Down,
+    Action::Up,
+    Action::Left,
+    Action::Right,
+    Action::WordNext,
+    Action::WordPrev,
+    Action::LineStart,
+    Action::LineEnd,
+    Action::HalfPageDown,
+    Action::HalfPageUp,
+    Action::Top,
+    Action::Bottom,
+];
+const HELP_NOTE: &[Action] =
+    &[Action::Select, Action::SelectLines, Action::Comment, Action::Delete, Action::Replace, Action::Label];
+const HELP_SEND: &[Action] =
+    &[Action::Send, Action::SendWithNote, Action::Paste, Action::Copy, Action::Discard];
+const HELP_LISTS: &[Action] =
+    &[Action::Replies, Action::Annotations, Action::Edit, Action::Remove, Action::Reload];
+const HELP_FILES: &[Action] =
+    &[Action::Tree, Action::FindFile, Action::PrevFile, Action::NextFile, Action::CloseFile];
+const HELP_OTHER: &[Action] = &[Action::Find, Action::FindNext, Action::FindPrev, Action::Help, Action::Quit];
+
+/// The lines of one help column: a bold title, then one line for each key.
+fn help_column(app: &App, groups: &[(&str, &[Action])]) -> Vec<Line<'static>> {
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let mut lines = Vec::new();
+    for (index, (title, actions)) in groups.iter().enumerate() {
+        if index > 0 {
+            lines.push(Line::default());
+        }
+        lines.push(Line::styled((*title).to_owned(), bold));
+        for action in *actions {
+            let key = app.config.keys.label(*action);
+            lines.push(Line::from(vec![Span::styled(format!("{key:>7}  "), bold), Span::raw(action.help())]));
+        }
+    }
+    lines
+}
+
+/// The help screen: every key from the live key map, over the viewer. Any key closes it.
+fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
+    let mut right: Vec<(&str, &[Action])> = vec![("Send", HELP_SEND), ("Lists", HELP_LISTS)];
+    if app.has_root() {
+        right.push(("Files", HELP_FILES));
+    }
+    right.push(("Other", HELP_OTHER));
+    let left = help_column(app, &[("Move", HELP_MOVE), ("Select and annotate", HELP_NOTE)]);
+    let right = help_column(app, &right);
+    let two = area.width >= 78;
+    let rows = if two { left.len().max(right.len()) } else { left.len() + 1 + right.len() };
+    let width = if two { area.width.min(80) } else { area.width.min(44) };
+    let height = u16::try_from(rows + 3).unwrap_or(u16::MAX).min(area.height);
+    let rect = Rect::new(
+        area.x + (area.width.saturating_sub(width)) / 2,
+        area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, rect);
+    let block = Block::default().borders(Borders::ALL).title(" Keys ").title_bottom(" any key closes ");
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    if two {
+        let half = inner.width / 2;
+        frame.render_widget(Paragraph::new(left), Rect::new(inner.x + 1, inner.y, half - 1, inner.height));
+        frame.render_widget(
+            Paragraph::new(right),
+            Rect::new(inner.x + half, inner.y, inner.width - half, inner.height),
+        );
+    } else {
+        let mut lines = left;
+        lines.push(Line::default());
+        lines.extend(right);
+        frame.render_widget(
+            Paragraph::new(lines),
+            Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(1), inner.height),
+        );
     }
 }
 

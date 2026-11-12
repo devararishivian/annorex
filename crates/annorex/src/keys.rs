@@ -46,12 +46,13 @@ pub enum Action {
     CloseFile,
     Tree,
     FindFile,
+    Help,
     Quit,
 }
 
 impl Action {
     /// Every action, in the order of the documentation.
-    pub const ALL: [Action; 37] = [
+    pub const ALL: [Action; 38] = [
         Action::Left,
         Action::Right,
         Action::Down,
@@ -88,6 +89,7 @@ impl Action {
         Action::CloseFile,
         Action::Tree,
         Action::FindFile,
+        Action::Help,
         Action::Quit,
     ];
 
@@ -130,6 +132,7 @@ impl Action {
             Action::CloseFile => "close_file",
             Action::Tree => "tree",
             Action::FindFile => "find_file",
+            Action::Help => "help",
             Action::Quit => "quit",
         }
     }
@@ -173,7 +176,52 @@ impl Action {
             Action::CloseFile => "W",
             Action::Tree => "T",
             Action::FindFile => "ctrl+p",
+            Action::Help => "?",
             Action::Quit => "q",
+        }
+    }
+
+    /// What the action does, for the help screen.
+    pub const fn help(self) -> &'static str {
+        match self {
+            Action::Left => "move left",
+            Action::Right => "move right",
+            Action::Down => "move down",
+            Action::Up => "move up",
+            Action::WordNext => "next word",
+            Action::WordPrev => "previous word",
+            Action::LineStart => "start of the line",
+            Action::LineEnd => "end of the line",
+            Action::HalfPageDown => "half a page down",
+            Action::HalfPageUp => "half a page up",
+            Action::Top => "go to the start",
+            Action::Bottom => "go to the end",
+            Action::Select => "select characters",
+            Action::SelectLines => "select lines",
+            Action::Comment => "comment",
+            Action::Delete => "mark for removal",
+            Action::Replace => "replace",
+            Action::Label => "edit the note at the cursor",
+            Action::Annotations => "list of notes",
+            Action::Replies => "list of documents",
+            Action::Find => "find text",
+            Action::FindNext => "next match",
+            Action::FindPrev => "previous match",
+            Action::Send => "send the notes",
+            Action::SendWithNote => "general note, then send",
+            Action::Paste => "paste without Enter",
+            Action::Copy => "copy the notes",
+            Action::Discard => "discard the notes",
+            Action::Edit => "edit (in the list)",
+            Action::Remove => "delete (in the list)",
+            Action::Reload => "read again",
+            Action::PrevFile => "previous file",
+            Action::NextFile => "next file",
+            Action::CloseFile => "close the file",
+            Action::Tree => "file tree",
+            Action::FindFile => "find a file",
+            Action::Help => "this help",
+            Action::Quit => "close the viewer",
         }
     }
 
@@ -382,7 +430,7 @@ mod tests {
         assert_eq!(map.action(key(KeyCode::Char('d'), KeyModifiers::CONTROL)), Some(Action::HalfPageDown));
         assert_eq!(map.action(key(KeyCode::Char('d'), none)), Some(Action::Delete));
         assert_eq!(map.action(key(KeyCode::Char('q'), none)), Some(Action::Quit));
-        assert_eq!(map.action(key(KeyCode::Char('?'), none)), None);
+        assert_eq!(map.action(key(KeyCode::Char('?'), none)), Some(Action::Help));
     }
 
     #[test]

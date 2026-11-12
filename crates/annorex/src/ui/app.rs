@@ -165,6 +165,8 @@ pub struct App {
     pub(crate) focus: Focus,
     /// The text of the find input while the user types it.
     pub(crate) find_input: Option<String>,
+    /// The help screen is open. Any key closes it.
+    pub help_open: bool,
     pub(crate) query: Option<String>,
     /// A message for the footer.
     pub(crate) status: Option<String>,
@@ -243,6 +245,7 @@ impl App {
             reply_source: ReplySource::Ready,
             focus: Focus::Doc,
             find_input: None,
+            help_open: false,
             query: None,
             status: None,
             page: 20,
@@ -1019,6 +1022,10 @@ impl App {
             self.find_key(key);
             return Effect::None;
         }
+        if self.help_open {
+            self.help_open = false;
+            return Effect::None;
+        }
         match &self.screen {
             Screen::Error(_) => match key.code {
                 KeyCode::Char('r') => Effect::Reload,
@@ -1088,6 +1095,7 @@ impl App {
                 Some(Action::Top) => self.set_cursor_line(0),
                 Some(Action::Bottom) => self.set_cursor_line(self.doc.lines.len().saturating_sub(1)),
                 Some(Action::Find) => self.find_input = Some(String::new()),
+                Some(Action::Help) => self.help_open = true,
                 Some(Action::FindNext) => self.find_next(true, false),
                 Some(Action::FindPrev) => self.find_next(false, false),
                 Some(Action::Replies) => self.toggle_panel(PanelView::Replies),
@@ -1220,6 +1228,7 @@ impl App {
                 Some(Action::Right) if self.panel_view == PanelView::Tree => self.tree.expand(),
                 Some(Action::Find) if self.panel_view == PanelView::Tree => self.tree.start_filter(),
                 Some(Action::Quit) => return self.request_quit(),
+                Some(Action::Help) => self.help_open = true,
                 Some(Action::Reload) => {
                     self.reload_shown();
                     return Effect::Reload;
