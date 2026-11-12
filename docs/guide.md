@@ -97,6 +97,35 @@ open in the session, the action focuses it.
 The header shows the agent and its state, for example `claude (idle)` or `opencode (waiting for permission)`. Annorex
 reads the state again every 2 seconds.
 
+Annorex has two modes in the document. Block mode is the default. Text mode is for notes on a part of a block.
+
+### Block mode
+
+One block has the focus. A block is a heading, a paragraph, a list item (a nested item is its own block), a whole code
+block, a whole table, a whole quote, or a rule. In a plain text or code file, a block is a group of lines between blank
+lines. The focused block has a bar in the left margin. The action bar shows below it.
+
+| Key                     | Function                                                         |
+|-------------------------|------------------------------------------------------------------|
+| `j` / `k`, arrows       | Go to the next or the previous block                             |
+| `g` / `G`, `home` / `end` | Go to the first or the last block                              |
+| `ctrl+d` / `ctrl+u`     | Scroll half a page, then focus the first block in the view       |
+| `PageDown` / `PageUp`   | Scroll one page, then focus the first block in the view          |
+| `o`                     | Note on the block: looks good (no text, no editor)               |
+| `c` / `d` / `s`         | Note on the block: comment, remove, or replace (opens the editor) |
+| `e` / `x`               | Edit or delete the note of the block                             |
+| `enter`                 | Enter text mode at the start of the block                        |
+| `v`                     | Enter text mode and start a selection at the start of the block  |
+| `V`                     | Enter text mode with the lines of the block selected             |
+| `h` `l` `w` `b` `0` `$` | Enter text mode at the start of the block, then do the move      |
+
+A block that is taller than the screen scrolls first. `j` moves to the next block when the end of the block is visible.
+`k` works the same way upward. If several notes share one block, a numbered list shows. Press `1` to `9` to pick one.
+
+### Text mode
+
+Text mode has a free cursor and a character selection.
+
 | Key                     | Function                                                         |
 |-------------------------|------------------------------------------------------------------|
 | `j` / `k`, arrows       | Move down or up one line                                         |
@@ -107,9 +136,16 @@ reads the state again every 2 seconds.
 | `PageDown` / `PageUp`   | Move down or up one page                                         |
 | `g` / `G`               | Go to the start or the end                                       |
 | `v` / `V`               | Start a selection of characters or of lines                      |
-| `c` / `d` / `s`         | Annotate: comment, remove, or replace                            |
-| `L`                     | Edit the annotation at the cursor, or add a comment              |
-| `a`                     | Open or close the annotation list                                |
+| `o` / `c` / `d` / `s`   | Note on the selection, or on the line of the cursor: looks good, comment, remove, or replace |
+| `esc`                   | Clear the selection. Without a selection, go back to block mode  |
+| `n` / `N`               | Go to the next or the previous match (in text mode)              |
+
+### Keys in both modes
+
+| Key                     | Function                                                         |
+|-------------------------|------------------------------------------------------------------|
+| `L`                     | Edit the label of the note at the cursor                         |
+| `a`                     | Move the focus to the list of notes                              |
 | `S`                     | Send the notes to the agent                                      |
 | `M`                     | Write a general note, then send                                  |
 | `P`                     | Paste the notes into the agent input box, without Enter          |
@@ -118,21 +154,64 @@ reads the state again every 2 seconds.
 | `/`                     | Find text (the case is ignored)                                  |
 | `n` / `N`               | Go to the next or the previous match                             |
 | `p`                     | Open or close the list of replies and open files                 |
-| `enter` (in the list)   | Show the selected reply, or go to the annotation                 |
-| `e` / `x` (annotation list) | Edit or delete the annotation                                |
-| `esc`                   | Cancel the selection, the editor, or the list                    |
+| `tab`                   | Move the focus between the tree, the document, and the card rail |
 | `r`                     | Read the transcript again                                        |
 | `?`                     | Open the help screen                                             |
 | `q`, `ctrl+c`           | Close the viewer                                                 |
 
-In the editor, `enter` saves the annotation. `ctrl+j` or `alt+enter` adds a new line. `tab` changes the label.
+In the list of notes and on a card, `j` and `k` move between notes, `enter` goes to the note, and `e` and `x` edit
+and delete the note. `esc` returns to the document. In the list of replies, `enter` shows the selected reply.
+
+### The editor
+
+The editor is a floating box below the block, or above it when there is no room below. It has the buttons `save` and
+`cancel`. `enter` saves the note. `ctrl+j` or `alt+enter` adds a new line. `tab` changes the label. `esc` cancels.
+The note `looks good` needs no text, so it saves at once without the editor. The text of a remove note is optional.
+
+### The layout
 
 The layout changes with the size of the window:
 
-- 100 columns or more: the reply list is a panel on the right side.
-- 60 to 99 columns: the reply list is a panel at the bottom.
-- Less than 60 columns or less than 16 rows: the reply list covers the reply.
+- 120 columns or more: the file tree on the left (when the view has files), the document, and the card rail on the
+  right. The tree is 28 columns wide. The rail is 34 columns wide. Each note has a card in the rail.
+- 100 to 119 columns: the file tree on the left and the document. There is no rail. A dot in the color of the note
+  marks the note in the right margin of the block.
+- Less than 100 columns, or less than 16 rows: one column. The tree and the list of notes open over the document.
 - Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
+
+`T` hides the tree on the left and shows it again. Over a narrow window, `T` opens and closes the tree.
+The list of replies (`p`), the file finder (`ctrl+p`), and the session picker open in a box in the center, at all widths.
+
+The header shows the view, the agent and its state, and the position. On the right, it has the send button
+`[ Send N → agent ▸ ]`. With no notes, the button is dim: `[ Send ▸ ]`. While the agent works, the button adds
+`queued` for Claude Code or `steers` for Pi and OpenCode. After a send, it shows `[ Sent HH:MM ]`. The footer shows the
+keys of the current mode. Hints that do not fit are left out from the end. `? help` stays while it fits.
+
+The note colors are the 16 ANSI colors. Looks good has a green background. A comment is underlined in yellow. Remove is
+red and crossed out. Replace is magenta and crossed out.
+
+### The mouse
+
+Each mouse action has a key. The help screen does not list the mouse actions.
+
+| Where                      | Action       | Result                                                                  |
+|----------------------------|--------------|-------------------------------------------------------------------------|
+| List, document, tree, rail | Wheel        | Scroll the part under the pointer by 3 lines. The focus does not change |
+| Block                      | Click        | Focus the block (block mode)                                            |
+| Document text              | Drag         | Select characters (text mode). At the top or the bottom row, the document scrolls |
+| Document text              | Double click | Select the word                                                         |
+| Action bar button          | Click        | Add that note. Looks good saves at once. The others open the editor     |
+| Card                       | Click        | Focus the note and its block. The card shows `edit` and `remove` buttons |
+| Header send button         | Click        | The same as `S`, with the same dialog check and messages                |
+| Tree row                   | Click        | Open the file, or open or close the directory                           |
+| Row of a list or picker    | Click        | Open that reply, session, or file                                       |
+| Numbered list of notes     | Click        | Choose that note                                                        |
+| Footer hint                | Click        | Do that action                                                          |
+| Editor                     | Click `save` or `cancel` | Save or cancel. A click outside the editor does nothing     |
+| Help screen                | Click or wheel | Close the help screen                                                 |
+
+A question in the footer (`y/n`) and the find input take no mouse event. There is no right click and no hover action.
+If a drag does not select text for the Rex copy, use `v` to select and `Y` to copy the notes.
 
 Pi and OpenCode can have more than one session in the same directory. If Annorex cannot find the session of the agent
 with certainty, the list shows the sessions, newest first. Select one with `enter`. If Annorex finds no replies (for
@@ -141,19 +220,20 @@ example, the agent has not answered yet), the list says why, and `r` looks again
 ## Help screen
 
 Press `?` to open a help screen. It lists all keys from the live key map, so it shows your changes from `config.toml`.
-Press any key to close it. The config action name is `help`. The footer shows `S send` and `? help`.
+Press any key to close it. The config action name is `help`. The footer shows `? help`.
 
 ## Annotate and send
 
-1. Move to the text. Press `v` and move to select characters, or press `V` to select lines. Without a selection, the
-   action uses the line of the cursor.
-2. Press `c` to comment, `d` to mark the text for removal, or `s` to replace it. Type the note. Press `enter`.
-3. Press `S` to send. The header shows `[Send N ▸]`, with N the number of annotations. After a send, it shows
-   `[Sent HH:MM]`.
+1. Move to the block with `j` and `k`. To note a part of a block, press `v` and move to select characters, or press
+   `V` to select lines. Without a selection in text mode, the note uses the line of the cursor.
+2. Press `o` to mark the text as good. This needs no text. Press `c` to comment, `d` to mark the text for removal, or
+   `s` to replace it. Type the note. Press `enter`.
+3. Press `S` or click the send button in the header. The button shows `[ Send N → agent ▸ ]`, with N the number of
+   notes. After a send, it shows `[ Sent HH:MM ]`.
 
 The export is Markdown. It starts with `# Annotations on last reply`. For an older reply, the name is
 `earlier reply (HH:MM)` in your local time. Each annotation has a number, the line numbers, the quoted source text, and
-your note as a quote.
+your note as a quote. The text before the quote names the type: `Comment on:`, `Remove this:`, or `Looks good:`.
 
 Annorex does not add a second identical note. The note must match in kind, range, label, and text. The footer says
 `Already saved.`
@@ -182,7 +262,7 @@ command palette. The action `annorex_files` opens the file viewer over the full 
 in the session, the action focuses it. Then Annorex ignores the new paths. The root is the work directory of the agent process.
 
 The viewer starts with the file tree. Open a file with `enter`. Annorex shows a Markdown file (`.md` or `.markdown`) as
-Markdown. It shows all other files as plain text with line numbers. It shows the text of a file with control characters
+Markdown, without line numbers. It shows all other files as plain text with line numbers. It shows the text of a file with control characters
 removed.
 
 You can open up to 50 files. Each file has its own annotations and its own draft. The keys for replies work in a file
@@ -190,7 +270,7 @@ too. These keys are for files:
 
 | Key        | Function                                                                         |
 |------------|----------------------------------------------------------------------------------|
-| `T`        | Open or close the file tree                                                      |
+| `T`        | Hide or show the file tree (over a narrow window: open or close it)             |
 | `ctrl+p`   | Open the fuzzy find of files                                                     |
 | `p`        | Open or close the list of replies and open files (`●` marks unsent notes)        |
 | `[` / `]`  | Show the previous or the next document (replies first, then the open files)      |

@@ -48,37 +48,94 @@ require("annorex").setup{ bin = "/path/to/annorex" }
 
 1. Focus the pane of Claude Code, Pi, or OpenCode.
 2. Press `cmd+shift+a` to review the last reply. Press `cmd+shift+f` to review the files.
-3. Move with `j` and `k`. Press `v` to start a selection and move to extend it.
-4. Press `c` to comment, `d` to mark the text for removal, or `s` to replace it. Type the note. Press `enter`.
-5. Press `S` to send all notes to the agent.
+3. Move from block to block with `j` and `k`. A block is a paragraph, a list item, a heading, a code block, or a table.
+   The action bar shows below the block.
+4. Press `o` to mark the block as good, `c` to comment, `d` to mark it for removal, or `s` to replace it. `o` needs no
+   text. The other keys open an editor. Type the note. Press `enter`.
+5. To annotate a part of a block, press `v` and move to select text. This is text mode. Press `esc` twice to go back
+   to block mode.
+6. Press `S` to send all notes to the agent.
 
 In the viewer, press `?` to see all keys.
 
+## The action bar and notes
+
+The block with the focus has a bar in the left margin. Below it, the action bar shows four buttons:
+`[o looks good] [c comment] [d remove] [s replace]`. A click on a button does the same as its key.
+
+The export of `o looks good` has the text `Looks good:` and the quote. The note needs no text. Press `e` later to add
+text.
+
+Notes show in place. Looks good has a green background. A comment is underlined in yellow. Remove is red and crossed
+out. Replace is magenta and crossed out. At 120 columns or more, each note has a card in a rail on the right. At 100 to
+119 columns, a dot in the note color marks the note in the right margin.
+
+The editor opens as a floating box near the block. It has the buttons `save` and `cancel`.
+
+Press `e` to edit and `x` to delete the note at the focus.
+
+## Layout
+
+The layout follows the size of the window.
+
+- 120 columns or more: the file tree (when there are files) on the left, the document, and the card rail on the right.
+- 100 to 119 columns: the file tree on the left and the document. There is no card rail.
+- Less than 100 columns, or less than 16 rows: one column. The tree and the lists open over the document.
+- Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
+
+The header shows the agent and the send button `[ Send N → agent ▸ ]`. The footer shows the keys of the current mode.
+The list of replies (`p`), the file finder (`ctrl+p`), and the session picker open in a box in the center.
+
 ## Key cheatsheet
 
-| Key                  | Function                                                     |
-|----------------------|--------------------------------------------------------------|
-| `j` / `k`, `h` / `l` | Move by line or by character                                 |
-| `w` / `b`, `g` / `G` | Move by word, or go to the start or the end                  |
-| `v` / `V`            | Select characters or lines                                   |
-| `c` / `d` / `s`      | Annotate: comment, remove, or replace                        |
-| `S`                  | Send the notes to the agent                                  |
-| `M`                  | Write a general note, then send                              |
-| `P`                  | Paste the notes into the agent input box, without Enter      |
-| `Y`                  | Copy the notes                                               |
-| `X`                  | Discard the notes of the document on the screen (asks first) |
-| `a`                  | Open or close the annotation list                            |
-| `p`                  | Open or close the list of replies and open files             |
-| `T`                  | Open or close the file tree                                  |
-| `ctrl+p`             | Find a file by name                                          |
-| `[` / `]`            | Show the previous or the next open file                      |
-| `W`                  | Close the file on the screen                                 |
-| `/`                  | Find text                                                    |
-| `r`                  | Read the transcript and the files again                      |
-| `?`                  | Show the help screen                                         |
-| `q`                  | Close the viewer                                             |
+| Key                  | Function                                                                 |
+|----------------------|--------------------------------------------------------------------------|
+| `j` / `k`            | Block mode: go to the next or the previous block                         |
+| `g` / `G`            | Go to the first or the last block (the start or the end in text mode)    |
+| `ctrl+d` / `ctrl+u`  | Scroll half a page                                                       |
+| `v` / `V`            | Select characters or lines (text mode)                                   |
+| `h` `l` `w` `b`      | Move by character or by word (text mode)                                 |
+| `o`                  | Note: looks good (no text needed)                                        |
+| `c` / `d` / `s`      | Note: comment, remove, or replace                                        |
+| `e` / `x`            | Edit or delete the note at the focus                                     |
+| `esc`                | Clear the selection. A second press goes back to block mode              |
+| `S`                  | Send the notes to the agent                                              |
+| `M`                  | Write a general note, then send                                          |
+| `P`                  | Paste the notes into the agent input box, without Enter                  |
+| `Y`                  | Copy the notes                                                           |
+| `X`                  | Discard the notes of the document on the screen (asks first)             |
+| `a`                  | Move the focus to the list of notes                                      |
+| `p`                  | Open or close the list of replies and open files                         |
+| `T`                  | Hide or show the file tree                                               |
+| `tab`                | Move the focus between the tree, the document, and the card rail         |
+| `ctrl+p`             | Find a file by name                                                      |
+| `[` / `]`            | Show the previous or the next open file                                  |
+| `W`                  | Close the file on the screen                                             |
+| `/`                  | Find text                                                                |
+| `r`                  | Read the transcript and the files again                                  |
+| `?`                  | Show the help screen                                                     |
+| `q`                  | Close the viewer                                                         |
 
 For all keys and for the config file, see [docs/guide.md](docs/guide.md).
+
+## Mouse
+
+Each mouse action has a key. The help screen does not list the mouse actions.
+
+| Where                    | Action       | Result                                                                   |
+|--------------------------|--------------|--------------------------------------------------------------------------|
+| List, document, tree, rail | Wheel      | Scroll the part under the pointer by 3 lines                             |
+| Block                    | Click        | Focus the block                                                          |
+| Document text            | Drag         | Select characters (text mode)                                            |
+| Document text            | Double click | Select the word                                                          |
+| Action bar button        | Click        | Add that note. Looks good saves at once. The others open the editor      |
+| Card                     | Click        | Focus the note and its block. The card shows `edit` and `remove`         |
+| Header `Send` button     | Click        | The same as `S`                                                          |
+| Tree row                 | Click        | Open the file, or open or close the directory                            |
+| Row of a list or picker  | Click        | Open that reply or session                                               |
+| Footer hint              | Click        | Do that action                                                           |
+| Editor                   | Click `save` or `cancel` | Save or cancel. A click outside the editor does nothing      |
+| Help screen              | Click        | Close the help screen                                                    |
 
 ## Theme
 
@@ -102,6 +159,9 @@ read the theme.
 - **`alt+enter` does not add a new line.** Set the Option key to send Alt in the Rex settings. Or use `ctrl+j`.
 - **The pane zoom ends when Annorex opens.** This is Rex behavior. Rex does not restore the zoom when you close the
   viewer.
+- **A sideways swipe hides the Rex sidebar.** Turn off the Rex setting "Use a gesture to toggle the sidebar".
+- **Drag does not select text for Rex copy.** Annorex uses the mouse, so a drag selects text in Annorex. To copy text,
+  select it with `v` and copy the notes with `Y`.
 - **"pane too small".** Make the window larger than 40 columns and 10 rows.
 
 ## How Annorex differs from plannotator-tui
