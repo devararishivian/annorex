@@ -188,30 +188,129 @@ fn esc_cancels_the_editor() {
 }
 
 #[test]
-fn tab_cycles_labels() {
-    let config = Config {
-        labels: vec!["question".into(), "looks good".into(), "must fix".into(), "needs test".into()],
-        ..Config::default()
-    };
-    let mut app = app_with("alpha beta\n", &config);
-    press(&mut app, "c");
-    let mut seen = Vec::new();
-    for _ in 0..5 {
-        press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
-        seen.push(app.editor().expect("editor").label.clone());
-    }
-    let expected = [Some("question"), Some("looks good"), Some("must fix"), Some("needs test"), None];
-    assert_eq!(seen, expected.map(|label| label.map(str::to_owned)));
+fn box_has_no_label_line() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "cx");
+    let screen = render(&mut app, 80, 24);
+    assert!(!screen.contains("label:"), "{screen}");
+    assert!(!screen.contains("Comment on"), "{screen}");
+    assert!(!screen.contains("tab label"), "{screen}");
 }
 
 #[test]
-fn a_label_alone_makes_a_valid_comment() {
+fn tab_does_not_set_a_label() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "cx");
+    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    let editor = app.editor().expect("editor");
+    assert_eq!((editor.label.clone(), editor.text.as_str()), (None, "x"));
+    press(&mut app, "\n");
+    assert_eq!(app.review().expect("review").annotations[0].label, None);
+}
+
+#[test]
+fn box_title_names_kind_and_line() {
+    let mut app = app("alpha beta\n\nsecond block\n");
+    press(&mut app, "jc");
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.contains("Comment · line 3"), "{screen}");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "vlls");
+    assert!(render(&mut app, 80, 24).contains("Replace · line 3"));
+}
+
+#[test]
+fn empty_box_shows_hint() {
     let mut app = app("alpha beta\n");
     press(&mut app, "c");
-    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
-    press(&mut app, "\n");
-    let a = &app.review().expect("review").annotations[0];
-    assert_eq!(a.label.as_deref(), Some("question"));
+    assert!(render(&mut app, 80, 24).contains("Write your comment"));
+    press(&mut app, "x");
+    assert!(!render(&mut app, 80, 24).contains("Write your comment"));
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "vlls");
+    assert!(render(&mut app, 80, 24).contains("Write the new text"));
+}
+
+fn thirty_rows() -> String {
+    (1..=30).map(|n| format!("row {n}")).collect::<Vec<_>>().join("\n")
+}
+
+/// The row of the top border and the row of the bottom border of the note box.
+fn box_rows(screen: &str) -> (usize, usize) {
+    let top = screen
+        .lines()
+        .position(|line| line.contains('┌') && line.contains("Comment"))
+        .unwrap_or_else(|| panic!("no box in\n{screen}"));
+    (top, row_of(screen, " save "))
+}
+
+#[test]
+fn long_paste_shows_its_end() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "c");
+    app.handle_paste(&thirty_rows());
+    let screen = render(&mut app, 80, 24);
+    let (top, bottom) = box_rows(&screen);
+    assert_eq!(bottom - top - 1, 8, "8 text rows:\n{screen}");
+    assert!(screen.lines().nth(bottom - 1).is_some_and(|line| line.contains("row 30")), "{screen}");
+    assert!(screen.lines().nth(top + 1).is_some_and(|line| line.contains("row 23")), "{screen}");
+    assert!(!screen.contains("row 22"), "{screen}");
+}
+
+#[test]
+fn pgup_scrolls_box() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "c");
+    app.handle_paste(&thirty_rows());
+    render(&mut app, 80, 24);
+    press_key(&mut app, KeyCode::PageUp, KeyModifiers::NONE);
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.contains("row 22") && screen.contains("row 15"), "{screen}");
+    assert!(!screen.contains("row 30"), "{screen}");
+    press_key(&mut app, KeyCode::PageDown, KeyModifiers::NONE);
+    assert!(render(&mut app, 80, 24).contains("row 30"));
+    press_key(&mut app, KeyCode::PageUp, KeyModifiers::NONE);
+    press(&mut app, "z");
+    assert!(render(&mut app, 80, 24).contains("row 30"), "typing follows the end again");
+}
+
+#[test]
+fn wheel_over_box_scrolls() {
+    use ratatui::crossterm::event::{MouseEvent, MouseEventKind};
+    let mut app = app("alpha beta\n");
+    press(&mut app, "c");
+    app.handle_paste(&thirty_rows());
+    let screen = render(&mut app, 80, 24);
+    let row = row_of(&screen, "row 30");
+    let wheel = |kind| MouseEvent {
+        kind,
+        column: 10,
+        row: u16::try_from(row).expect("row"),
+        modifiers: KeyModifiers::NONE,
+    };
+    app.handle_mouse(wheel(MouseEventKind::ScrollUp));
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.contains("row 20") && !screen.contains("row 30"), "{screen}");
+    app.handle_mouse(wheel(MouseEventKind::ScrollDown));
+    assert!(render(&mut app, 80, 24).contains("row 30"));
+    assert!(app.editor().is_some(), "the wheel keeps the box open");
+}
+
+#[test]
+fn hint_says_shift_enter_when_supported() {
+    let mut app = app("alpha beta\n");
+    app.shift_enter = true;
+    press(&mut app, "c");
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.contains("shift+enter new line") && !screen.contains("ctrl+j"), "{screen}");
+}
+
+#[test]
+fn hint_says_ctrl_j_when_not() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "c");
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.contains("ctrl+j new line") && !screen.contains("shift+enter"), "{screen}");
 }
 
 #[test]
@@ -383,9 +482,6 @@ fn two_notes() -> App {
     press(&mut app, "vllc");
     press(&mut app, "Which page?\n");
     press(&mut app, "jjVjd");
-    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
-    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
-    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
     press(&mut app, "Not needed.\n");
     app
 }
@@ -402,7 +498,6 @@ fn snapshot_editor_80x24() {
     let mut app = app("We change the login page.\n\n- one\n- two\n");
     press(&mut app, "wwvllllc");
     press(&mut app, "Which page?");
-    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
     insta::assert_snapshot!(render(&mut app, 80, 24));
 }
 
@@ -979,7 +1074,7 @@ fn many_paragraphs() -> String {
 fn editor_rows(screen: &str) -> (usize, usize) {
     let top = screen
         .lines()
-        .position(|line| line.contains('┌') && line.contains("comment"))
+        .position(|line| line.contains('┌') && line.contains("Comment"))
         .unwrap_or_else(|| panic!("no editor in\n{screen}"));
     let bottom = row_of(screen, " save ");
     (top, bottom)
@@ -1037,7 +1132,6 @@ fn snapshot_editor_floating_80x24() {
     let mut app = app(bar_text());
     press(&mut app, "jc");
     press(&mut app, "Which page?");
-    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
     insta::assert_snapshot!(render(&mut app, 80, 24));
 }
 

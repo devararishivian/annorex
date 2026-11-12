@@ -9,11 +9,12 @@ use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::app::{App, BoxView, Confirm, Docked, Focus, ReplySource, Screen, StartView, match_ranges};
 use super::bar::{draw_action_bar, shown_rows};
 use super::cards::{Side, draw_pick, draw_side, range_style, rank, split_markers};
+use super::editor::MAX_ROWS;
 use super::focus::{Mode, View};
 use super::hits::Hit;
 use crate::agent::Agent;
@@ -78,7 +79,8 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
         Screen::Viewer => {}
     }
     if app.editor.is_some() {
-        return vec![plain("enter save"), plain("ctrl+j new line"), plain("tab label"), plain("esc cancel")];
+        let newline = if app.shift_enter { "shift+enter new line" } else { "ctrl+j new line" };
+        return vec![plain("enter save"), plain(newline), plain("esc cancel")];
     }
     if app.pick.is_some() {
         return vec![plain("1-9 choose"), plain("esc close")];
@@ -1341,37 +1343,32 @@ fn draw_annotation_list(frame: &mut Frame, app: &mut App, area: Rect, borders: B
 /// The editor box. `area` is the text area of the document. The box has the width of the text
 /// and goes directly below the rows of its range. When it does not fit there, it goes directly
 /// above them. When it fits in neither place, or the range is not on the screen, it stays in `area`.
+/// The text shows in at most `MAX_ROWS` rows. The box follows the end of the text, or shows the rows
+/// from the scroll of the editor.
 fn draw_editor(frame: &mut Frame, app: &mut App, area: Rect) {
     let Some(editor) = app.editor.clone() else { return };
     if area.width < 4 || area.height < 5 {
         return;
     }
     let width = usize::from(area.width - 2);
-    let quote = app.doc.source.get(editor.range.clone()).unwrap_or_default();
-    let mut first = quote.lines().next().unwrap_or_default().to_owned();
-    if quote.lines().count() > 1 {
-        first.push('…');
+    let rows = wrap_rows(&format!("{}▏", editor.text), width);
+    let last = rows.len().saturating_sub(MAX_ROWS);
+    let top = editor.scroll.map_or(last, |scroll| scroll.min(last));
+    if let Some(open) = app.editor.as_mut() {
+        open.rows = rows.len();
     }
-    let word = match editor.kind {
-        Kind::Comment => "Comment on",
-        Kind::Delete => "Remove",
-        Kind::LooksGood => "Looks good",
-        Kind::Replace => "Replace",
-    };
-    let label = editor.label.as_deref().unwrap_or("none");
-    let mut lines = vec![
-        Line::styled(
-            fit(&format!("{word}: \"{first}\""), area.width - 2),
-            Style::new().add_modifier(Modifier::DIM),
-        ),
-        Line::raw(fit(&format!("label: {label}"), area.width - 2)),
-    ];
-    let typed = format!("{}▏", editor.text);
-    let text_rows: usize = typed.split('\n').map(|line| line.width().max(1).div_ceil(width)).sum();
-    lines.extend(typed.split('\n').map(|line| Line::raw(line.to_owned())));
-    let fixed = 2 + lines.len() - typed.split('\n').count();
-    // At most 10 rows with the borders.
-    let height = u16::try_from(text_rows.min(6) + fixed).unwrap_or(u16::MAX).min(area.height);
+    let dim = Style::new().add_modifier(Modifier::DIM);
+    let mut lines: Vec<Line> =
+        rows.iter().skip(top).take(MAX_ROWS).map(|row| Line::raw(row.clone())).collect();
+    if editor.text.is_empty() {
+        let hint = match (editor.general, editor.kind) {
+            (true, _) => "Write your note",
+            (false, Kind::Replace) => "Write the new text",
+            (false, _) => "Write your comment",
+        };
+        lines = vec![Line::from(vec![Span::raw("▏"), Span::styled(hint, dim)])];
+    }
+    let height = u16::try_from(lines.len() + 2).unwrap_or(u16::MAX).min(area.height);
     let anchor = if editor.general { None } else { shown_rows(app, &editor.range) };
     let y = editor_top(area, height, anchor);
     let rect = Rect::new(area.x, y, area.width, height);
@@ -1379,12 +1376,40 @@ fn draw_editor(frame: &mut Frame, app: &mut App, area: Rect) {
     let title = if editor.general {
         " Note ".to_owned()
     } else {
-        format!(" {prefix}{} · l.{} ", kind_word(editor.kind), app.doc.line_of(editor.range.start))
+        let word = match editor.kind {
+            Kind::Comment => "Comment",
+            Kind::Delete => "Remove",
+            Kind::LooksGood => "Looks good",
+            Kind::Replace => "Replace",
+        };
+        format!(" {prefix}{word} · line {} ", app.doc.line_of(editor.range.start))
     };
     frame.render_widget(Clear, rect);
+    app.hits.push(rect, Hit::Editor);
     let block = Block::new().borders(Borders::ALL).title(title);
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(block), rect);
+    frame.render_widget(Paragraph::new(lines).block(block), rect);
     draw_editor_buttons(frame, app, rect);
+}
+
+/// Split `text` into rows of at most `width` columns. A new line starts a row. A long line breaks at
+/// the column, so the rows are exact and the scroll can count them.
+fn wrap_rows(text: &str, width: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    for line in text.split('\n') {
+        let mut row = String::new();
+        let mut used = 0;
+        for c in line.chars() {
+            let w = c.width().unwrap_or(0);
+            if used + w > width && !row.is_empty() {
+                rows.push(std::mem::take(&mut row));
+                used = 0;
+            }
+            row.push(c);
+            used += w;
+        }
+        rows.push(row);
+    }
+    rows
 }
 
 /// The first row of the editor box of `height` rows. `anchor` is the first and the last row of the

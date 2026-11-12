@@ -4,9 +4,7 @@ expression: "render(&mut app, 80, 24)"
 ---
 Annorex · last reply · claude (idle) · reply 1/1                      [ Send ▸ ]
  We change the login page.
- ┌ comment · l.1 ────────────────────────────────────────────────────────────┐
- │Comment on: "the l"                                                        │
- │label: question                                                            │
+ ┌ Comment · line 1 ─────────────────────────────────────────────────────────┐
  │Which page?▏                                                               │
  └─────────────────────────────────────────────────────────── save ─ cancel ─┘
 
@@ -25,4 +23,6 @@ Annorex · last reply · claude (idle) · reply 1/1                      [ Send 
 
 
 
-line 1/4                   enter save · ctrl+j new line · tab label · esc cancel
+
+
+line 1/4                               enter save · ctrl+j new line · esc cancel

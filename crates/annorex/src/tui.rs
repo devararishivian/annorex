@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 use annorex_hosts::roots::Roots;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event};
+use ratatui::crossterm::terminal::supports_keyboard_enhancement;
 use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGTERM};
 
 use crate::agent::{Agent, NOT_AGENT, detect};
@@ -173,7 +174,8 @@ pub fn run_viewer(
     let pane = target.to_owned();
     std::thread::spawn(move || watch_status(&watcher, &pane, &sender));
 
-    let mut terminal = start_terminal(init_terminal, restore_terminal)?;
+    let (mut terminal, enhanced) = start_terminal(init_terminal, restore_terminal)?;
+    app.shift_enter = enhanced;
     let result = run_loop(
         &mut app,
         &mut CrosstermEvents,
@@ -187,10 +189,14 @@ pub fn run_viewer(
     result
 }
 
+/// True while the keyboard enhancement flags of this process are on in the terminal.
+static ENHANCED: AtomicBool = AtomicBool::new(false);
+
 /// Raw mode, the alternate screen, bracketed paste (so a paste is one event and not keys), and the
-/// mouse. A panic turns the paste mode and the mouse off before the panic hook of ratatui restores
-/// the rest.
-fn init_terminal() -> io::Result<DefaultTerminal> {
+/// mouse. When the terminal supports it, also the keyboard enhancement that makes `shift+enter` a
+/// key of its own [src: crossterm 0.29.0]. The bool is true when that is on. A panic turns the
+/// paste mode, the mouse, and the enhancement off before the panic hook of ratatui restores the rest.
+fn init_terminal() -> io::Result<(DefaultTerminal, bool)> {
     static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
     let terminal = ratatui::try_init()?;
     // `try_init` adds its hook at each call. The hook of this function goes in one time only, so a
@@ -203,12 +209,24 @@ fn init_terminal() -> io::Result<DefaultTerminal> {
         }));
     });
     ratatui::crossterm::execute!(io::stdout(), event::EnableBracketedPaste, event::EnableMouseCapture)?;
-    Ok(terminal)
+    let enhanced = supports_keyboard_enhancement().unwrap_or(false);
+    if enhanced {
+        // Set the flag first: a failed push still gets one pop, which a terminal ignores.
+        ENHANCED.store(true, Ordering::SeqCst);
+        ratatui::crossterm::execute!(
+            io::stdout(),
+            event::PushKeyboardEnhancementFlags(event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )?;
+    }
+    Ok((terminal, enhanced))
 }
 
 fn stop_paste_and_mouse() {
     let _ =
         ratatui::crossterm::execute!(io::stdout(), event::DisableMouseCapture, event::DisableBracketedPaste);
+    if ENHANCED.swap(false, Ordering::SeqCst) {
+        let _ = ratatui::crossterm::execute!(io::stdout(), event::PopKeyboardEnhancementFlags);
+    }
 }
 
 fn restore_terminal() {

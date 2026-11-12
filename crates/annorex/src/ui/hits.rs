@@ -26,6 +26,8 @@ pub(crate) enum Hit {
     TreeRow(usize),
     ListRow(usize),
     Hint(Action),
+    /// The note box outside its buttons. The wheel scrolls the text.
+    Editor,
     EditorSave,
     EditorCancel,
     BoxInside,

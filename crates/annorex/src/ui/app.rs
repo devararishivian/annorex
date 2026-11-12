@@ -254,6 +254,9 @@ pub struct App {
     /// document, a press of the mouse, and another document close it.
     pub(crate) bar_open: bool,
     pub(crate) editor: Option<Editor>,
+    /// True when the terminal reports `shift+enter` as its own key. The tui sets it at start. The
+    /// footer of the note box then names `shift+enter` and not `ctrl+j`.
+    pub shift_enter: bool,
     /// The annotation that the editor changes. `None` for a new annotation.
     pub(crate) editing_id: Option<u64>,
     /// Editors of replies that are not on the screen.
@@ -345,6 +348,7 @@ impl App {
             selection: None,
             bar_open: false,
             editor: None,
+            shift_enter: false,
             editing_id: None,
             parked: HashMap::new(),
             annotation_index: 0,
@@ -1142,7 +1146,7 @@ impl App {
     pub fn handle_paste(&mut self, text: &str) -> Effect {
         let Some(editor) = &mut self.editor else { return Effect::None };
         self.status = None;
-        editor.text.push_str(&sanitize(text));
+        editor.push_str(&sanitize(text));
         Effect::SaveDraft
     }
 
@@ -2089,6 +2093,8 @@ impl App {
             range: annotation.range.clone(),
             text,
             label: annotation.label.clone(),
+            scroll: None,
+            rows: 0,
             general: false,
         });
         self.editing_id = Some(id);
@@ -2097,7 +2103,7 @@ impl App {
 
     fn editor_key(&mut self, key: KeyEvent) -> Effect {
         let Some(editor) = &mut self.editor else { return Effect::None };
-        let result = editor.handle_key(key, &self.config.labels);
+        let result = editor.handle_key(key);
         self.editor_done(result)
     }
 

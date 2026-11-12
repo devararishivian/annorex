@@ -370,6 +370,13 @@ impl App {
     /// The wheel: scroll the part under the pointer. The focus and the selection stay.
     fn wheel(&mut self, (column, row): (u16, u16), forward: bool) {
         let hit = self.hits.at(column, row).copied();
+        if let Some(editor) = self.editor.as_mut() {
+            // The note box takes the wheel over itself. Elsewhere the wheel does nothing.
+            if matches!(hit, Some(Hit::Editor | Hit::EditorSave | Hit::EditorCancel)) {
+                editor.scroll_rows(forward, super::editor::WHEEL_ROWS);
+            }
+            return;
+        }
         let boxed = self.boxed.is_some() || matches!(self.screen, Screen::Picker(_));
         let part = match hit {
             Some(Hit::ListRow(_) | Hit::BoxInside) if boxed => Part::Box,

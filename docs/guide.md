@@ -118,8 +118,8 @@ above it.
 | `g` / `G`, `home` / `end` | Go to the first or the last block. Without a focus, only scroll to the top or the end |
 | `ctrl+d` / `ctrl+u`     | Scroll half a page, then focus the first block in the view. Without a focus, only scroll |
 | `PageDown` / `PageUp`   | Scroll one page, then focus the first block in the view          |
-| `o`                     | Note on the block: looks good (no text, no editor)               |
-| `c` / `d` / `s`         | Note on the block: comment, remove, or replace (opens the editor) |
+| `o`                     | Note on the block: looks good (no text, no note box)               |
+| `c` / `d` / `s`         | Note on the block: comment, remove, or replace (opens the note box) |
 | `e` / `x`               | Edit or delete the note of the block                             |
 | `enter`                 | Show the action bar for the whole block. Block mode stays. Without a focus, focus the first block on the screen first |
 | `v`                     | Enter text mode and start a selection at the start of the block  |
@@ -156,13 +156,15 @@ The action bar shows after you finish a selection:
 - after `enter` on the focused block,
 - after the `v` or `V` that ends a selection.
 
-After `enter`, the selection is the whole focused block. It shows on the row above the selection. When there is no row above, it shows on the row below. It starts at the first
-column of the selection. Near the right edge, it moves left to stay in the document. It has four items:
+After `enter`, the selection is the whole focused block. The action bar shows on the row above the selection. When
+there is no row above, it shows on the row below. It starts at the first column of the selection. Near the right edge,
+it moves left to stay in the document. It has four items:
 `o ✓ looks good`, `c 💬 comment`, `d ✕ remove`, and `s ⇄ replace`. Each item has the icon and the color of its note
 card. A click on an item does the same as its key.
 
 The keys `o`, `c`, `d`, and `s` also work without the action bar. A focus move with `j` or `k` does not show the action
-bar. Any other key and a click close it. A saved note and an open editor close it too. The help screen only covers it.
+bar. Each key in the document closes it, except `?`: the help screen only covers it. A mouse click outside the action
+bar closes it. The mouse wheel does not close it. A saved note and an open note box close it too.
 
 ### Keys in both modes
 
@@ -186,11 +188,20 @@ bar. Any other key and a click close it. A saved note and an open editor close i
 In the list of notes and on a card, `j` and `k` move between notes, `enter` goes to the note, and `e` and `x` edit
 and delete the note. `esc` returns to the document. In the list of replies, `enter` shows the selected reply.
 
-### The editor
+### The note box
 
-The editor is a floating box below the block, or above it when there is no room below. It has the buttons `save` and
-`cancel`. `enter` saves the note. `ctrl+j` or `alt+enter` adds a new line. `tab` changes the label. `esc` cancels.
-The note `looks good` needs no text, so it saves at once without the editor. The text of a remove note is optional.
+The note box is a floating box below the block, or above it when there is no room below. The title names the kind and
+the line, for example `Comment · line 20`. An empty box shows a dim hint. It has the buttons `save` and `cancel`.
+
+`enter` saves the note. A new line needs `shift+enter` when the terminal supports it. Otherwise, use `ctrl+j`. The
+footer shows the key that works. `alt+enter` also adds a new line. `esc` cancels.
+
+The box shows at most 8 rows of text. It follows the end of the text. Press `PgUp` or `PgDn`, or use the mouse wheel
+over the box, to scroll. A new character goes back to the end. A comment needs text. The note `looks good` needs no text,
+so it saves at once without the box. The text of a remove note is optional.
+
+The config file can still have `labels`. Annorex reads them and does not use them. A note with a label keeps its label
+in the export.
 
 ### The layout
 
@@ -228,14 +239,14 @@ Each mouse action has a key. The help screen does not list the mouse actions.
 | Block                      | Click        | Focus the block (block mode)                                            |
 | Document text              | Drag         | Select characters (text mode). At the top or the bottom row, the document scrolls. The action bar shows at the release |
 | Document text              | Double click | Select the word and show the action bar                                 |
-| Action bar item            | Click        | Add that note. Looks good saves at once. The others open the editor     |
+| Action bar item            | Click        | Add that note. Looks good saves at once. The others open the note box   |
 | Card                       | Click        | Focus the note and its block. The card shows `edit` and `remove` buttons |
 | Header send button         | Click        | The same as `S`, with the same dialog check and messages                |
 | Tree row                   | Click        | Open the file, or open or close the directory                           |
 | Row of a list or picker    | Click        | Open that reply, session, or file                                       |
 | Numbered list of notes     | Click        | Choose that note                                                        |
 | Footer hint                | Click        | Do that action                                                          |
-| Editor                     | Click `save` or `cancel` | Save or cancel. A click outside the editor does nothing     |
+| Note box                   | Click `save` or `cancel` | Save or cancel. A click outside the box does nothing. The wheel over the box scrolls it |
 | Help screen                | Click or wheel | Close the help screen                                                 |
 
 A question in the footer (`y/n`) and the find input take no mouse event. There is no right click and no hover action.
@@ -358,7 +369,7 @@ Annorex reads `$XDG_CONFIG_HOME/annorex/config.toml`, or `~/.config/annorex/conf
 
 ```toml
 enter_delay_ms = 300       # 50 to 5000: the wait between the paste and Enter
-labels = ["nit"]           # more labels, after question, looks good, and must fix
+labels = ["nit"]           # read, but the note box does not use labels
 changes_turns = 1          # 1 to 20: how many of your prompts the tree looks back for changed files
 
 [keys]
