@@ -402,6 +402,16 @@ fn new_picker_starts_at_the_first_session() {
 }
 
 #[test]
+fn a_change_to_the_picker_closes_the_help() {
+    let mut app = viewer();
+    press(&mut app, "?");
+    assert!(app.help_open);
+    app.set_picker(vec![candidate("a"), candidate("b")]);
+    assert!(!app.help_open);
+    assert_eq!(press(&mut app, "\n"), Effect::PickSession(0));
+}
+
+#[test]
 fn ctrl_keys_do_not_type_in_find() {
     let mut app = viewer();
     press(&mut app, "/ab");

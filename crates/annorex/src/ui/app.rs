@@ -792,6 +792,7 @@ impl App {
             self.set_reply_source(ReplySource::Pick(candidates));
             return;
         }
+        self.help_open = false;
         self.screen = Screen::Picker(candidates);
         self.picker_index = 0;
     }
