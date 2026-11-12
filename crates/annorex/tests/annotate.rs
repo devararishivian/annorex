@@ -247,13 +247,16 @@ fn annotation_list_goes_edits_and_deletes() {
     press(&mut app, "first\n");
     press(&mut app, "$vhc");
     press(&mut app, "second\n");
+    // At 110 columns the window has no card rail, so the list opens beside the document.
+    let _ = render(&mut app, 110, 24);
     press(&mut app, "a");
-    let screen = render(&mut app, 120, 24);
+    let screen = render(&mut app, 110, 24);
     assert!(screen.contains("1  l.1  comment") && screen.contains("2  l.1  comment"), "{screen}");
     press(&mut app, "j");
     press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     assert_eq!(app.cursor(), 14, "enter moves the cursor to the start of the range");
-    press(&mut app, "ae");
+    // The list starts at the note at the cursor: the second one. `k` goes to the first.
+    press(&mut app, "ake");
     assert_eq!(app.editor().expect("editor").text, "first");
     press(&mut app, "!\n");
     assert_eq!(app.review().expect("review").in_order()[0].note, "first!");
@@ -288,8 +291,7 @@ fn each_reply_keeps_its_own_review() {
     press(&mut app, "pj");
     press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     assert!(app.review().is_none_or(annorex::review::Review::is_empty), "reply 2 has no annotation");
-    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
-    press(&mut app, "k");
+    press(&mut app, "pk");
     press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
     assert_eq!(app.review().expect("review").annotations.len(), 1);
 }
@@ -338,7 +340,7 @@ fn a_new_change_makes_a_sent_draft_unsent() {
     assert!(!render(&mut app, 80, 12).contains("unsent"));
     press(&mut app, "jcy\n");
     assert!(app.draft(Agent::ClaudeCode, "s").expect("draft").sent_at.is_none());
-    assert!(render(&mut app, 80, 12).contains("unsent 1"));
+    assert!(render(&mut app, 100, 12).contains("unsent 1"));
 }
 
 #[test]
@@ -347,7 +349,7 @@ fn header_lists_unsent_replies() {
     press(&mut app, "cone\n");
     press(&mut app, "pjj");
     press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-    press(&mut app, "cthree\n");
+    press(&mut app, "cthree\np");
     let screen = render(&mut app, 120, 24);
     let header = screen.lines().next().expect("header");
     assert!(header.contains("unsent 1,3"), "{header}");
@@ -457,17 +459,17 @@ fn send_with_note_puts_the_note_first() {
 fn send_marks_the_draft_sent_and_a_change_makes_it_unsent_again() {
     use annorex::send::{SendResult, apply_result};
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
-    assert!(header(&mut app).contains("[Send 1 ▸]"), "{}", header(&mut app));
+    assert!(header(&mut app).contains("[ Send 1 → claude ▸ ]"), "{}", header(&mut app));
     assert!(apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z"));
     let draft = app.draft(Agent::ClaudeCode, "s").expect("draft");
     assert_eq!(draft.sent_at.as_deref(), Some("2026-11-09T14:30:00Z"));
     assert_eq!(draft.review.annotations.len(), 1, "the annotations stay");
     assert!(app.status().is_some_and(|text| text.contains("If the agent prompt had text")));
     let top = header(&mut app);
-    assert!(top.contains("[Sent 14:30]") && !top.contains("unsent"), "{top}");
+    assert!(top.contains("[ Sent 14:30 ]") && !top.contains("unsent"), "{top}");
     press(&mut app, "cmore\n");
     assert!(app.draft(Agent::ClaudeCode, "s").expect("draft").sent_at.is_none());
-    assert!(header(&mut app).contains("[Send 1 ▸]"));
+    assert!(header(&mut app).contains("[ Send 1 → claude ▸ ]"));
 }
 
 #[test]
@@ -494,10 +496,10 @@ fn sending_clears_the_general_note() {
 fn working_state_shows_queued_or_steers() {
     let working = || Safety::Clear { state: Some("working".to_owned()) };
     let mut claude = annotated(Agent::ClaudeCode, working());
-    assert!(header(&mut claude).contains("[Send 1 · queued ▸]"), "{}", header(&mut claude));
+    assert!(header(&mut claude).contains("[ Send 1 · queued → claude ▸ ]"), "{}", header(&mut claude));
     for agent in [Agent::Pi, Agent::OpenCode] {
         let mut app = annotated(agent, working());
-        assert!(header(&mut app).contains("[Send 1 · steers ▸]"), "{}", header(&mut app));
+        assert!(header(&mut app).contains("[ Send 1 · steers → "), "{}", header(&mut app));
     }
 }
 
@@ -807,8 +809,8 @@ fn hints_follow_rebound_keys() {
     let mut app = app_with("alpha beta\n", &config);
     let screen = render(&mut app, 120, 12);
     let footer = screen.lines().last().expect("footer").to_owned();
-    assert!(footer.contains("y/d/s annotate") && footer.contains("Z quit"), "{footer}");
-    assert!(!footer.contains("c/d/s") && !footer.contains(" q quit"), "{footer}");
+    assert!(footer.contains("o y d s note"), "{footer}");
+    assert!(!footer.contains("c d s"), "{footer}");
     let mut error =
         App::new(state_of(Agent::ClaudeCode, idle()), Screen::Error("x".to_owned()), Vec::new(), &config);
     let footer = render(&mut error, 120, 12).lines().last().expect("footer").to_owned();

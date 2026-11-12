@@ -1,66 +1,74 @@
-//! The layout of the viewer for the size of the pane (spec §8.2).
+//! The layout of the viewer for the size of the pane.
 
 use ratatui::layout::Rect;
 
 /// Below this size, the viewer shows only "pane too small".
 pub const MIN_WIDTH: u16 = 40;
 pub const MIN_HEIGHT: u16 = 10;
-/// Below this size, the viewer has one column and the panel opens over the document.
-pub const SINGLE_BELOW_WIDTH: u16 = 60;
+/// Below this height, the viewer has one column at all widths.
 pub const SINGLE_BELOW_HEIGHT: u16 = 16;
-/// From this width, the panel is at the side. Below it, the panel is at the bottom.
+/// From this width, the tree is on the left of the document. Below it, the viewer has one column, and
+/// the tree and the annotation list open over the document.
 pub const SIDE_FROM_WIDTH: u16 = 100;
-/// The height of the bottom panel.
-pub const BOTTOM_PANEL_ROWS: u16 = 8;
+/// From this width, the card rail is on the right of the document.
+pub const RAIL_FROM_WIDTH: u16 = 120;
+/// The width of the tree on the left, with its border.
+pub const TREE_WIDTH: u16 = 28;
+/// The width of the card rail on the right.
+pub const RAIL_WIDTH: u16 = 34;
 
 /// The areas of the viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
     TooSmall,
-    /// One column. The panel, when open, covers the document (`overlay`).
+    /// One column. The tree, the annotation list, and the boxes open over the document.
     Single {
         header: Rect,
         doc: Rect,
-        overlay: Rect,
         footer: Rect,
     },
-    /// The panel is below the document. A closed panel has zero height.
-    Bottom {
+    /// The tree on the left when the view has files and the tree is open, the document, and the card
+    /// rail on the right from `RAIL_FROM_WIDTH` columns.
+    Wide {
         header: Rect,
+        tree: Option<Rect>,
         doc: Rect,
-        panel: Rect,
-        footer: Rect,
-    },
-    /// The panel is at the right of the document. A closed panel has zero width.
-    Side {
-        header: Rect,
-        doc: Rect,
-        panel: Rect,
+        rail: Option<Rect>,
         footer: Rect,
     },
 }
 
-/// The layout for `area`.
-pub fn compute(area: Rect, panel_open: bool) -> Layout {
+impl Layout {
+    /// The header and the footer, or `None` when the pane is too small.
+    pub fn header_footer(&self) -> Option<(Rect, Rect)> {
+        match *self {
+            Layout::TooSmall => None,
+            Layout::Single { header, footer, .. } | Layout::Wide { header, footer, .. } => {
+                Some((header, footer))
+            }
+        }
+    }
+}
+
+/// The layout for `area`. `has_tree` is true when the view has files. `tree_open` is false after the
+/// user hid the tree.
+pub fn compute(area: Rect, has_tree: bool, tree_open: bool) -> Layout {
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         return Layout::TooSmall;
     }
     let header = Rect::new(area.x, area.y, area.width, 1);
     let footer = Rect::new(area.x, area.bottom() - 1, area.width, 1);
     let body = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
-    if area.width < SINGLE_BELOW_WIDTH || area.height < SINGLE_BELOW_HEIGHT {
-        return Layout::Single { header, doc: body, overlay: body, footer };
+    if area.width < SIDE_FROM_WIDTH || area.height < SINGLE_BELOW_HEIGHT {
+        return Layout::Single { header, doc: body, footer };
     }
-    if area.width < SIDE_FROM_WIDTH {
-        let rows = if panel_open { BOTTOM_PANEL_ROWS.min(body.height) } else { 0 };
-        let doc = Rect::new(body.x, body.y, body.width, body.height - rows);
-        let panel = Rect::new(body.x, doc.bottom(), body.width, rows);
-        return Layout::Bottom { header, doc, panel, footer };
-    }
-    let columns = if panel_open { (area.width / 3).clamp(30, 50) } else { 0 };
-    let doc = Rect::new(body.x, body.y, body.width - columns, body.height);
-    let panel = Rect::new(doc.right(), body.y, columns, body.height);
-    Layout::Side { header, doc, panel, footer }
+    let tree = (has_tree && tree_open).then(|| Rect::new(body.x, body.y, TREE_WIDTH, body.height));
+    let rail = (area.width >= RAIL_FROM_WIDTH)
+        .then(|| Rect::new(body.right() - RAIL_WIDTH, body.y, RAIL_WIDTH, body.height));
+    let left = tree.map_or(body.x, Rect::right);
+    let right = rail.map_or(body.right(), |rail| rail.x);
+    let doc = Rect::new(left, body.y, right - left, body.height);
+    Layout::Wide { header, tree, doc, rail, footer }
 }
 
 #[cfg(test)]
@@ -75,79 +83,65 @@ mod tests {
     }
 
     #[test]
-    fn side_at_100_columns() {
-        match compute(area(100, 30), true) {
-            Layout::Side { header, doc, panel, footer } => {
-                assert_eq!(header, Rect::new(0, 0, 100, 1));
-                assert_eq!(footer, Rect::new(0, 29, 100, 1));
-                assert_eq!(panel, Rect::new(67, 1, 33, 28));
-                assert_eq!(doc, Rect::new(0, 1, 67, 28));
+    fn tree_doc_and_rail_at_120_columns() {
+        match compute(area(120, 40), true, true) {
+            Layout::Wide { header, tree, doc, rail, footer } => {
+                assert_eq!(header, Rect::new(0, 0, 120, 1));
+                assert_eq!(footer, Rect::new(0, 39, 120, 1));
+                assert_eq!(tree, Some(Rect::new(0, 1, 28, 38)));
+                assert_eq!(rail, Some(Rect::new(86, 1, 34, 38)));
+                assert_eq!(doc, Rect::new(28, 1, 58, 38));
             }
-            other => panic!("expected Side, got {other:?}"),
-        }
-        match compute(area(218, 69), true) {
-            Layout::Side { panel, .. } => assert_eq!(panel.width, 50),
-            other => panic!("expected Side, got {other:?}"),
+            other => panic!("expected Wide, got {other:?}"),
         }
     }
 
     #[test]
-    fn closed_side_panel_gives_the_document_the_space() {
-        match compute(area(120, 40), false) {
-            Layout::Side { doc, panel, .. } => {
-                assert_eq!(doc.width, 120);
-                assert_eq!(panel.width, 0);
-            }
-            other => panic!("expected Side, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn bottom_at_99_and_60_columns() {
-        for width in [99, 60] {
-            match compute(area(width, 24), true) {
-                Layout::Bottom { doc, panel, .. } => {
-                    assert_eq!(panel, Rect::new(0, 15, width, 8));
-                    assert_eq!(doc, Rect::new(0, 1, width, 14));
+    fn tree_and_doc_from_100_to_119_columns() {
+        for width in [100, 119] {
+            match compute(area(width, 30), true, true) {
+                Layout::Wide { tree, doc, rail, .. } => {
+                    assert_eq!(tree, Some(Rect::new(0, 1, 28, 28)));
+                    assert_eq!(rail, None);
+                    assert_eq!(doc, Rect::new(28, 1, width - 28, 28));
                 }
-                other => panic!("expected Bottom at {width}, got {other:?}"),
+                other => panic!("expected Wide at {width}, got {other:?}"),
             }
-        }
-        match compute(area(80, 24), false) {
-            Layout::Bottom { doc, panel, .. } => {
-                assert_eq!(doc.height, 22);
-                assert_eq!(panel.height, 0);
-            }
-            other => panic!("expected Bottom, got {other:?}"),
         }
     }
 
     #[test]
-    fn single_at_59_columns() {
-        match compute(area(59, 30), true) {
-            Layout::Single { doc, overlay, .. } => {
-                assert_eq!(doc, Rect::new(0, 1, 59, 28));
-                assert_eq!(overlay, doc);
+    fn a_hidden_tree_or_no_files_gives_the_document_the_space() {
+        for (has_tree, tree_open) in [(true, false), (false, true)] {
+            match compute(area(120, 40), has_tree, tree_open) {
+                Layout::Wide { tree, doc, .. } => {
+                    assert_eq!(tree, None);
+                    assert_eq!(doc, Rect::new(0, 1, 86, 38));
+                }
+                other => panic!("expected Wide, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn one_column_below_100_columns_or_16_rows() {
+        match compute(area(99, 30), true, true) {
+            Layout::Single { doc, .. } => assert_eq!(doc, Rect::new(0, 1, 99, 28)),
             other => panic!("expected Single, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn single_at_15_rows() {
-        assert!(matches!(compute(area(200, 15), true), Layout::Single { .. }));
-        assert!(matches!(compute(area(200, 16), true), Layout::Side { .. }));
+        assert!(matches!(compute(area(200, 15), true, true), Layout::Single { .. }));
+        assert!(matches!(compute(area(200, 16), true, true), Layout::Wide { .. }));
     }
 
     #[test]
     fn too_small_at_39_columns_or_9_rows() {
-        assert_eq!(compute(area(39, 30), true), Layout::TooSmall);
-        assert_eq!(compute(area(80, 9), true), Layout::TooSmall);
-        assert_eq!(compute(area(0, 0), true), Layout::TooSmall);
+        assert_eq!(compute(area(39, 30), true, true), Layout::TooSmall);
+        assert_eq!(compute(area(80, 9), true, true), Layout::TooSmall);
+        assert_eq!(compute(area(0, 0), true, true), Layout::TooSmall);
     }
 
     #[test]
     fn exactly_40_by_10_is_not_too_small() {
-        assert!(matches!(compute(area(40, 10), true), Layout::Single { .. }));
+        assert!(matches!(compute(area(40, 10), true, true), Layout::Single { .. }));
     }
 }

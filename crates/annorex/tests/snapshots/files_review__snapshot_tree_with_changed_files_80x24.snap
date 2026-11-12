@@ -2,27 +2,27 @@
 source: crates/annorex/tests/files_review.rs
 expression: "render(&mut app, 80, 24)"
 ---
-Annorex · files · claude (idle)                                     no file open
-
-
-
-
-
-
-
-
-
-
-
-
-
-
- Tree ──────────────────────────────────────────────────────────────────────────
-* changed by the agent: 2
-   *src/main.rs
-   *README.md
-  ▸ src/
-   *README.md
-
-
-j/k move  enter open  h/l close/open  / filter  esc close  q quit
+Annorex · files · claude (idle) · no file open                        [ Send ▸ ]
+┌ Tree ────────────────────────────────────────────────────────────────────────┐
+│* changed by the agent: 2                                                     │
+│   *src/main.rs                                                               │
+│   *README.md                                                                 │
+│  ▸ src/                                                                      │
+│   *README.md                                                                 │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+block 0/0  j/k move · enter open · h/l close/open · / filter · esc back · ? help

@@ -124,17 +124,33 @@ pub(crate) enum Confirm {
 /// Where the keys go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Focus {
+    /// The file tree, on the left or over the document.
+    Tree,
     Doc,
-    Panel,
+    /// The card rail, or the annotation list where the window has no rail.
+    Rail,
+    /// The centered box: the reply list or the finder.
+    Box,
 }
 
-/// What the side panel lists.
+/// What the centered box shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PanelView {
+pub(crate) enum BoxView {
+    /// The documents, or the sessions to choose from.
     Replies,
-    Annotations,
-    Tree,
     Finder,
+}
+
+/// The parts that the last frame showed beside the document.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools, reason = "independent facts of one frame")]
+pub(crate) struct Docked {
+    /// The tree on the left.
+    pub(crate) tree: bool,
+    /// The card rail or the annotation list on the right.
+    pub(crate) rail: bool,
+    /// The card rail on the right (from 120 columns).
+    pub(crate) cards: bool,
 }
 
 /// The text that the user marked with `v` or `V`. The anchor is where the marking started.
@@ -143,6 +159,9 @@ pub(crate) enum Selection {
     Chars { anchor: usize },
     Lines { anchor: usize },
 }
+
+/// The footer message when a note key finds no text, in block mode and in text mode.
+const NOTHING_TO_ANNOTATE: &str = "nothing to annotate";
 
 /// The footer message when the text under a note is gone after a new read.
 const MOVED_TEXT: &str = "The text under your note is gone after the new read, so the editor closed.";
@@ -167,7 +186,15 @@ pub struct App {
     pub(crate) width: u16,
     /// The index of the first visual row on the screen in the last frame.
     pub(crate) top_row: usize,
-    pub(crate) panel_open: bool,
+    /// False after the user hid the tree.
+    pub(crate) tree_open: bool,
+    /// The annotation list is open where the window has no card rail.
+    pub(crate) list_open: bool,
+    /// The centered box, when one is open.
+    pub(crate) boxed: Option<BoxView>,
+    /// What the last frame showed beside the document. The keys `tab`, `T`, and `a` use it.
+    pub(crate) docked: Docked,
+    /// The cursor of the reply list.
     pub(crate) panel_index: usize,
     pub(crate) picker_index: usize,
     pub(crate) reply_source: ReplySource,
@@ -181,8 +208,6 @@ pub struct App {
     pub(crate) status: Option<String>,
     /// The height of the document area in the last frame.
     pub(crate) page: usize,
-    /// True when the last frame showed the panel over the document.
-    pub(crate) overlay: bool,
     /// The clickable areas of the last frame.
     pub(crate) hits: HitMap,
     /// The time zone of the times in the reply list. The default is the system zone.
@@ -198,7 +223,6 @@ pub struct App {
     pub(crate) editing_id: Option<u64>,
     /// Editors of replies that are not on the screen.
     parked: HashMap<String, Editing>,
-    pub(crate) panel_view: PanelView,
     pub(crate) annotation_index: usize,
     /// The annotation that waits for `y` or `n`.
     pub(crate) confirm: Option<Confirm>,
@@ -258,7 +282,10 @@ impl App {
             mode: Mode::Block(0),
             width: 0,
             top_row: 0,
-            panel_open: false,
+            tree_open: true,
+            list_open: false,
+            boxed: None,
+            docked: Docked::default(),
             panel_index: 0,
             picker_index: 0,
             reply_source: ReplySource::Ready,
@@ -268,7 +295,6 @@ impl App {
             query: None,
             status: None,
             page: 20,
-            overlay: false,
             hits: HitMap::default(),
             zone: jiff::tz::TimeZone::system(),
             config: config.clone(),
@@ -278,7 +304,6 @@ impl App {
             editor: None,
             editing_id: None,
             parked: HashMap::new(),
-            panel_view: PanelView::Replies,
             annotation_index: 0,
             confirm: None,
             pick: None,
@@ -347,9 +372,8 @@ impl App {
         self.replies.push(Reply { id, text: loaded.text, at: None });
         self.screen = Screen::Viewer;
         // A file on the screen is the work now: the choice of a session waits in the reply list.
-        if matches!(self.reply_source, ReplySource::Pick(_)) && self.panel_view == PanelView::Replies {
-            self.panel_open = false;
-            self.focus = Focus::Doc;
+        if matches!(self.reply_source, ReplySource::Pick(_)) && self.boxed == Some(BoxView::Replies) {
+            self.close_box();
         }
         self.show_reply(self.replies.len() - 1);
         self.sync_watch();
@@ -435,9 +459,16 @@ impl App {
 
     /// Show the file tree. The viewer starts with it when no file is open.
     pub fn open_tree(&mut self) {
-        if !(self.panel_open && self.panel_view == PanelView::Tree) {
-            self.toggle_panel(PanelView::Tree);
-        }
+        self.tree_open = true;
+        self.boxed = None;
+        self.focus_tree();
+    }
+
+    /// Give the tree the focus. The user sees the changed files now, so the banner about them ends.
+    fn focus_tree(&mut self) {
+        self.focus = Focus::Tree;
+        self.tree.stop_filter();
+        self.new_changed = 0;
     }
 
     /// Show the tree with a directory open and the cursor on it.
@@ -501,8 +532,7 @@ impl App {
     /// raises the banner.
     pub fn changed_list(&mut self, list: Vec<PathBuf>) {
         let fresh = list.iter().filter(|path| !self.tree.is_changed(path)).count();
-        let tree_open = self.panel_open && self.panel_view == PanelView::Tree;
-        if self.changes_seen && !tree_open {
+        if self.changes_seen && self.focus != Focus::Tree {
             self.new_changed += fresh;
         }
         self.changes_seen = true;
@@ -763,6 +793,9 @@ impl App {
     /// Put the annotations, the open editor, and the parked editors of changed replies on their
     /// quoted text again. An editor whose text is gone closes, and the footer says so.
     fn place_again(&mut self, changed: &[(String, String, String)]) {
+        if !changed.is_empty() {
+            self.pick = None;
+        }
         for (id, old, new) in changed {
             if let Some(review) = self.reviews.get_mut(id) {
                 review.reanchor(new);
@@ -840,9 +873,8 @@ impl App {
     pub fn set_reply_source(&mut self, source: ReplySource) {
         self.picker_index = 0;
         if matches!(source, ReplySource::Pick(_)) && self.shown_id.is_none() {
-            self.panel_open = true;
-            self.panel_view = PanelView::Replies;
-            self.focus = Focus::Panel;
+            self.boxed = Some(BoxView::Replies);
+            self.focus = Focus::Box;
         }
         self.reply_source = source;
         self.screen = Screen::Viewer;
@@ -867,6 +899,8 @@ impl App {
         let id = reply.id.clone();
         self.selected = index;
         self.panel_index = index;
+        // The text can be new, so the ids of the numbered pick can be stale.
+        self.pick = None;
         self.doc = match self.files.get(&id) {
             Some(file) => Doc::for_kind(file.kind, &reply.text),
             None => Doc::parse(&reply.text),
@@ -886,7 +920,6 @@ impl App {
             self.mode = Mode::Block(0);
             self.cursor = self.block_start(0).unwrap_or(self.cursor);
             self.confirm = None;
-            self.pick = None;
             self.annotation_index = 0;
             self.shown_id = Some(id.clone());
             if let Some(editing) = self.parked.remove(&id) {
@@ -1084,8 +1117,10 @@ impl App {
                 }
             }
             Screen::Viewer => match self.focus {
-                Focus::Panel => self.panel_key(key),
+                Focus::Tree => self.tree_key(key),
                 Focus::Doc => self.doc_key(key),
+                Focus::Rail => self.rail_key(key),
+                Focus::Box => self.box_key(key),
             },
         }
     }
@@ -1112,7 +1147,7 @@ impl App {
             KeyCode::PageUp => self.move_cursor(-signed(self.page.max(1))),
             KeyCode::Home => self.set_cursor_line(0),
             KeyCode::End => self.set_cursor_line(self.doc.lines.len().saturating_sub(1)),
-            KeyCode::Tab if self.panel_open => self.focus = Focus::Panel,
+            KeyCode::Tab => self.cycle_focus(),
             KeyCode::Esc => self.escape(),
             _ => match self.action_of(key) {
                 Some(Action::Quit) => return self.request_quit(),
@@ -1136,13 +1171,13 @@ impl App {
                 Some(Action::Help) => self.help_open = true,
                 Some(Action::FindNext) => self.find_next(true, false),
                 Some(Action::FindPrev) => self.find_next(false, false),
-                Some(Action::Replies) => self.toggle_panel(PanelView::Replies),
-                Some(Action::Annotations) => self.toggle_panel(PanelView::Annotations),
+                Some(Action::Replies) => self.toggle_box(BoxView::Replies),
+                Some(Action::Annotations) => self.toggle_list(),
                 Some(Action::PrevFile) if self.root.is_some() => self.step_file(false),
                 Some(Action::NextFile) if self.root.is_some() => self.step_file(true),
                 Some(Action::CloseFile) if self.shown_file().is_some() => self.begin_close(),
-                Some(Action::Tree) if self.root.is_some() => self.toggle_panel(PanelView::Tree),
-                Some(Action::FindFile) if self.root.is_some() => self.toggle_panel(PanelView::Finder),
+                Some(Action::Tree) if self.root.is_some() => self.toggle_tree(),
+                Some(Action::FindFile) if self.root.is_some() => self.toggle_box(BoxView::Finder),
                 Some(Action::Select) => self.toggle_selection(false),
                 Some(Action::SelectLines) => self.toggle_selection(true),
                 Some(Action::Comment) => return self.begin_new(Kind::Comment),
@@ -1168,47 +1203,115 @@ impl App {
         Effect::None
     }
 
-    fn toggle_panel(&mut self, view: PanelView) {
-        if self.panel_open && self.panel_view == view {
-            self.panel_open = false;
+    /// The parts that `tab` moves through, in order: the tree, the document, and the rail. A part
+    /// counts when the last frame showed it, or when it has the focus.
+    fn focus_parts(&self) -> Vec<Focus> {
+        let mut parts = Vec::new();
+        if self.root.is_some() && (self.docked.tree || self.focus == Focus::Tree) {
+            parts.push(Focus::Tree);
+        }
+        parts.push(Focus::Doc);
+        if self.docked.rail || self.focus == Focus::Rail {
+            parts.push(Focus::Rail);
+        }
+        parts
+    }
+
+    /// `tab`: give the focus to the next part on the screen.
+    fn cycle_focus(&mut self) {
+        let parts = self.focus_parts();
+        let at = parts.iter().position(|&part| part == self.focus).unwrap_or(0);
+        match parts.get((at + 1) % parts.len()).copied().unwrap_or(Focus::Doc) {
+            Focus::Tree => self.focus_tree(),
+            other => self.focus = other,
+        }
+    }
+
+    /// The tree key: hide the tree on the left, close the tree over the document, or show the tree
+    /// with the focus.
+    fn toggle_tree(&mut self) {
+        if self.docked.tree {
+            self.tree_open = false;
+            if self.focus == Focus::Tree {
+                self.focus = Focus::Doc;
+            }
+        } else if self.focus == Focus::Tree {
             self.focus = Focus::Doc;
+        } else {
+            self.open_tree();
+        }
+    }
+
+    /// The annotation key: the focus goes to the card rail or to the annotation list, or back to the
+    /// document. Where the window has no rail, the list opens and closes.
+    fn toggle_list(&mut self) {
+        let beside = self.list_open && self.docked.rail && !self.docked.cards;
+        if self.focus == Focus::Rail || beside {
+            self.list_open = false;
+            if self.focus == Focus::Rail {
+                self.focus = Focus::Doc;
+            }
             return;
         }
-        self.panel_open = true;
-        self.panel_view = view;
-        self.focus = Focus::Panel;
+        self.list_open = true;
+        self.boxed = None;
+        self.focus = Focus::Rail;
+        // Start at the first note at the focus of the document, else keep the place.
+        let here = self.notes_here().first().copied();
+        let order: Vec<u64> =
+            self.review().map(|r| r.in_order().iter().map(|a| a.id).collect()).unwrap_or_default();
+        match here.and_then(|id| order.iter().position(|&other| other == id)) {
+            Some(index) => self.annotation_index = index,
+            None => self.annotation_index = self.annotation_index.min(order.len().saturating_sub(1)),
+        }
+    }
+
+    /// Open the box, or close it when it shows the same view.
+    fn toggle_box(&mut self, view: BoxView) {
+        if self.boxed == Some(view) {
+            self.close_box();
+            return;
+        }
+        self.boxed = Some(view);
+        self.focus = Focus::Box;
         match view {
-            PanelView::Replies => self.panel_index = self.selected,
-            PanelView::Annotations => self.annotation_index = 0,
-            PanelView::Tree => {
-                self.tree.stop_filter();
-                self.new_changed = 0;
+            BoxView::Replies => self.panel_index = self.selected,
+            BoxView::Finder => self.finder = Finder::new(self.tree.file_paths()),
+        }
+    }
+
+    fn close_box(&mut self) {
+        self.boxed = None;
+        self.focus = Focus::Doc;
+    }
+
+    /// The keys that work the same in the tree, the rail, and the reply list. `None` when the key is
+    /// not one of them.
+    fn common_key(&mut self, action: Option<Action>) -> Option<Effect> {
+        match action? {
+            Action::Quit => return Some(self.request_quit()),
+            Action::Help => self.help_open = true,
+            Action::Reload => {
+                self.reload_shown();
+                return Some(Effect::Reload);
             }
-            PanelView::Finder => self.finder = Finder::new(self.tree.file_paths()),
+            Action::Replies => self.toggle_box(BoxView::Replies),
+            Action::Annotations => self.toggle_list(),
+            Action::Tree if self.root.is_some() => self.toggle_tree(),
+            Action::FindFile if self.root.is_some() => self.toggle_box(BoxView::Finder),
+            _ => return None,
         }
-    }
-
-    fn close_panel_if_overlay(&mut self) {
-        self.focus = Focus::Doc;
-        if self.overlay {
-            self.panel_open = false;
-        }
-    }
-
-    /// Close the tree or the finder, also when the panel is not an overlay.
-    fn close_panel(&mut self) {
-        self.panel_open = false;
-        self.focus = Focus::Doc;
+        Some(Effect::None)
     }
 
     /// The finder is a text field: letters go into the query.
     fn finder_key(&mut self, key: KeyEvent) -> Effect {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Esc => self.close_panel(),
+            KeyCode::Esc => self.close_box(),
             KeyCode::Enter => {
                 if let Some(path) = self.finder.selected().map(PathBuf::from) {
-                    self.close_panel();
+                    self.close_box();
                     return self.open_path(&path);
                 }
             }
@@ -1244,120 +1347,147 @@ impl App {
             self.tree.toggle();
         } else {
             let path = entry.path.clone();
-            self.close_panel();
+            self.tree.stop_filter();
+            self.focus = Focus::Doc;
             return self.open_path(&path);
         }
         Effect::None
     }
 
-    fn panel_key(&mut self, key: KeyEvent) -> Effect {
-        if self.panel_view == PanelView::Finder {
-            return self.finder_key(key);
-        }
-        if self.panel_view == PanelView::Tree && self.tree.filter().is_some() {
+    fn tree_key(&mut self, key: KeyEvent) -> Effect {
+        if self.tree.filter().is_some() {
             return self.tree_filter_key(key);
         }
         match key.code {
-            KeyCode::Enter if self.panel_view == PanelView::Tree => return self.tree_enter(),
-            KeyCode::Esc if self.panel_view == PanelView::Tree => self.close_panel(),
-            KeyCode::Enter => return self.panel_enter(),
-            KeyCode::Esc | KeyCode::Tab => self.close_panel_if_overlay(),
-            _ => match self.action_of(key) {
-                Some(Action::Tree) if self.root.is_some() => self.toggle_panel(PanelView::Tree),
-                Some(Action::FindFile) if self.root.is_some() => self.toggle_panel(PanelView::Finder),
-                Some(Action::Left) if self.panel_view == PanelView::Tree => self.tree.collapse(),
-                Some(Action::Right) if self.panel_view == PanelView::Tree => self.tree.expand(),
-                Some(Action::Find) if self.panel_view == PanelView::Tree => self.tree.start_filter(),
-                Some(Action::Quit) => return self.request_quit(),
-                Some(Action::Help) => self.help_open = true,
-                Some(Action::Reload) => {
-                    self.reload_shown();
-                    return Effect::Reload;
+            KeyCode::Enter => return self.tree_enter(),
+            KeyCode::Esc => self.focus = Focus::Doc,
+            KeyCode::Tab => self.cycle_focus(),
+            _ => {
+                let action = self.action_of(key);
+                match action {
+                    Some(Action::Left) => self.tree.collapse(),
+                    Some(Action::Right) => self.tree.expand(),
+                    Some(Action::Find) => self.tree.start_filter(),
+                    Some(Action::Down) => self.tree.move_by(1),
+                    Some(Action::Up) => self.tree.move_by(-1),
+                    _ => return self.common_key(action).unwrap_or(Effect::None),
                 }
-                Some(Action::Down) => self.panel_move(1),
-                Some(Action::Up) => self.panel_move(-1),
-                Some(Action::Replies) => self.toggle_panel(PanelView::Replies),
-                Some(Action::Annotations) => self.toggle_panel(PanelView::Annotations),
-                Some(Action::Edit) if self.panel_view == PanelView::Annotations => {
-                    if let Some(id) = self.listed_annotation() {
-                        self.panel_open = false;
-                        self.focus = Focus::Doc;
-                        return self.begin_edit(id);
-                    }
-                }
-                Some(Action::Remove) if self.panel_view == PanelView::Annotations => {
-                    self.confirm = self.listed_annotation().map(Confirm::Annotation);
-                }
-                _ => {}
-            },
+            }
         }
         Effect::None
     }
 
-    fn panel_move(&mut self, delta: isize) {
-        match self.panel_view {
-            PanelView::Replies => {
-                if let ReplySource::Pick(candidates) = &self.reply_source {
-                    let last = candidates.len().saturating_sub(1);
-                    self.picker_index = self.picker_index.saturating_add_signed(delta).min(last);
-                    return;
+    /// The keys of the card rail and of the annotation list.
+    fn rail_key(&mut self, key: KeyEvent) -> Effect {
+        match key.code {
+            KeyCode::Enter => self.rail_enter(),
+            KeyCode::Esc => self.focus = Focus::Doc,
+            KeyCode::Tab => self.cycle_focus(),
+            _ => {
+                let action = self.action_of(key);
+                match action {
+                    Some(Action::Down) => self.rail_move(1),
+                    Some(Action::Up) => self.rail_move(-1),
+                    Some(Action::Edit) => {
+                        if let Some(id) = self.listed_annotation() {
+                            self.list_open = false;
+                            self.focus = Focus::Doc;
+                            return self.begin_edit(id);
+                        }
+                    }
+                    Some(Action::Remove) => self.confirm = self.listed_annotation().map(Confirm::Annotation),
+                    _ => return self.common_key(action).unwrap_or(Effect::None),
                 }
-                let last = self.replies.len().saturating_sub(1);
-                self.panel_index = self.panel_index.saturating_add_signed(delta).min(last);
             }
-            PanelView::Annotations => {
-                let last = self.review().map_or(0, |review| review.annotations.len()).saturating_sub(1);
-                self.annotation_index = self.annotation_index.saturating_add_signed(delta).min(last);
-            }
-            PanelView::Tree => self.tree.move_by(delta),
-            PanelView::Finder => self.finder.move_by(delta),
         }
+        Effect::None
+    }
+
+    /// Move in the annotation list. On the card rail, the document shows the note of the focused card.
+    fn rail_move(&mut self, delta: isize) {
+        let last = self.review().map_or(0, |review| review.annotations.len()).saturating_sub(1);
+        self.annotation_index = self.annotation_index.saturating_add_signed(delta).min(last);
+        if self.docked.cards
+            && let Some(start) = self.listed_place()
+        {
+            self.cursor = start;
+            self.snap_cursor();
+            self.focus_near(start);
+        }
+    }
+
+    /// The start of the note under the cursor of the annotation list. `None` for a detached note.
+    fn listed_place(&self) -> Option<usize> {
+        let id = self.listed_annotation()?;
+        let annotation = self.review()?.annotations.iter().find(|a| a.id == id)?;
+        (!annotation.detached).then_some(annotation.range.start)
+    }
+
+    /// The keys of the centered box.
+    fn box_key(&mut self, key: KeyEvent) -> Effect {
+        let Some(view) = self.boxed else {
+            self.focus = Focus::Doc;
+            return self.doc_key(key);
+        };
+        if view == BoxView::Finder {
+            return self.finder_key(key);
+        }
+        match key.code {
+            KeyCode::Enter => return self.replies_enter(),
+            KeyCode::Esc => self.close_box(),
+            KeyCode::Tab => {}
+            _ => {
+                let action = self.action_of(key);
+                match action {
+                    Some(Action::Down) => self.replies_move(1),
+                    Some(Action::Up) => self.replies_move(-1),
+                    _ => return self.common_key(action).unwrap_or(Effect::None),
+                }
+            }
+        }
+        Effect::None
+    }
+
+    fn replies_move(&mut self, delta: isize) {
+        if let ReplySource::Pick(candidates) = &self.reply_source {
+            let last = candidates.len().saturating_sub(1);
+            self.picker_index = self.picker_index.saturating_add_signed(delta).min(last);
+            return;
+        }
+        let last = self.replies.len().saturating_sub(1);
+        self.panel_index = self.panel_index.saturating_add_signed(delta).min(last);
     }
 
     /// The id of the annotation under the cursor of the annotation list.
-    fn listed_annotation(&self) -> Option<u64> {
+    pub(super) fn listed_annotation(&self) -> Option<u64> {
         self.review()?.in_order().get(self.annotation_index).map(|annotation| annotation.id)
     }
 
-    fn panel_enter(&mut self) -> Effect {
-        match self.panel_view {
-            PanelView::Replies => {
-                if let ReplySource::Pick(candidates) = &self.reply_source {
-                    return if candidates.is_empty() {
-                        Effect::None
-                    } else {
-                        Effect::PickSession(self.picker_index)
-                    };
-                }
-                self.show_reply(self.panel_index);
-                self.close_panel_if_overlay();
-            }
-            PanelView::Annotations => {
-                let range = self.listed_annotation().and_then(|id| {
-                    self.review()?
-                        .annotations
-                        .iter()
-                        .find(|a| a.id == id)
-                        .map(|a| (a.range.start, a.detached))
-                });
-                match range {
-                    Some((_, true)) => {
-                        self.status = Some("the text of this annotation was not found".to_owned());
-                    }
-                    Some((start, false)) => {
-                        self.cursor = start;
-                        self.snap_cursor();
-                        self.focus_near(start);
-                        self.panel_open = false;
-                        self.focus = Focus::Doc;
-                    }
-                    None => {}
-                }
-            }
-            PanelView::Tree => return self.tree_enter(),
-            PanelView::Finder => {}
+    /// `enter` in the reply list: show the reply, or choose the session.
+    fn replies_enter(&mut self) -> Effect {
+        if let ReplySource::Pick(candidates) = &self.reply_source {
+            return if candidates.is_empty() { Effect::None } else { Effect::PickSession(self.picker_index) };
         }
+        self.show_reply(self.panel_index);
+        self.close_box();
         Effect::None
+    }
+
+    /// `enter` on the rail or in the annotation list: go to the note in the document.
+    fn rail_enter(&mut self) {
+        if self.listed_annotation().is_none() {
+            return;
+        }
+        match self.listed_place() {
+            None => self.status = Some("the text of this annotation was not found".to_owned()),
+            Some(start) => {
+                self.cursor = start;
+                self.snap_cursor();
+                self.focus_near(start);
+                self.list_open = false;
+                self.focus = Focus::Doc;
+            }
+        }
     }
 
     fn confirm_key(&mut self, key: KeyEvent, what: Confirm) -> Effect {
@@ -1663,20 +1793,12 @@ impl App {
             .or_else(|| self.doc.lines.get(self.cursor_line()).map(|line| line.source.clone()))
     }
 
-    /// Why a note key does nothing.
-    fn no_text(&self) -> &'static str {
-        match self.mode {
-            Mode::Block(_) => "nothing to annotate",
-            Mode::Text => "there is no text here to annotate",
-        }
-    }
-
     fn begin_new(&mut self, kind: Kind) -> Effect {
         if self.shown_id.is_none() {
             return Effect::None;
         }
         let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
-            self.status = Some(self.no_text().to_owned());
+            self.status = Some(NOTHING_TO_ANNOTATE.to_owned());
             return Effect::None;
         };
         self.editor = Some(Editor::new(kind, range));
@@ -1688,7 +1810,7 @@ impl App {
     pub fn add_looks_good(&mut self) -> Effect {
         let Some(reply) = self.shown_id.clone() else { return Effect::None };
         let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
-            self.status = Some(self.no_text().to_owned());
+            self.status = Some(NOTHING_TO_ANNOTATE.to_owned());
             return Effect::None;
         };
         let review = self.reviews.entry(reply.clone()).or_default();
@@ -1719,7 +1841,7 @@ impl App {
 
     /// The ids of the notes at the focus, in document order: the notes on the focused block in block
     /// mode, the notes at the cursor in text mode. Detached notes are left out.
-    fn notes_here(&self) -> Vec<u64> {
+    pub(super) fn notes_here(&self) -> Vec<u64> {
         let Some(review) = self.review() else { return Vec::new() };
         let block = self.focus_range();
         review
@@ -1727,7 +1849,7 @@ impl App {
             .into_iter()
             .filter(|a| !a.detached)
             .filter(|a| match &block {
-                Some(block) => a.range.start < block.end && block.start < a.range.end,
+                Some(block) => overlaps(&a.range, block),
                 None => a.range.contains(&self.cursor),
             })
             .map(|a| a.id)
@@ -2002,6 +2124,11 @@ impl App {
             self.cursor = stop;
         }
     }
+}
+
+/// True when two source ranges share a byte.
+fn overlaps(a: &Range<usize>, b: &Range<usize>) -> bool {
+    a.start < b.end && b.start < a.end
 }
 
 /// A character of a word: a letter, a digit, or an underscore.

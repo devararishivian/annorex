@@ -13,8 +13,13 @@ use crate::review::Kind;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Hit {
     Block(usize),
-    DocCell { row: u16, col: u16 },
+    DocCell {
+        row: u16,
+        col: u16,
+    },
     Action(Kind),
+    /// The action bar row outside its buttons. A click there does nothing.
+    Bar,
     Card(u64),
     CardEdit(u64),
     CardRemove(u64),

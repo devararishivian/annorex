@@ -126,7 +126,8 @@ fn header_names_view_agent_state_and_reply() {
     let screen = render(&mut viewer(), 120, 40);
     let header = screen.lines().next().expect("header");
     assert!(header.starts_with("Annorex · last reply · claude (idle)"), "{header}");
-    assert!(header.ends_with("reply 1/3"), "{header}");
+    assert!(header.contains("claude (idle) · reply 1/3"), "{header}");
+    assert!(header.ends_with("[ Send ▸ ]"), "{header}");
 }
 
 #[test]
@@ -163,6 +164,7 @@ fn cursor_line_stays_visible_when_moving_down() {
     let cursor = app.cursor_line();
     let screen = render(&mut app, 80, 24);
     let start: String = app.doc().lines[cursor].plain().chars().take(12).collect();
+    assert!(!start.trim().is_empty(), "the check needs text on the cursor line");
     let doc_rows: Vec<&str> = screen.lines().skip(1).take(22).collect();
     assert!(doc_rows.iter().any(|row| row.contains(&start)), "{screen}");
 }
@@ -210,7 +212,7 @@ fn panel_lists_replies_and_enter_selects() {
         assert!(screen.contains("Oldest reply: short."), "at {width}×{height}:\n{screen}");
         press(&mut app, "j\n");
         let screen = render(&mut app, width, height);
-        assert!(screen.lines().next().expect("header").ends_with("reply 2/3"), "{screen}");
+        assert!(screen.lines().next().expect("header").contains("reply 2/3"), "{screen}");
         assert!(screen.contains("The older reply."), "at {width}×{height}:\n{screen}");
     }
 }
@@ -298,7 +300,7 @@ fn reload_keeps_the_selected_reply() {
     assert_eq!(press(&mut app, "r"), Effect::Reload);
     app.set_replies(replies());
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
-    assert!(header.ends_with("reply 2/3"), "{header}");
+    assert!(header.contains("reply 2/3"), "{header}");
 }
 
 #[test]
@@ -322,7 +324,7 @@ fn reload_shows_a_new_newest_reply() {
     newer.insert(0, reply("r0", "## Newest answer\n\nThe new text."));
     app.set_replies(newer);
     let screen = render(&mut app, 120, 40);
-    assert!(screen.lines().next().expect("header").ends_with("reply 1/4"), "{screen}");
+    assert!(screen.lines().next().expect("header").contains("reply 1/4"), "{screen}");
     assert!(screen.contains("Newest answer"), "{screen}");
 }
 
@@ -382,11 +384,11 @@ fn wide_state_keeps_reply_position() {
     );
     let screen = render(&mut app, 50, 12);
     let header = screen.lines().next().expect("header");
-    assert!(header.ends_with("reply 1/3") || header.contains('…'), "{header}");
+    assert!(header.contains("reply 1/3") || header.contains('…'), "{header}");
     assert!(header.width() <= 50, "{header}");
-    // At a larger width the whole header fits, with "reply 1/3" at the right edge.
+    // At a larger width the whole header fits, with the send button at the right edge.
     let header = render(&mut app, 80, 12).lines().next().expect("header").to_owned();
-    assert!(header.ends_with("reply 1/3"), "{header}");
+    assert!(header.contains("reply 1/3") && header.ends_with("[ Send ▸ ]"), "{header}");
 }
 
 fn candidate(name: &str) -> Candidate {
@@ -516,4 +518,24 @@ fn cursor_cell_is_reversed() {
     assert!(reversed(2), "the second character is the cursor");
     assert!(!reversed(1), "the first character is not");
     assert!(!reversed(3));
+}
+
+#[test]
+fn the_session_picker_is_a_centered_box() {
+    let mut app = App::new(
+        state(Agent::Pi, "idle"),
+        Screen::Picker(vec![candidate("a"), candidate("b")]),
+        Vec::new(),
+        &Config::default(),
+    );
+    let screen = render(&mut app, 80, 24);
+    let lines: Vec<Vec<char>> = screen.lines().map(|line| line.chars().collect()).collect();
+    let y =
+        lines.iter().position(|line| line.iter().collect::<String>().contains("┌ Sessions")).expect("box");
+    let x = lines[y].iter().position(|&c| c == '┌').expect("corner");
+    let right = lines[y].iter().position(|&c| c == '┐').expect("corner");
+    let bottom = (y..lines.len()).find(|&row| lines[row].get(x) == Some(&'└')).expect("bottom");
+    assert!(x.abs_diff(80 - right - 1) <= 1, "{screen}");
+    assert!((y - 1).abs_diff(23 - bottom - 1) <= 1, "{screen}");
+    assert!(screen.contains("▸ updated just now · a"), "{screen}");
 }

@@ -1,5 +1,7 @@
 //! Drawing of the viewer with ratatui.
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use ratatui::Frame;
@@ -9,77 +11,26 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Confirm, Focus, PanelView, ReplySource, Screen, match_ranges};
+use super::app::{App, BoxView, Confirm, Docked, Focus, ReplySource, Screen, match_ranges};
 use super::bar::{draw_action_bar, shown_rows};
-use super::cards::{Side, draw_pick, draw_side, range_style, rank, split_side};
+use super::cards::{Side, draw_pick, draw_side, range_style, rank, split_markers};
 use super::focus::{Mode, View};
 use super::hits::Hit;
 use crate::agent::Agent;
 use crate::doc::{Doc, DocKind, DocSpan, SpanStyle};
 use crate::files::TREE_LIMIT;
-use crate::keys::{Action, KeyMap};
-use crate::layout::{Layout, compute};
+use crate::keys::Action;
+use crate::layout::{Layout, RAIL_WIDTH, compute};
 use crate::replies::Candidate;
 use crate::review::{Kind, Review};
 use crate::safety::Safety;
 use crate::wrap::{VisualLine, fit, gutter_width};
 
-/// The key hints of the viewer, most important first. They show the keys that are bound now.
-fn viewer_keys(keys: &KeyMap) -> String {
-    let k = |action| keys.label(action);
-    format!(
-        "{}/{} move  {} select  {}/{}/{} annotate  {} send  {} help  {} list  {} replies  {} find  {} quit",
-        k(Action::Down),
-        k(Action::Up),
-        k(Action::Select),
-        k(Action::Comment),
-        k(Action::Delete),
-        k(Action::Replace),
-        k(Action::Send),
-        k(Action::Help),
-        k(Action::Annotations),
-        k(Action::Replies),
-        k(Action::Find),
-        k(Action::Quit)
-    )
-}
+/// One hint of the footer: the action that a click does, when there is one, and the text.
+pub(super) type Hint = (Option<Action>, String);
 
-/// The key hints in the file viewer.
-fn files_keys(keys: &KeyMap) -> String {
-    let k = |action| keys.label(action);
-    format!(
-        "{}/{} move  {} select  {}/{}/{} annotate  {} send  {} help  {} files  {} tree  {} find file  {}/{} switch  {} quit",
-        k(Action::Down),
-        k(Action::Up),
-        k(Action::Select),
-        k(Action::Comment),
-        k(Action::Delete),
-        k(Action::Replace),
-        k(Action::Send),
-        k(Action::Help),
-        k(Action::Replies),
-        k(Action::Tree),
-        k(Action::FindFile),
-        k(Action::PrevFile),
-        k(Action::NextFile),
-        k(Action::Quit)
-    )
-}
-
-fn tree_keys(keys: &KeyMap) -> String {
-    let k = |action| keys.label(action);
-    format!(
-        "{}/{} move  enter open  {}/{} close/open  {} filter  esc close  {} quit",
-        k(Action::Down),
-        k(Action::Up),
-        k(Action::Left),
-        k(Action::Right),
-        k(Action::Find),
-        k(Action::Quit)
-    )
-}
-
-const FINDER_KEYS: &str = "type to filter  enter open  ctrl+n/ctrl+p move  esc close";
+/// The text between two hints of the footer.
+const HINT_GAP: &str = " · ";
 
 /// A number with a comma between the thousands: `20,000`.
 fn thousands(number: usize) -> String {
@@ -94,67 +45,153 @@ fn thousands(number: usize) -> String {
     out
 }
 
-fn panel_keys(keys: &KeyMap) -> String {
-    let k = |action| keys.label(action);
-    format!(
-        "{}/{} move  enter show  esc back  {} close  {} quit",
-        k(Action::Down),
-        k(Action::Up),
-        k(Action::Replies),
-        k(Action::Quit)
-    )
+/// The hints of the footer for the current mode, most important first. They show the keys that are
+/// bound now. `? help` is last wherever the help key works.
+#[allow(clippy::too_many_lines, reason = "one list of hints for each mode")]
+pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
+    let k = |action| app.config.keys.label(action);
+    let hint = |action: Action, text: String| (Some(action), text);
+    let plain = |text: &str| (None, text.to_owned());
+    let help = hint(Action::Help, format!("{} help", k(Action::Help)));
+    let up_down = format!("{}/{}", k(Action::Down), k(Action::Up));
+    let notes = format!(
+        "{} {} {} {} note",
+        k(Action::LooksGood),
+        k(Action::Comment),
+        k(Action::Delete),
+        k(Action::Replace)
+    );
+    match &app.screen {
+        Screen::Error(_) => {
+            return vec![
+                hint(Action::Reload, format!("{} try again", k(Action::Reload))),
+                hint(Action::Quit, format!("{} quit", k(Action::Quit))),
+            ];
+        }
+        Screen::Picker(_) => {
+            return vec![
+                hint(Action::Down, format!("{up_down} move")),
+                plain("enter open"),
+                hint(Action::Quit, format!("{} quit", k(Action::Quit))),
+            ];
+        }
+        Screen::Viewer => {}
+    }
+    if app.editor.is_some() {
+        return vec![plain("enter save"), plain("ctrl+j new line"), plain("tab label"), plain("esc cancel")];
+    }
+    if app.pick.is_some() {
+        return vec![plain("1-9 choose"), plain("esc close")];
+    }
+    let files = app.has_root();
+    let lists = |out: &mut Vec<Hint>| {
+        out.push(hint(Action::Send, format!("{} send", k(Action::Send))));
+        out.push(hint(Action::Annotations, format!("{} notes", k(Action::Annotations))));
+        out.push(hint(Action::Replies, format!("{} list", k(Action::Replies))));
+        if files {
+            out.push(hint(Action::Tree, format!("{} tree", k(Action::Tree))));
+            out.push(hint(Action::FindFile, format!("{} find", k(Action::FindFile))));
+        }
+    };
+    let mut out = match app.focus {
+        Focus::Box if app.boxed == Some(BoxView::Finder) => {
+            return vec![
+                plain("type to filter"),
+                plain("enter open"),
+                plain("ctrl+n/ctrl+p move"),
+                plain("esc close"),
+            ];
+        }
+        Focus::Box => {
+            vec![hint(Action::Down, format!("{up_down} move")), plain("enter open"), plain("esc close")]
+        }
+        Focus::Tree => vec![
+            hint(Action::Down, format!("{up_down} move")),
+            plain("enter open"),
+            hint(Action::Left, format!("{}/{} close/open", k(Action::Left), k(Action::Right))),
+            hint(Action::Find, format!("{} filter", k(Action::Find))),
+            plain("esc back"),
+            hint(Action::Tree, format!("{} hide", k(Action::Tree))),
+        ],
+        Focus::Rail => vec![
+            hint(Action::Down, format!("{up_down} note")),
+            plain("enter go"),
+            hint(Action::Edit, format!("{} edit", k(Action::Edit))),
+            hint(Action::Remove, format!("{} remove", k(Action::Remove))),
+            plain("esc back"),
+        ],
+        Focus::Doc => match app.mode {
+            Mode::Block(_) => {
+                let mut out = vec![
+                    hint(Action::Down, format!("{up_down} block")),
+                    hint(Action::Select, format!("{} text", k(Action::Select))),
+                    hint(Action::Comment, notes),
+                    hint(Action::Edit, format!("{}/{} edit", k(Action::Edit), k(Action::Remove))),
+                ];
+                lists(&mut out);
+                out
+            }
+            Mode::Text if app.selection.is_some() => vec![
+                hint(Action::Comment, notes),
+                hint(Action::Select, format!("{} end", k(Action::Select))),
+                plain("esc clear"),
+                hint(Action::Send, format!("{} send", k(Action::Send))),
+            ],
+            Mode::Text => {
+                let moves = [Action::Left, Action::Down, Action::Up, Action::Right].map(k).join("/");
+                let mut out = vec![
+                    hint(Action::Down, format!("{moves} move")),
+                    hint(Action::Select, format!("{} select", k(Action::Select))),
+                    hint(Action::Comment, notes),
+                    plain("esc block"),
+                ];
+                lists(&mut out);
+                out
+            }
+        },
+    };
+    out.push(help);
+    out
 }
-
-fn annotation_keys(keys: &KeyMap) -> String {
-    let k = |action| keys.label(action);
-    format!(
-        "{}/{} move  enter go  {} edit  {} delete  {} close  esc back  {} quit",
-        k(Action::Down),
-        k(Action::Up),
-        k(Action::Edit),
-        k(Action::Remove),
-        k(Action::Annotations),
-        k(Action::Quit)
-    )
-}
-
-fn picker_keys(keys: &KeyMap) -> String {
-    format!(
-        "{}/{} move  enter open  {} quit",
-        keys.label(Action::Down),
-        keys.label(Action::Up),
-        keys.label(Action::Quit)
-    )
-}
-
-fn error_keys(keys: &KeyMap) -> String {
-    format!("{} try again  {} quit", keys.label(Action::Reload), keys.label(Action::Quit))
-}
-
-const EDITOR_KEYS: &str = "enter save  ctrl+j new line  tab label  esc cancel";
 
 /// Draw the whole viewer.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     app.hits.clear();
     let area = frame.area();
-    let layout = compute(area, app.panel_open);
-    let Some((header, footer)) = header_footer(&layout) else {
+    let layout = compute(area, app.has_root(), app.tree_open);
+    let Some((header, footer)) = layout.header_footer() else {
+        app.docked = Docked::default();
         draw_too_small(frame, area);
         return;
     };
+    let body = Rect::new(area.x, header.bottom(), area.width, footer.y - header.bottom());
     match app.screen.clone() {
         Screen::Error(message) => {
-            draw_header(frame, header, app, title_of(app), &[]);
-            let body = Rect::new(area.x, header.bottom(), area.width, footer.y - header.bottom());
+            draw_header(
+                frame,
+                app,
+                header,
+                &[format!("Annorex · {} · {}", title_of(app), app.state.header_text())],
+                None,
+            );
             let paragraph = Paragraph::new(format!("Annorex: {message}")).wrap(Wrap { trim: true });
             frame.render_widget(paragraph, body);
-            draw_footer(frame, footer, &error_keys(&app.config.keys), None);
+            draw_footer(frame, app, footer, None, footer_hints(app));
         }
         Screen::Picker(candidates) => {
-            draw_header(frame, header, app, "choose the session", &[]);
-            let body = Rect::new(area.x, header.bottom(), area.width, footer.y - header.bottom());
-            draw_picker(frame, body, &candidates, app.picker_index);
-            draw_footer(frame, footer, &picker_keys(&app.config.keys), None);
+            draw_header(
+                frame,
+                app,
+                header,
+                &[format!("Annorex · choose the session · {}", app.state.header_text())],
+                None,
+            );
+            let rect = open_box(frame, app, area, body, candidates.len() + 2);
+            let block = Block::new().borders(Borders::ALL).title(" Sessions ");
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+            draw_picker(frame, app, inner, &candidates, app.picker_index);
+            draw_footer(frame, app, footer, None, footer_hints(app));
         }
         Screen::Viewer => {
             draw_viewer(frame, app, layout, header, footer);
@@ -163,6 +200,30 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             }
         }
     }
+}
+
+/// The rectangle of `width` × `height` in the middle of `area`. A box larger than `area` gets the size
+/// of `area`.
+pub(super) fn centered_box(area: Rect, width: u16, height: u16) -> Rect {
+    let (width, height) = (width.min(area.width), height.min(area.height));
+    Rect::new(area.x + (area.width - width) / 2, area.y + (area.height - height) / 2, width, height)
+}
+
+/// The most rows of a centered box, with its borders.
+const BOX_ROWS: u16 = 20;
+
+/// Clear the centered box over `body` and put it in the hit map: a click outside it reaches nothing
+/// below. `screen` is the whole frame. The box is high enough for `rows` rows of content, up to
+/// `BOX_ROWS`.
+fn open_box(frame: &mut Frame, app: &mut App, screen: Rect, body: Rect, rows: usize) -> Rect {
+    let width = body.width.saturating_sub(4).min(76);
+    let wanted = u16::try_from(rows).unwrap_or(u16::MAX).saturating_add(2).clamp(6, BOX_ROWS);
+    let height = body.height.saturating_sub(2).min(wanted);
+    let rect = centered_box(body, width, height);
+    frame.render_widget(Clear, rect);
+    app.hits.push(screen, Hit::BoxOutside);
+    app.hits.push(rect, Hit::BoxInside);
+    rect
 }
 
 /// The groups of the help screen. The file group shows only when the viewer has a work directory.
@@ -215,7 +276,7 @@ fn help_column(app: &App, groups: &[(&str, &[Action])]) -> Vec<Line<'static>> {
 }
 
 /// The help screen: every key from the live key map, over the viewer. Any key closes it.
-fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_help(frame: &mut Frame, area: Rect, app: &mut App) {
     let mut right: Vec<(&str, &[Action])> = vec![("Send", HELP_SEND), ("Lists", HELP_LISTS)];
     if app.has_root() {
         right.push(("Files", HELP_FILES));
@@ -225,15 +286,12 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     let right = help_column(app, &right);
     let two = area.width >= 78;
     let rows = if two { left.len().max(right.len()) } else { left.len() + 1 + right.len() };
-    let width = if two { area.width.min(80) } else { area.width.min(44) };
-    let height = u16::try_from(rows + 3).unwrap_or(u16::MAX).min(area.height);
-    let rect = Rect::new(
-        area.x + (area.width.saturating_sub(width)) / 2,
-        area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    );
+    let width = if two { 80 } else { 44 };
+    let height = u16::try_from(rows + 3).unwrap_or(u16::MAX);
+    let rect = centered_box(area, width, height);
     frame.render_widget(Clear, rect);
+    app.hits.push(area, Hit::BoxOutside);
+    app.hits.push(rect, Hit::BoxInside);
     let block = Block::default().borders(Borders::ALL).title(" Keys ").title_bottom(" any key closes ");
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
@@ -255,15 +313,6 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn header_footer(layout: &Layout) -> Option<(Rect, Rect)> {
-    match *layout {
-        Layout::TooSmall => None,
-        Layout::Single { header, footer, .. }
-        | Layout::Bottom { header, footer, .. }
-        | Layout::Side { header, footer, .. } => Some((header, footer)),
-    }
-}
-
 fn draw_too_small(frame: &mut Frame, area: Rect) {
     if area.height == 0 {
         return;
@@ -273,29 +322,38 @@ fn draw_too_small(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(text).centered(), row);
 }
 
-/// A piece of the right side of the header, with its style.
-type Part = (String, Style);
-
-fn parts_width(parts: &[Part]) -> usize {
-    parts.iter().map(|(text, _)| text.width()).sum()
+fn text_width(text: &str) -> u16 {
+    u16::try_from(text.width()).unwrap_or(u16::MAX)
 }
 
-/// The header. `rights` are the texts for the right side, the preferred one first. The first
-/// that fits stays.
-fn draw_header(frame: &mut Frame, area: Rect, app: &App, view: &str, rights: &[Vec<Part>]) {
+/// The header: the view, the agent, and the position on the left, the send button on the right.
+/// `lefts` are the texts for the left side, the preferred one first. The first that fits beside the
+/// button stays. When none fits, the last one is cut. The button stays while it fits.
+fn draw_header(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    lefts: &[String],
+    button: Option<(String, Style)>,
+) {
     let bold = Style::new().add_modifier(Modifier::BOLD);
-    let left = format!("Annorex · {view} · {}", app.state.header_text());
-    let width = usize::from(area.width);
-    let line = match rights.iter().find(|parts| left.width() + 1 + parts_width(parts) <= width) {
-        Some(parts) => {
-            let gap = width - left.width() - parts_width(parts);
-            let mut spans = vec![Span::styled(left, bold), Span::raw(" ".repeat(gap))];
-            spans.extend(parts.iter().map(|(text, style)| Span::styled(text.clone(), *style)));
-            Line::from(spans)
-        }
-        None => Line::styled(fit(&left, area.width), bold),
+    let shortest = lefts.last().cloned().unwrap_or_default();
+    let Some((label, style)) = button.filter(|(label, _)| text_width(label) + 11 <= area.width) else {
+        frame.render_widget(Paragraph::new(Line::styled(fit(&shortest, area.width), bold)), area);
+        return;
     };
+    let room = area.width - text_width(&label) - 1;
+    let left =
+        lefts.iter().find(|left| text_width(left) <= room).cloned().unwrap_or_else(|| fit(&shortest, room));
+    let gap = usize::from(area.width - text_width(&left) - text_width(&label));
+    let line = Line::from(vec![
+        Span::styled(left, bold),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(label.clone(), style),
+    ]);
     frame.render_widget(Paragraph::new(line), area);
+    let width = text_width(&label);
+    app.hits.push(Rect::new(area.right() - width, area.y, width, 1), Hit::Send);
 }
 
 /// `HH:MM` in the time zone of the app for an RFC 3339 time.
@@ -304,17 +362,17 @@ fn clock(at: &str, zone: &jiff::tz::TimeZone) -> String {
         .map_or_else(|_| at.to_owned(), |time| time.to_zoned(zone.clone()).strftime("%H:%M").to_string())
 }
 
-/// The send button: `[Send N ▸]`, with the effect of a message while the agent works, or
-/// `[Sent HH:MM]` after a send. Dim when the agent shows a dialog.
-fn send_button(app: &App) -> Option<Part> {
+/// The send button: `[ Send N → AGENT ▸ ]`, with the effect of a message while the agent works, or
+/// `[ Sent HH:MM ]` after a send. Dim with no notes, and when the agent shows a dialog.
+fn send_button(app: &App) -> (String, Style) {
     let bold = Style::new().add_modifier(Modifier::BOLD);
+    let dim = Style::new().add_modifier(Modifier::DIM);
     if let Some(at) = app.shown_sent() {
-        return Some((format!("[Sent {}]", clock(at, &app.zone)), bold));
+        return (format!("[ Sent {} ]", clock(at, &app.zone)), bold);
     }
     let count = app.unsent_count();
-    let note = app.has_unsent_note();
-    if count == 0 && !note {
-        return None;
+    if count == 0 && !app.has_unsent_note() {
+        return ("[ Send ▸ ]".to_owned(), dim);
     }
     let effect = match (&app.state.safety, app.state.agent) {
         (Safety::Clear { state: Some(state) }, Some(Agent::ClaudeCode)) if state == "working" => " · queued",
@@ -323,20 +381,61 @@ fn send_button(app: &App) -> Option<Part> {
         }
         _ => "",
     };
-    let style = if matches!(app.state.safety, Safety::Blocked { .. }) {
-        Style::new().add_modifier(Modifier::DIM)
-    } else {
-        bold
-    };
-    Some((format!("[Send {count}{effect} ▸]"), style))
+    let agent = app.state.agent.map_or_else(String::new, |agent| format!(" → {}", agent.host().label()));
+    let style = if matches!(app.state.safety, Safety::Blocked { .. }) { dim } else { bold };
+    (format!("[ Send {count}{effect}{agent} ▸ ]"), style)
 }
 
-fn draw_footer(frame: &mut Frame, area: Rect, keys: &str, message: Option<String>) {
-    let (text, style) = match message {
-        Some(message) => (message, Style::new().add_modifier(Modifier::BOLD)),
-        None => (keys.to_owned(), Style::new().add_modifier(Modifier::DIM)),
-    };
-    frame.render_widget(Paragraph::new(fit(&text, area.width)).style(style), area);
+/// The footer: the status or a message on the left, the hints on the right. The hints that do not fit
+/// are left out from the end, but the help hint stays while it fits. Each hint with an action is in the
+/// hit map.
+fn draw_footer(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    left: Option<(String, Style)>,
+    hints: Vec<Hint>,
+) {
+    let (left, left_style) = left.unwrap_or_default();
+    let used = if left.is_empty() { 0 } else { text_width(&left) + 2 };
+    let gap = text_width(HINT_GAP);
+    let (help, rest): (Vec<Hint>, Vec<Hint>) =
+        hints.into_iter().partition(|(action, _)| *action == Some(Action::Help));
+    let mut room = area.width.saturating_sub(used);
+    let mut chosen: Vec<Hint> = Vec::new();
+    let help = help.into_iter().next().filter(|(_, text)| text_width(text) <= room);
+    if let Some((_, text)) = &help {
+        room -= text_width(text);
+    }
+    for hint in rest {
+        let width = text_width(&hint.1) + gap;
+        if width > room {
+            break;
+        }
+        room -= width;
+        chosen.push(hint);
+    }
+    chosen.extend(help);
+    let hints_width: u16 = chosen.iter().map(|(_, text)| text_width(text)).sum::<u16>()
+        + gap * u16::try_from(chosen.len().saturating_sub(1)).unwrap_or(0);
+    let left = fit(&left, area.width.saturating_sub(hints_width + u16::from(hints_width > 0) * 2));
+    let dim = Style::new().add_modifier(Modifier::DIM);
+    let filler = usize::from(area.width.saturating_sub(text_width(&left) + hints_width));
+    let mut spans = vec![Span::styled(left, left_style), Span::raw(" ".repeat(filler))];
+    let mut x = area.right() - hints_width;
+    for (index, (action, text)) in chosen.into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(HINT_GAP, dim));
+            x += gap;
+        }
+        let width = text_width(&text);
+        if let Some(action) = action {
+            app.hits.push(Rect::new(x, area.y, width, 1), Hit::Hint(action));
+        }
+        x += width;
+        spans.push(Span::styled(text, dim));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// The title follows the document on the screen.
@@ -401,46 +500,71 @@ fn position_text(app: &App) -> String {
     }
 }
 
-fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
-    let files = app.has_root();
-    let position = position_text(app);
-    let bold = Style::new().add_modifier(Modifier::BOLD);
-    let unsent = app.unsent_replies();
-    let button = send_button(app);
-    let with_button = |text: String| -> Vec<Part> {
-        let mut parts = vec![(text, bold)];
-        if let Some(button) = button.clone() {
-            parts.push(("  ".to_owned(), bold));
-            parts.push(button);
+/// The status on the left of the footer: the focused block or the line of the cursor, and the
+/// number of notes of the document.
+fn doc_status(app: &App) -> String {
+    let place = match app.mode {
+        Mode::Block(index) => match app.doc.blocks.len() {
+            0 => "block 0/0".to_owned(),
+            count => format!("block {}/{count}", index.min(count - 1) + 1),
+        },
+        Mode::Text => {
+            let lines = app.doc.source.lines().count().max(1);
+            format!("line {}/{lines}", app.doc.line_of(app.cursor))
         }
-        parts
     };
-    let mut rights = Vec::new();
+    match app.review().map_or(0, |review| review.annotations.len()) {
+        0 => place,
+        1 => format!("{place} · 1 note"),
+        count => format!("{place} · {count} notes"),
+    }
+}
+
+#[allow(clippy::too_many_lines, reason = "one place that puts the parts of the viewer on the screen")]
+fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
+    let position = position_text(app);
+    let state = app.state.header_text();
+    let base = format!("Annorex · {} · {state} · {position}", title_of(app));
+    let unsent = app.unsent_replies();
+    let mut lefts = Vec::new();
     if !unsent.is_empty() {
         let numbers: Vec<String> = unsent.iter().map(ToString::to_string).collect();
-        rights.push(with_button(format!("{position} · unsent {}", numbers.join(","))));
+        lefts.push(format!("{base} · unsent {}", numbers.join(",")));
     }
-    rights.push(with_button(position.clone()));
-    rights.push(vec![(position, bold)]);
-    draw_header(frame, header, app, title_of(app), &rights);
-    let (doc_area, panel_area, overlay) = match layout {
-        Layout::Single { doc, overlay, .. } => (doc, app.panel_open.then_some(overlay), true),
-        Layout::Bottom { doc, panel, .. } | Layout::Side { doc, panel, .. } => {
-            (doc, app.panel_open.then_some(panel), false)
-        }
+    lefts.push(base);
+    // A narrow header keeps the position and the agent before the name of the view.
+    lefts.push(format!("{state} · {position}"));
+    lefts.push(position);
+    draw_header(frame, app, header, &lefts, Some(send_button(app)));
+    let (body, tree, rail) = match layout {
+        Layout::Single { doc, .. } => (doc, None, None),
+        Layout::Wide { doc, tree, rail, .. } => (doc, tree, rail),
         Layout::TooSmall => return,
     };
-    app.overlay = overlay;
+    let narrow = matches!(layout, Layout::Single { .. });
     let doc_area = match app.banner() {
-        Some(text) if doc_area.height > 1 => {
-            let row = Rect::new(doc_area.x, doc_area.y, doc_area.width, 1);
+        Some(text) if body.height > 1 => {
+            let row = Rect::new(body.x, body.y, body.width, 1);
             let style = Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD);
-            frame.render_widget(Paragraph::new(fit(&text, doc_area.width)).style(style), row);
-            Rect::new(doc_area.x, doc_area.y + 1, doc_area.width, doc_area.height - 1)
+            frame.render_widget(Paragraph::new(fit(&text, body.width)).style(style), row);
+            Rect::new(body.x, body.y + 1, body.width, body.height - 1)
         }
-        _ => doc_area,
+        _ => body,
     };
-    let (doc_area, side) = split_side(doc_area);
+    // Where the window has no card rail, the annotation list opens at the right of the document.
+    let list = (!narrow && rail.is_none() && app.list_open && doc_area.width > RAIL_WIDTH + 20)
+        .then(|| Rect::new(doc_area.right() - RAIL_WIDTH, doc_area.y, RAIL_WIDTH, doc_area.height));
+    let doc_area = match list {
+        Some(list) => Rect { width: doc_area.width - list.width, ..doc_area },
+        None => doc_area,
+    };
+    let (doc_area, side) = match rail {
+        // The rail starts at the first document row, so a card lines up with its note.
+        Some(rail) => (doc_area, Side::Rail(Rect { y: doc_area.y, height: doc_area.height, ..rail })),
+        None => split_markers(doc_area),
+    };
+    app.docked =
+        Docked { tree: tree.is_some(), rail: rail.is_some() || list.is_some(), cards: rail.is_some() };
     // The focus background also fills the marker margin, so it reaches the end of the row.
     let fill_width = match side {
         Side::Markers(column) => doc_area.width + column.width,
@@ -454,51 +578,65 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         doc_area.width.saturating_sub(margin + gutter),
         doc_area.height,
     );
-    draw_action_bar(frame, text_area, app);
+    draw_action_bar(frame, text_area, doc_area.x, app);
     draw_side(frame, app, side);
-    if let Some(panel) = panel_area {
-        let borders = match layout {
-            Layout::Side { .. } => Borders::LEFT,
-            Layout::Bottom { .. } => Borders::TOP,
-            _ => Borders::ALL,
-        };
-        if overlay {
-            frame.render_widget(Clear, panel);
-        }
-        match app.panel_view {
-            PanelView::Replies => draw_reply_list(frame, app, panel, borders),
-            PanelView::Annotations => draw_annotation_list(frame, app, panel, borders),
-            PanelView::Tree => draw_tree(frame, app, panel, borders),
-            PanelView::Finder => draw_finder(frame, app, panel, borders),
-        }
+    if let Some(tree) = tree {
+        draw_tree(frame, app, tree, Borders::RIGHT);
+    }
+    if let Some(list) = list {
+        draw_annotation_list(frame, app, list, Borders::LEFT);
+    }
+    // In one column, the tree and the annotation list cover the document while they have the focus.
+    if narrow && app.focus == Focus::Tree && app.has_root() {
+        frame.render_widget(Clear, body);
+        draw_tree(frame, app, body, Borders::ALL);
+    }
+    if narrow && app.focus == Focus::Rail {
+        frame.render_widget(Clear, body);
+        draw_annotation_list(frame, app, body, Borders::ALL);
     }
     draw_pick(frame, app, text_area);
     draw_editor(frame, app, text_area);
-    let prompt = app.confirm.map(|what| prompt_text(app, what));
-    let message = prompt
-        .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")))
-        .or_else(|| app.status.clone())
+    if let Some(view) = app.boxed {
+        let screen = Rect::new(header.x, header.y, header.width, footer.bottom() - header.y);
+        let middle = Rect::new(header.x, header.bottom(), header.width, footer.y - header.bottom());
+        let rows = match (view, &app.reply_source) {
+            (BoxView::Finder, _) => usize::from(BOX_ROWS),
+            (BoxView::Replies, ReplySource::Pick(candidates)) => candidates.len() + 2,
+            (BoxView::Replies, ReplySource::Missing(_)) => app.replies.len() + 2,
+            (BoxView::Replies, ReplySource::Ready) => app.replies.len(),
+        };
+        let rect = open_box(frame, app, screen, middle, rows);
+        match view {
+            BoxView::Replies => draw_reply_list(frame, app, rect),
+            BoxView::Finder => draw_finder(frame, app, rect),
+        }
+    }
+    let tree_shown = tree.is_some() || (narrow && app.focus == Focus::Tree);
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    // A question and the find input take the keys, so the footer shows no hints with them.
+    let question = app
+        .confirm
+        .map(|what| prompt_text(app, what))
+        .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")));
+    if let Some(question) = question {
+        draw_footer(frame, app, footer, Some((question, bold)), Vec::new());
+        return;
+    }
+    let message = app
+        .status
+        .clone()
         .or_else(|| app.save_error.as_ref().map(|error| format!("draft not saved: {error}")))
         .or_else(|| {
-            (app.panel_open && app.panel_view == PanelView::Tree && app.tree.is_truncated())
+            (tree_shown && app.tree.is_truncated())
                 .then(|| format!("The tree shows the first {} entries.", thousands(TREE_LIMIT)))
         });
-    let keys = if app.editor.is_some() {
-        EDITOR_KEYS.to_owned()
-    } else if app.focus == Focus::Panel && app.panel_view == PanelView::Annotations {
-        annotation_keys(&app.config.keys)
-    } else if app.focus == Focus::Panel && app.panel_view == PanelView::Tree {
-        tree_keys(&app.config.keys)
-    } else if app.focus == Focus::Panel && app.panel_view == PanelView::Finder {
-        FINDER_KEYS.to_owned()
-    } else if app.focus == Focus::Panel {
-        panel_keys(&app.config.keys)
-    } else if files {
-        files_keys(&app.config.keys)
-    } else {
-        viewer_keys(&app.config.keys)
+    let left = match message {
+        Some(message) => (message, bold),
+        None => (doc_status(app), Style::new().add_modifier(Modifier::DIM)),
     };
-    draw_footer(frame, footer, &keys, message);
+    let hints = footer_hints(app);
+    draw_footer(frame, app, footer, Some(left), hints);
 }
 
 /// Draw the document in `area`. The focus background fills `fill_width` columns from the left of `area`.
@@ -808,23 +946,70 @@ fn row_spans(
     out
 }
 
-/// The lines of a list panel: the first line is a header, and the rest scrolls with the cursor.
-fn draw_list(frame: &mut Frame, inner: Rect, header: Option<String>, rows: &[String], cursor: usize) {
+/// The lines of a list: the first line is a header, and the rest scrolls with the cursor. The result
+/// is the index of the first row on the screen and the screen row where it is.
+fn draw_list(
+    frame: &mut Frame,
+    inner: Rect,
+    header: Option<String>,
+    rows: &[String],
+    cursor: usize,
+    marked: bool,
+) -> (usize, u16) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     if let Some(header) = header {
         lines.push(Line::styled(fit(&header, inner.width), Style::new().add_modifier(Modifier::BOLD)));
     }
+    let first_y = inner.y + u16::try_from(lines.len()).unwrap_or(0);
     let height = usize::from(inner.height).saturating_sub(lines.len());
     let offset = cursor.saturating_sub(height.saturating_sub(1));
     for (index, text) in rows.iter().enumerate().skip(offset).take(height) {
-        let style =
-            if index == cursor { Style::new().add_modifier(Modifier::REVERSED) } else { Style::new() };
+        let style = if marked && index == cursor {
+            Style::new().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::new()
+        };
         lines.push(Line::styled(fit(text, inner.width), style));
     }
     frame.render_widget(Paragraph::new(lines), inner);
+    (offset, first_y)
 }
 
-fn draw_tree(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
+/// Put one hit for each row of a list on the screen, from the row `offset` at the screen row `first_y`.
+fn push_rows(
+    app: &mut App,
+    inner: Rect,
+    (offset, first_y): (usize, u16),
+    count: usize,
+    hit: fn(usize) -> Hit,
+) {
+    let shown = usize::from(inner.bottom().saturating_sub(first_y));
+    for (row, index) in (offset..count).take(shown).enumerate() {
+        let y = first_y + u16::try_from(row).unwrap_or(0);
+        app.hits.push(Rect::new(inner.x, y, inner.width, 1), hit(index));
+    }
+}
+
+/// The number of notes in the open files below each directory.
+fn notes_by_directory(app: &App) -> HashMap<PathBuf, usize> {
+    let mut counts: HashMap<PathBuf, usize> = HashMap::new();
+    for (id, file) in &app.files {
+        let count = app.reviews.get(id).map_or(0, |review| review.annotations.len());
+        if count == 0 {
+            continue;
+        }
+        for parent in file.relative.ancestors().skip(1).filter(|parent| !parent.as_os_str().is_empty()) {
+            *counts.entry(parent.to_path_buf()).or_default() += count;
+        }
+    }
+    counts
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+fn draw_tree(frame: &mut Frame, app: &mut App, area: Rect, borders: Borders) {
     let block = Block::new().borders(borders).title(" Tree ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -836,6 +1021,7 @@ fn draw_tree(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         return;
     }
     let filtering = app.tree.filter().is_some_and(|text| !text.is_empty());
+    let counts = notes_by_directory(app);
     let rows: Vec<String> = app
         .tree
         .visible()
@@ -845,16 +1031,15 @@ fn draw_tree(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
             let indent = "  ".repeat(row.depth);
             if row.entry.is_dir {
                 let arrow = if app.tree.is_expanded(path) { "▾" } else { "▸" };
-                let name =
-                    path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-                format!("  {indent}{arrow} {name}/")
+                let count = counts.get(path).map_or_else(String::new, |count| format!(" {count}"));
+                format!("  {indent}{arrow} {}/{count}", file_name(path))
             } else {
                 let dot = if app.is_marked(path) { "●" } else { " " };
                 let changed = if app.tree.is_changed(path) { "*" } else { " " };
                 let name = if filtering || row.changed_section {
                     path.display().to_string()
                 } else {
-                    path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+                    file_name(path)
                 };
                 format!("  {indent}{dot}{changed}{name}")
             }
@@ -874,11 +1059,13 @@ fn draw_tree(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         frame.render_widget(Paragraph::new(lines), inner);
         return;
     }
-    draw_list(frame, inner, header, &rows, app.tree.index);
+    // Without the focus, the tree shows no cursor.
+    let place = draw_list(frame, inner, header, &rows, app.tree.index, app.focus == Focus::Tree);
+    push_rows(app, inner, place, rows.len(), Hit::TreeRow);
 }
 
-fn draw_finder(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
-    let block = Block::new().borders(borders).title(" Find file ");
+fn draw_finder(frame: &mut Frame, app: &mut App, area: Rect) {
+    let block = Block::new().borders(Borders::ALL).title(" Find file ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -888,7 +1075,7 @@ fn draw_finder(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         .finder
         .results()
         .map(|path| {
-            let dot = if app.is_marked(std::path::Path::new(path)) { "●" } else { " " };
+            let dot = if app.is_marked(Path::new(path)) { "●" } else { " " };
             format!("{dot} {path}")
         })
         .collect();
@@ -904,24 +1091,25 @@ fn draw_finder(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         frame.render_widget(Paragraph::new(lines), inner);
         return;
     }
-    draw_list(frame, inner, header, &rows, app.finder.index);
+    let place = draw_list(frame, inner, header, &rows, app.finder.index, true);
+    push_rows(app, inner, place, rows.len(), Hit::ListRow);
 }
 
-fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
+fn draw_reply_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let has_replies = app.replies.iter().any(|reply| !app.files.contains_key(&reply.id));
     let title = match (app.has_root(), has_replies) {
         (false, _) => " Replies ",
         (true, false) => " Files ",
         (true, true) => " Documents ",
     };
-    let block = Block::new().borders(borders).title(title);
+    let block = Block::new().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
         return;
     }
-    if let ReplySource::Pick(candidates) = &app.reply_source {
-        draw_picker(frame, inner, candidates, app.picker_index);
+    if let ReplySource::Pick(candidates) = app.reply_source.clone() {
+        draw_picker(frame, app, inner, &candidates, app.picker_index);
         return;
     }
     let reason: Vec<Line<'static>> = match &app.reply_source {
@@ -930,6 +1118,7 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         }
         _ => Vec::new(),
     };
+    let first_y = inner.y + u16::try_from(reason.len()).unwrap_or(0);
     let height = usize::from(inner.height).saturating_sub(reason.len()).max(1);
     let offset = app.panel_index.saturating_sub(height.saturating_sub(1));
     let lines: Vec<Line<'static>> = app
@@ -960,7 +1149,7 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
             } else {
                 format!("{marker} {:>2}{dot}{time} {}", index + 1, reply.first_line())
             };
-            let style = if index == app.panel_index && app.focus == Focus::Panel {
+            let style = if index == app.panel_index && app.focus == Focus::Box {
                 Style::new().add_modifier(Modifier::REVERSED)
             } else if index == app.selected {
                 Style::new().add_modifier(Modifier::BOLD)
@@ -970,8 +1159,10 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
             Line::styled(fit(&text, inner.width), style)
         })
         .collect();
+    let count = app.replies.len();
     let lines: Vec<Line<'static>> = reason.into_iter().chain(lines).collect();
     frame.render_widget(Paragraph::new(lines), inner);
+    push_rows(app, inner, (offset, first_y), count, Hit::ListRow);
 }
 
 fn kind_word(kind: Kind) -> &'static str {
@@ -1013,7 +1204,7 @@ fn draw_annotation_list(frame: &mut Frame, app: &App, area: Rect, borders: Borde
             _ => annotation.note.as_str(),
         };
         let second = format!("    {}", detail.lines().next().unwrap_or_default());
-        let style = if index == app.annotation_index && app.focus == Focus::Panel {
+        let style = if index == app.annotation_index && app.focus == Focus::Rail {
             Style::new().add_modifier(Modifier::REVERSED)
         } else {
             Style::new()
@@ -1119,7 +1310,7 @@ fn short_time(at: Option<&str>, zone: &jiff::tz::TimeZone) -> String {
     }
 }
 
-fn draw_picker(frame: &mut Frame, area: Rect, candidates: &[Candidate], index: usize) {
+fn draw_picker(frame: &mut Frame, app: &mut App, area: Rect, candidates: &[Candidate], index: usize) {
     let now = SystemTime::now();
     let mut lines = vec![
         Line::raw(fit(
@@ -1139,6 +1330,7 @@ fn draw_picker(frame: &mut Frame, area: Rect, candidates: &[Candidate], index: u
         lines.push(Line::styled(fit(&text, area.width), style));
     }
     frame.render_widget(Paragraph::new(lines), area);
+    push_rows(app, area, (offset, area.y + 2), candidates.len(), Hit::ListRow);
 }
 
 fn age(now: SystemTime, then: SystemTime) -> String {
@@ -1196,8 +1388,9 @@ mod tests {
         }
         // The second row of the block with two lines.
         assert_eq!(app.hits.at(0, row_of("two")), Some(&Hit::Block(1)));
-        // The blank row between blocks is in no block.
-        assert_eq!(app.hits.at(0, row_of("one") - 1), None);
+        // The blank row between blocks is in no block. The row below the focused block is the action bar.
+        assert_eq!(app.hits.at(0, row_of("three") - 1), None);
+        assert_eq!(app.hits.at(0, row_of("one") - 1), Some(&Hit::Bar));
     }
 
     /// The column and the row of the first cell where `text` starts on the screen.
@@ -1254,6 +1447,64 @@ mod tests {
         assert_eq!(app.hits.at(x, y), Some(&Hit::EditorCancel));
         assert_eq!(app.hits.at(x + 7, y), Some(&Hit::EditorCancel));
         assert_ne!(app.hits.at(x + 8, y), Some(&Hit::EditorCancel));
+    }
+
+    #[test]
+    fn the_editor_box_clamps_into_the_area_when_it_fits_neither_below_nor_above() {
+        let area = ratatui::layout::Rect::new(0, 0, 40, 10);
+        assert_eq!(super::editor_top(area, 6, Some((3, 5))), 4, "below is 6 + 6 > 10, above is 3 < 6");
+        assert_eq!(super::editor_top(area, 3, Some((1, 2))), 3, "below fits");
+        assert_eq!(super::editor_top(area, 3, Some((6, 8))), 3, "above fits");
+        assert_eq!(super::editor_top(area, 3, None), 7, "no range: the bottom of the area");
+    }
+
+    #[test]
+    fn the_bar_goes_above_the_last_block_at_the_bottom() {
+        let text = (0..40).map(|i| format!("p{i}")).collect::<Vec<_>>().join("\n\n");
+        let (mut app, _) = drawn(&text, "");
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        let screen = terminal.backend().buffer().clone();
+        let (_, bar) = find(&screen, "[c comment]");
+        let (_, last) = find(&screen, "p39");
+        assert_eq!(bar + 1, last, "no row below the block, so the bar is above it");
+    }
+
+    #[test]
+    fn the_bar_hides_when_another_part_has_the_focus_or_the_find_input_is_open() {
+        for keys in ["a", "/", "p", "?"] {
+            let (_, screen) = drawn("# T\n\none\n", keys);
+            let text: String = (0..24u16)
+                .map(|y| {
+                    (0..80u16).map(|x| screen.cell((x, y)).map_or(" ", |c| c.symbol())).collect::<String>()
+                })
+                .collect();
+            assert!(!text.contains("[c comment]"), "after {keys:?}");
+        }
+        let (_, screen) = drawn("# T\n\none\n", "");
+        assert_eq!(find(&screen, "[c comment]").1, 2, "the bar shows in block mode");
+    }
+
+    #[test]
+    fn the_plain_bar_row_shows_no_line_number_and_belongs_to_the_bar() {
+        let reply = Reply { id: "r".to_owned(), text: "one\ntwo\nthree\n".to_owned(), at: None };
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default())
+            .with_root(std::path::PathBuf::from("/work"));
+        app.open_file(crate::files::LoadedFile {
+            relative: std::path::PathBuf::from("a.txt"),
+            text: "one\ntwo\nthree\n".to_owned(),
+            stamp: crate::files::Stamp { size: 14, modified: None },
+        });
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        let screen = terminal.backend().buffer().clone();
+        let (x, y) = find(&screen, "[o looks good]");
+        let row: String = (0..x).map(|column| screen.cell((column, y)).map_or(" ", |c| c.symbol())).collect();
+        assert_eq!(row.trim(), "", "no gutter number on the bar row: {row:?}");
+        assert_eq!(app.hits.at(0, y), Some(&Hit::Bar), "the margin of the bar row");
+        assert_eq!(app.hits.at(70, y), Some(&Hit::Bar), "the empty end of the bar row");
     }
 
     #[test]

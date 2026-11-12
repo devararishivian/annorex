@@ -2,7 +2,7 @@
 source: crates/annorex/tests/viewer.rs
 expression: "render(&mut viewer(), 40, 12)"
 ---
-Annorex · last reply · claude (idle)
+claude (idle) · reply 1/3     [ Send ▸ ]
 ▍Migration plan
  [o looks good] [c comment] [d remove]
  We change the login page and the
@@ -13,4 +13,4 @@ Annorex · last reply · claude (idle)
 
  1. Step 1: update the module number 1
  and run its tests. This item is long,
-j/k move  v select  c/d/s annotate  S s…
+block 1/49   j/k block · v text · ? help

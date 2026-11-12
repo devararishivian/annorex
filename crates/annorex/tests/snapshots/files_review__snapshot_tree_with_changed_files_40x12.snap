@@ -2,7 +2,7 @@
 source: crates/annorex/tests/files_review.rs
 expression: "render(&mut app, 40, 12)"
 ---
-Annorex · files · claude (idle)
+claude (idle) · no file open  [ Send ▸ ]
 ┌ Tree ────────────────────────────────┐
 │* changed by the agent: 2             │
 │   *src/main.rs                       │
@@ -13,4 +13,4 @@ Annorex · files · claude (idle)
 │                                      │
 │                                      │
 └──────────────────────────────────────┘
-j/k move  enter open  h/l close/open  /…
+block 0/0              j/k move · ? help

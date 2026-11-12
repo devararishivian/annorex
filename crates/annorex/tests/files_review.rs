@@ -131,11 +131,10 @@ fn list_marks_unsent_files() {
     press(&mut app, "p");
     let screen = render(&mut app, 120, 20);
     assert!(screen.contains("Files") && screen.contains("b.txt") && screen.contains("a.md"), "{screen}");
-    // The list is the right part of the screen. The document part has the note marker too.
-    let list: Vec<String> = screen.lines().map(|line| line.chars().skip(80).collect()).collect();
-    let marked: Vec<&String> = list.iter().filter(|line| line.contains('●')).collect();
-    assert_eq!(marked.len(), 1, "{screen}");
-    assert!(marked[0].contains("a.md"), "{marked:?}");
+    // The list is a box over the document: its rows end with the note counts.
+    let row = |name: &str| screen.lines().find(|line| line.contains(&format!("{name} ("))).expect("row");
+    assert!(row("a.md").contains("● a.md"), "{screen}");
+    assert!(!row("b.txt").contains('●'), "{screen}");
 }
 
 #[test]
@@ -186,7 +185,7 @@ fn send_marks_all_files_sent() {
     assert!(app.export().is_empty(), "both files were sent");
     assert_eq!(app.unsent_replies(), Vec::<usize>::new());
     assert!(!app.export_all().is_empty(), "copy still has all notes");
-    assert!(render(&mut app, 120, 12).contains("[Sent"));
+    assert!(render(&mut app, 120, 12).contains("[ Sent"));
 }
 
 #[test]
@@ -289,10 +288,10 @@ fn tree_filter_ranks_full_paths() {
 fn finder_filters_while_typing_and_opens_the_best_match() {
     let (_dir, mut app) = tree_app(&Config::default());
     ctrl(&mut app, 'p');
-    let screen = render(&mut app, 120, 20);
+    let screen = render(&mut app, 80, 20);
     assert!(screen.contains("README.md") && screen.contains("src/main.rs"), "{screen}");
     press(&mut app, "main");
-    let screen = render(&mut app, 120, 20);
+    let screen = render(&mut app, 80, 20);
     assert!(screen.contains("src/main.rs") && !screen.contains("README.md"), "{screen}");
     assert!(screen.contains("> main"), "the query shows: {screen}");
     press(&mut app, "\n");
@@ -305,7 +304,7 @@ fn finder_filters_while_typing_and_opens_the_best_match() {
     press_key(&mut app, KeyCode::Up, KeyModifiers::NONE);
     press_key(&mut app, KeyCode::Backspace, KeyModifiers::NONE);
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-    assert!(!render(&mut app, 120, 20).contains("Find file"), "esc closes the finder");
+    assert!(!render(&mut app, 80, 20).contains("Find file"), "esc closes the finder");
 }
 
 #[test]
@@ -360,9 +359,11 @@ fn rebound_keys_open_the_tree_and_the_finder() {
     assert!(screen.contains("Find file") && screen.contains("README.md"), "{screen}");
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
     press(&mut app, "T");
-    assert!(!render(&mut app, 120, 20).contains("Tree"), "the old key does nothing");
+    assert!(render(&mut app, 120, 20).contains("Tree"), "the old key does nothing: the tree stays");
+    press(&mut app, "t");
+    assert!(!render(&mut app, 120, 20).contains("Tree"), "the new key hides the tree");
     let footer = render(&mut app, 120, 20).lines().last().expect("footer").to_owned();
-    assert!(footer.contains("t tree") && footer.contains("ctrl+o find file"), "{footer}");
+    assert!(footer.contains("t tree") && footer.contains("ctrl+o find"), "{footer}");
 }
 
 #[test]
@@ -534,16 +535,16 @@ fn header_and_nothing_to_send_look_at_all_open_files() {
     let mut app = two_files(); // a.md on the screen
     press(&mut app, "cnote\n");
     app.mark_sent("2026-11-09T10:00:00Z");
-    assert!(render(&mut app, 100, 12).contains("[Sent 10:00]"));
+    assert!(render(&mut app, 100, 12).contains("[ Sent 10:00 ]"));
     // Show b.txt, which has no notes: the notes of a.md were sent, so the header still says so.
     press(&mut app, "[");
-    assert!(render(&mut app, 100, 12).contains("[Sent 10:00]"), "sent state is for all files");
+    assert!(render(&mut app, 100, 12).contains("[ Sent 10:00 ]"), "sent state is for all files");
     press(&mut app, "S");
     assert_eq!(app.status(), Some("Nothing new to send. Press Y to copy all notes."));
     // A new note in b.txt makes the header a send button again.
     press(&mut app, "cmore\n");
     let screen = render(&mut app, 100, 12);
-    assert!(screen.contains("[Send 1") && !screen.contains("[Sent"), "{screen}");
+    assert!(screen.contains("[ Send 1") && !screen.contains("[ Sent"), "{screen}");
 }
 
 #[test]
@@ -635,10 +636,10 @@ fn banner_names_the_count_of_new_files_and_clears_when_the_tree_opens() {
     let (_dir, mut app) = tree_app(&Config::default());
     app.changed_list(vec!["src/main.rs".into()]);
     app.changed_list(vec!["src/lib.rs".into(), "README.md".into(), "src/main.rs".into()]);
-    let screen = render(&mut app, 120, 20);
+    let screen = render(&mut app, 80, 20);
     assert!(screen.contains("The agent changed 2 more files."), "{screen}");
     press(&mut app, "T");
-    assert!(!render(&mut app, 120, 20).contains("The agent changed"));
+    assert!(!render(&mut app, 80, 20).contains("The agent changed"));
 }
 
 #[test]
@@ -689,4 +690,183 @@ fn the_agent_banner_shows_beside_the_banner_of_the_open_file() {
         screen.contains("a.md was deleted") && screen.contains("The agent changed 1 more file."),
         "{screen}"
     );
+}
+
+fn tab(app: &mut App) {
+    press_key(app, KeyCode::Tab, KeyModifiers::NONE);
+}
+
+/// The first `columns` characters of each screen row.
+fn left_part(screen: &str, columns: usize) -> String {
+    screen.lines().map(|line| line.chars().take(columns).collect::<String>()).collect::<Vec<_>>().join("\n")
+}
+
+/// The tree app with `README.md` open.
+fn tree_with_file() -> (tempfile::TempDir, App) {
+    let (dir, mut app) = tree_app(&Config::default());
+    app.open_file(annorex::files::load(dir.path(), std::path::Path::new("README.md")).expect("load"));
+    (dir, app)
+}
+
+#[test]
+fn tree_is_on_the_left_when_there_are_files() {
+    for width in [100, 120] {
+        let (_dir, mut app) = tree_with_file();
+        let screen = render(&mut app, width, 20);
+        let left = left_part(&screen, 28);
+        assert!(left.contains("Tree") && left.contains("src/") && left.contains("README.md"), "{screen}");
+        let row = screen.lines().find(|line| line.contains("Readme")).expect("document row");
+        let column = row.get(..row.find("Readme").expect("Readme")).expect("head").chars().count();
+        assert!(column >= 28, "the document is right of the tree at {width}: {screen}");
+    }
+    let mut no_files = App::new(state(), Screen::Viewer, Vec::new(), &Config::default());
+    assert!(!render(&mut no_files, 120, 20).contains("Tree"), "no tree without files");
+}
+
+#[test]
+fn t_hides_and_shows_the_tree() {
+    let (_dir, mut app) = tree_with_file();
+    assert!(left_part(&render(&mut app, 120, 20), 28).contains("Tree"));
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(!screen.contains("Tree"), "{screen}");
+    let row = screen.lines().find(|line| line.contains("Readme")).expect("document row");
+    assert!(row.find("Readme").expect("Readme") < 5, "the document takes the space: {screen}");
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(left_part(&screen, 28).contains("Tree"), "{screen}");
+    assert!(
+        screen.lines().last().unwrap_or_default().contains("enter open"),
+        "the tree has the focus: {screen}"
+    );
+}
+
+#[test]
+fn tab_cycles_tree_doc_rail() {
+    let (_dir, mut app) = tree_with_file();
+    press(&mut app, "cnote\n");
+    let footer = |app: &mut App| render(app, 120, 20).lines().last().unwrap_or_default().to_owned();
+    assert!(footer(&mut app).contains("j/k block"));
+    tab(&mut app);
+    assert!(footer(&mut app).contains("enter go"), "the rail");
+    tab(&mut app);
+    assert!(footer(&mut app).contains("/ filter"), "the tree");
+    tab(&mut app);
+    assert!(footer(&mut app).contains("j/k block"), "the document again");
+    // Without the tree and the rail, tab stays on the document.
+    let mut narrow = files_app();
+    narrow.open_file(loaded("a.md", "# Title\n"));
+    let _ = render(&mut narrow, 80, 20);
+    tab(&mut narrow);
+    assert!(render(&mut narrow, 80, 20).lines().last().unwrap_or_default().contains("j/k block"));
+}
+
+#[test]
+fn a_focuses_the_rail_at_120_columns() {
+    let mut app = two_files();
+    press(&mut app, "cnote a\n");
+    let _ = render(&mut app, 120, 30);
+    press(&mut app, "a");
+    let screen = render(&mut app, 120, 30);
+    assert!(!screen.contains("Annotations"), "no list beside the rail: {screen}");
+    assert!(screen.lines().last().unwrap_or_default().contains("enter go"), "{screen}");
+    assert!(screen.contains(" e edit ─ x remove ─"), "the focused card: {screen}");
+    press(&mut app, "a");
+    assert!(render(&mut app, 120, 30).lines().last().unwrap_or_default().contains("j/k block"));
+}
+
+#[test]
+fn a_opens_the_list_at_110_columns() {
+    let mut app = two_files();
+    press(&mut app, "cnote a\n");
+    let _ = render(&mut app, 110, 30);
+    press(&mut app, "a");
+    let screen = render(&mut app, 110, 30);
+    let right: Vec<String> = screen.lines().map(|line| line.chars().skip(70).collect()).collect();
+    assert!(right.iter().any(|line| line.contains("Annotations")), "{screen}");
+    assert!(right.iter().any(|line| line.contains("note a")), "{screen}");
+    assert!(!screen.contains(" e edit ─"), "no card rail at 110: {screen}");
+}
+
+/// The box whose top border starts with `┌` and `title`: column, row, width, height.
+fn box_of(screen: &str, title: &str) -> (usize, usize, usize, usize) {
+    let lines: Vec<Vec<char>> = screen.lines().map(|line| line.chars().collect()).collect();
+    let needle: Vec<char> = format!("┌{title}").chars().collect();
+    for (y, line) in lines.iter().enumerate() {
+        if let Some(x) = line.windows(needle.len()).position(|w| w == needle.as_slice()) {
+            let right = line.iter().skip(x).position(|&c| c == '┐').expect("right corner") + x;
+            let bottom =
+                (y..lines.len()).find(|&row| lines[row].get(x) == Some(&'└')).expect("bottom corner");
+            return (x, y, right - x + 1, bottom - y + 1);
+        }
+    }
+    panic!("no box {title:?}:\n{screen}");
+}
+
+/// True when the box is in the middle of the body (the rows between the header and the footer), to
+/// one cell.
+fn centered(screen: &str, title: &str, width: usize, height: usize) -> bool {
+    let (x, y, w, h) = box_of(screen, title);
+    let (left, right) = (x, width - x - w);
+    let (above, below) = (y - 1, height - 1 - (y + h));
+    left.abs_diff(right) <= 1 && above.abs_diff(below) <= 1
+}
+
+#[test]
+fn reply_list_finder_and_picker_open_centered() {
+    for (width, height) in [(80, 24), (120, 40), (50, 20)] {
+        let (_dir, mut app) = tree_with_file();
+        press(&mut app, "p");
+        let screen = render(&mut app, width, height);
+        assert!(centered(&screen, " Files ", usize::from(width), usize::from(height)), "{screen}");
+        press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        ctrl(&mut app, 'p');
+        let screen = render(&mut app, width, height);
+        assert!(centered(&screen, " Find file ", usize::from(width), usize::from(height)), "{screen}");
+        press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        app.set_reply_source(annorex::ui::ReplySource::Pick(vec![annorex::replies::Candidate {
+            session: annorex::replies::SessionRef::Pi(PathBuf::from("/s.jsonl")),
+            updated: std::time::SystemTime::now(),
+            last_line: "the session".to_owned(),
+        }]));
+        press(&mut app, "p");
+        let screen = render(&mut app, width, height);
+        assert!(screen.contains("the session"), "{screen}");
+        assert!(centered(&screen, " Files ", usize::from(width), usize::from(height)), "{screen}");
+    }
+}
+
+#[test]
+fn folder_rows_show_note_counts() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::create_dir(dir.path().join("docs")).expect("docs");
+    std::fs::write(dir.path().join("docs/a.md"), "one\n\ntwo\n").expect("a");
+    std::fs::write(dir.path().join("docs/b.md"), "three\n").expect("b");
+    std::fs::write(dir.path().join("top.md"), "top\n").expect("top");
+    let mut app =
+        App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(dir.path().to_path_buf());
+    app.set_scan(annorex::files::scan(dir.path()));
+    for (name, keys) in [("docs/a.md", "cx\njcy\n"), ("docs/b.md", "cz\n"), ("top.md", "cw\n")] {
+        app.open_file(annorex::files::load(dir.path(), std::path::Path::new(name)).expect("load"));
+        press(&mut app, keys);
+    }
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("▸ docs/ 3"), "{screen}");
+}
+
+#[test]
+fn one_column_below_100() {
+    let (_dir, mut app) = tree_with_file();
+    press(&mut app, "cnote\n");
+    let screen = render(&mut app, 80, 20);
+    assert!(!screen.contains("Tree") && !screen.contains("Annotations"), "{screen}");
+    press(&mut app, "T");
+    let screen = render(&mut app, 80, 20);
+    assert!(screen.lines().nth(1).unwrap_or_default().starts_with("┌ Tree"), "over the document: {screen}");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(!render(&mut app, 80, 20).contains("Tree"), "esc gives the document back");
+    press(&mut app, "a");
+    let screen = render(&mut app, 80, 20);
+    assert!(screen.lines().nth(1).unwrap_or_default().starts_with("┌ Annotations"), "{screen}");
+    assert!(screen.contains("note"), "{screen}");
 }

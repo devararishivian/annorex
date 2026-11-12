@@ -8,21 +8,18 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::app::App;
+use super::app::{App, Focus};
 use super::bar::shown_rows;
 use super::draw::editor_top;
-use super::focus::Mode;
 use super::hits::Hit;
 use crate::keys::Action;
 use crate::review::{Annotation, Kind};
 use crate::wrap::fit;
 
-/// From this width of the document area, the cards show in a rail on the right.
-pub(super) const RAIL_FROM_WIDTH: u16 = 120;
-/// The width of the rail. Its first column stays blank between the document and the cards.
-pub(super) const RAIL_WIDTH: u16 = 34;
-/// The width of the marker margin on the right below `RAIL_FROM_WIDTH`: a blank and the marker.
+/// The width of the marker margin on the right where the window has no card rail: a blank and the marker.
 const MARKER_WIDTH: u16 = 2;
+/// The narrowest document area that keeps the marker margin.
+const MARKERS_FROM_WIDTH: u16 = 21;
 /// The most rows of note text on one card.
 const MAX_BODY_ROWS: usize = 6;
 /// The most notes in the numbered pick: the keys `1` to `9`.
@@ -31,7 +28,7 @@ pub(super) const MAX_PICK: usize = 9;
 /// What shows at the right of the document text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Side {
-    /// The card rail.
+    /// The card rail. Its first column stays blank between the document and the cards.
     Rail(Rect),
     /// The marker margin.
     Markers(Rect),
@@ -39,14 +36,11 @@ pub(super) enum Side {
     Nothing,
 }
 
-/// Split the document area into the area of the text and the area at its right.
-pub(super) fn split_side(area: Rect) -> (Rect, Side) {
-    let keep = |width: u16| Rect::new(area.x, area.y, area.width - width, area.height);
-    if area.width >= RAIL_FROM_WIDTH {
-        let doc = keep(RAIL_WIDTH);
-        (doc, Side::Rail(Rect::new(doc.right(), area.y, RAIL_WIDTH, area.height)))
-    } else if area.width > MARKER_WIDTH * 10 {
-        let doc = keep(MARKER_WIDTH);
+/// Where the window has no card rail: split the document area into the area of the text and the
+/// marker margin at its right.
+pub(super) fn split_markers(area: Rect) -> (Rect, Side) {
+    if area.width >= MARKERS_FROM_WIDTH {
+        let doc = Rect::new(area.x, area.y, area.width - MARKER_WIDTH, area.height);
         (doc, Side::Markers(Rect::new(doc.right(), area.y, MARKER_WIDTH, area.height)))
     } else {
         (area, Side::Nothing)
@@ -172,23 +166,24 @@ struct Shown {
 }
 
 /// The notes whose range has a row on the screen, in document order. Detached notes are left out.
+/// A note has the focus when the rail has the focus and its card is the focused one, else when it is
+/// at the focus of the document: on the focused block, or at the cursor in text mode.
 fn shown_notes(app: &mut App) -> Vec<Shown> {
     let notes: Vec<Annotation> = app
         .review()
         .map(|review| review.in_order().into_iter().filter(|a| !a.detached).cloned().collect())
         .unwrap_or_default();
-    let focus = match app.mode {
-        Mode::Block(index) => app.doc.blocks.get(index).map(|block| block.range.clone()),
-        Mode::Text => None,
+    let focused: Vec<u64> = if app.focus == Focus::Rail {
+        app.listed_annotation().into_iter().collect()
+    } else {
+        app.notes_here()
     };
     notes
         .into_iter()
         .filter_map(|annotation| {
             let (first, _) = shown_rows(app, &annotation.range)?;
             let row = u16::try_from(first).ok()?;
-            let in_focus = focus.as_ref().is_some_and(|block| {
-                annotation.range.start < block.end && block.start < annotation.range.end
-            });
+            let in_focus = focused.contains(&annotation.id);
             Some(Shown { annotation, row, in_focus })
         })
         .collect()
@@ -354,10 +349,10 @@ mod tests {
     }
 
     #[test]
-    fn a_wide_area_has_the_rail_and_a_narrow_one_the_markers() {
-        let (doc, side) = split_side(Rect::new(0, 1, 120, 30));
-        assert_eq!((doc.width, side), (86, Side::Rail(Rect::new(86, 1, 34, 30))));
-        let (doc, side) = split_side(Rect::new(0, 1, 119, 30));
+    fn the_marker_margin_needs_21_columns() {
+        let (doc, side) = split_markers(Rect::new(0, 1, 119, 30));
         assert_eq!((doc.width, side), (117, Side::Markers(Rect::new(117, 1, 2, 30))));
+        let (doc, side) = split_markers(Rect::new(0, 1, 20, 30));
+        assert_eq!((doc.width, side), (20, Side::Nothing));
     }
 }

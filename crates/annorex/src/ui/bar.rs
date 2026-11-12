@@ -37,8 +37,8 @@ pub(super) fn shown_rows(app: &mut App, range: &Range<usize>) -> Option<(usize, 
     Some((first, last))
 }
 
-/// True when the bar does not show: an editor, the numbered pick, the help screen, a question, the find input, a
-/// list with the focus, or a list over the document is open, or the document is empty.
+/// True when the bar does not show: an editor, the numbered pick, the help screen, a question, or the find input is
+/// open, another part has the focus (the tree, the rail, a list, or a box), or the document is empty.
 fn hidden(app: &App) -> bool {
     app.editor.is_some()
         || app.pick.is_some()
@@ -46,7 +46,6 @@ fn hidden(app: &App) -> bool {
         || app.confirm.is_some()
         || app.find_input.is_some()
         || app.focus != Focus::Doc
-        || (app.panel_open && app.overlay)
         || app.shown_id.is_none()
         || app.doc.blocks.is_empty()
 }
@@ -54,8 +53,10 @@ fn hidden(app: &App) -> bool {
 /// Draw the action bar on the row below the range of a note: the focused block in block mode, the
 /// selection or the cursor line in text mode. When that row is not in `area`, the bar goes on the
 /// row above the range. When neither row is in `area`, no bar shows. `area` is the text area of the
-/// document: it starts at the text column. The buttons that do not fit are left out from the end.
-pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, app: &mut App) {
+/// document: it starts at the text column. `row_start` is the first column of the document row: the
+/// bar row is blank from there, so no line number or focus mark of a hidden row shows. The buttons
+/// that do not fit are left out from the end.
+pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, row_start: u16, app: &mut App) {
     if hidden(app) || area.width == 0 || area.height == 0 {
         return;
     }
@@ -70,7 +71,10 @@ pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, app: &mut App) {
     };
     let Ok(row) = u16::try_from(row) else { return };
     let y = area.y + row;
-    frame.render_widget(Clear, Rect::new(area.x, y, area.width, 1));
+    let whole = Rect::new(row_start, y, area.right().saturating_sub(row_start), 1);
+    frame.render_widget(Clear, whole);
+    // The whole row belongs to the bar: a click on its empty part must not reach the hidden row.
+    app.hits.push(whole, Hit::Bar);
     let mut x = area.x;
     for (index, (action, kind, word, color)) in BUTTONS.into_iter().enumerate() {
         let key = app.config.keys.label(action);

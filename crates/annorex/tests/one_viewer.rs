@@ -255,7 +255,7 @@ fn the_send_button_counts_only_unsent_notes_of_all_documents() {
     app.finish_send("2026-11-12T10:00:00Z");
     press(&mut app, "cnote two\n");
     let screen = render(&mut app, 100, 24);
-    assert!(screen.contains("[Send 1"), "one new note, not three:\n{screen}");
+    assert!(screen.contains("[ Send 1 "), "one new note, not three:\n{screen}");
 }
 
 #[test]
@@ -360,8 +360,92 @@ fn the_footer_shows_send_and_help_first() {
     let mut app = both();
     let screen = render(&mut app, 100, 30);
     let footer = screen.lines().last().unwrap_or_default();
-    let annotate = footer.find("annotate").unwrap_or(usize::MAX);
+    let annotate = footer.find("note").unwrap_or(usize::MAX);
     let send = footer.find("S send").unwrap_or(0);
     let help = footer.find("? help").unwrap_or(0);
     assert!(annotate < send && send < help, "{footer}");
+}
+
+fn header_of(app: &mut App, width: u16) -> String {
+    render(app, width, 24).lines().next().unwrap_or_default().to_owned()
+}
+
+fn footer_of(app: &mut App, width: u16) -> String {
+    render(app, width, 24).lines().last().unwrap_or_default().to_owned()
+}
+
+#[test]
+fn header_send_button_names_the_agent() {
+    let pi = AgentState { agent: Some(Agent::Pi), safety: Safety::Clear { state: Some("idle".to_owned()) } };
+    let mut app = App::new(pi, Screen::Viewer, vec![reply("r1", "one\n\ntwo\n")], &Config::default());
+    let header = header_of(&mut app, 100);
+    assert!(header.ends_with("[ Send ▸ ]"), "a dim button with no notes: {header}");
+    press(&mut app, "cfirst\n");
+    press(&mut app, "jcsecond\n");
+    let header = header_of(&mut app, 100);
+    assert!(header.ends_with("[ Send 2 → pi ▸ ]"), "{header}");
+}
+
+#[test]
+fn footer_changes_with_the_mode() {
+    let mut app = both();
+    let block = footer_of(&mut app, 200);
+    assert!(
+        block.contains("block 1/1") && block.contains("j/k block") && block.ends_with("? help"),
+        "{block}"
+    );
+    press(&mut app, "v");
+    let text = footer_of(&mut app, 200);
+    assert!(text.contains("o c d s note") && text.contains("esc clear"), "{text}");
+    assert!(!text.contains("j/k block"), "{text}");
+    press(&mut app, "c");
+    let editor = footer_of(&mut app, 200);
+    assert!(editor.contains("enter save") && editor.contains("esc cancel"), "{editor}");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    let rail = footer_of(&mut app, 200);
+    assert!(rail.contains("enter go") && rail.contains("e edit"), "{rail}");
+    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    let tree = footer_of(&mut app, 200);
+    assert!(tree.contains("enter open") && tree.contains("/ filter") && tree.ends_with("? help"), "{tree}");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "p");
+    let list = footer_of(&mut app, 200);
+    assert!(list.contains("enter open") && list.contains("esc close"), "{list}");
+    assert!(!list.contains("/ filter"), "{list}");
+}
+
+#[test]
+fn footer_drops_hints_from_the_end_but_keeps_help() {
+    let mut app = both();
+    let wide = footer_of(&mut app, 200);
+    assert!(wide.contains("ctrl+p find"), "{wide}");
+    let narrow = footer_of(&mut app, 60);
+    assert!(narrow.ends_with("? help") && narrow.contains("j/k block"), "{narrow}");
+    assert!(!narrow.contains("ctrl+p find"), "the last hints go first: {narrow}");
+    assert!(narrow.chars().count() <= 60, "{narrow}");
+}
+
+#[test]
+fn an_empty_document_shows_block_0_of_0() {
+    let mut app = files_only();
+    let footer = footer_of(&mut app, 80);
+    assert!(footer.contains("block 0/0"), "{footer}");
+    press(&mut app, "jkcvo");
+    assert!(footer_of(&mut app, 80).contains("block 0/0"));
+}
+
+#[test]
+fn a_new_text_closes_the_numbered_pick() {
+    let mut app = both();
+    press(&mut app, "cone\n");
+    press(&mut app, "ctwo\n");
+    press(&mut app, "e");
+    assert!(render(&mut app, 80, 24).contains(" pick "), "two notes on the block open the pick");
+    app.set_replies(vec![reply("r1", "new start\n\nalpha beta gamma\n"), reply("r2", "older reply text\n")]);
+    assert!(!render(&mut app, 80, 24).contains(" pick "), "the ids of the pick can be stale");
+    press(&mut app, "1");
+    assert!(app.editor().is_none(), "1 does not edit a stale note");
 }
