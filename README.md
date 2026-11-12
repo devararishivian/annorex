@@ -50,8 +50,8 @@ require("annorex").setup{ bin = "/path/to/annorex" }
 2. Press `cmd+shift+a` to review the last reply. Press `cmd+shift+f` to review the files.
 3. At the start, no block has the focus. Press `j` or `k` to choose a block, or click one. A block is a paragraph, a
    list item, a heading, a code block, or a table. Press `enter` to show the action bar above the block.
-4. Press `o` to mark the block as good, `c` to comment, `d` to mark it for removal, or `s` to replace it. `o` needs no
-   text. The other keys open a note box. Type the note. Press `enter`.
+4. Press `o` to mark the block as good, `c` to comment, `d` to mark it for removal, or `s` to replace it. `o` and `d`
+   save at once and need no text. The other keys open a note box. Type the note. Press `enter`.
 5. To annotate a part of a block, press `v` and move to select text. This is text mode. Press `v` again to end the
    selection and show the action bar. Press `esc` twice to go back to block mode.
 6. Press `S` to send all notes to the agent.
@@ -63,15 +63,16 @@ In the viewer, press `?` to see all keys.
 The block with the focus has a bar in the left margin. The action bar shows after you finish a selection: when a drag
 ends, after a double click, after `enter` on the focused block, and after the `v` or `V` that ends a selection. The
 action bar shows on the row above the selection. When there is no row above, it shows on the row below. It moves left
-to stay in the document. After `enter`, an item acts on the whole block. It has four items: `o ✓ looks good`, `c 💬 comment`, `d ✕ remove`, and `s ⇄ replace`. Each item has the
-icon and the color of its note card. A click on an item does the same as its key.
+to stay in the document. After `enter`, an item acts on the whole block. The bar has four items: `o ✓ looks good`, `c 💬 comment`,
+`d ✕ remove`, and `s ⇄ replace`. Each item has the icon and the color of its note card. A click on an item does the same as its key.
 
 The keys `o`, `c`, `d`, and `s` also work without the action bar. They act on the focused block or on the selection. A
 focus move with `j` or `k` does not show the action bar. Each key in the document closes it, except `?`. A mouse click
 outside the action bar closes it. The mouse wheel does not close it.
 
-The export of `o looks good` has the text `Looks good:` and the quote. The note needs no text. Press `e` later to add
-text.
+The keys `o` and `d` save the note at once. No note box opens, and the action bar closes. The export of `o looks good`
+has the text `Looks good:` and the quote. A looks good note and a remove note have no text. Press `e` on them to see the
+message `Looks good has no text.` or `Remove has no text.`
 
 Notes show in place. Looks good has a green background. A comment is underlined in yellow. Remove is red and crossed
 out. Replace is magenta and crossed out. At 120 columns or more, each note has a card in a rail on the right. Where
@@ -82,7 +83,7 @@ The note box opens as a floating box near the block. It has the buttons `save` a
 adds a new line when the terminal supports it. Otherwise, use `ctrl+j`. The box shows 8 rows of text and scrolls with
 `PgUp`, `PgDn`, or the mouse wheel.
 
-Press `e` to edit and `x` to delete the note at the focus.
+Press `e` to edit and `x` to delete the note at the focus. A card of a looks good note or a remove note has only the `x remove` button.
 
 ## Layout
 
@@ -134,20 +135,21 @@ For all keys and for the config file, see [docs/guide.md](docs/guide.md).
 
 Each mouse action has a key. The help screen does not list the mouse actions.
 
-| Where                    | Action       | Result                                                                   |
-|--------------------------|--------------|--------------------------------------------------------------------------|
-| List, document, tree, rail | Wheel      | Scroll the part under the pointer by 3 lines                             |
-| Block                    | Click        | Focus the block                                                          |
-| Document text            | Drag         | Select characters (text mode). The action bar shows at the release       |
-| Document text            | Double click | Select the word and show the action bar                                  |
-| Action bar item          | Click        | Add that note. Looks good saves at once. The others open the note box     |
-| Card                     | Click        | Focus the note and its block. The card shows `edit` and `remove`         |
-| Header `Send` button     | Click        | The same as `S`                                                          |
-| Tree row                 | Click        | Open the file, or open or close the directory                            |
-| Row of a list or picker  | Click        | Open that reply, session, or file                                            |
-| Footer hint              | Click        | Do that action                                                           |
-| Editor                   | Click `save` or `cancel` | Save or cancel. A click outside the editor does nothing      |
-| Help screen              | Click        | Close the help screen                                                    |
+| Where                      | Action                   | Result                                                                                                     |
+|----------------------------|--------------------------|------------------------------------------------------------------------------------------------------------|
+| List, document, tree, rail | Wheel                    | Scroll the part under the pointer by 3 lines                                                               |
+| Note box                   | Wheel                    | Scroll the text of the box                                                                                 |
+| Block                      | Click                    | Focus the block                                                                                            |
+| Document text              | Drag                     | Select characters (text mode). The action bar shows at the release                                         |
+| Document text              | Double click             | Select the word and show the action bar                                                                    |
+| Action bar item            | Click                    | Add that note. Looks good and remove save at once. The others open the note box                            |
+| Card                       | Click                    | Focus the note and its block. The card shows `edit` and `remove`. Looks good and remove have `remove` only |
+| Header `Send` button       | Click                    | The same as `S`                                                                                            |
+| Tree row                   | Click                    | Open the file, or open or close the directory                                                              |
+| Row of a list or picker    | Click                    | Open that reply, session, or file                                                                          |
+| Footer hint                | Click                    | Do that action                                                                                             |
+| Note box                   | Click `save` or `cancel` | Save or cancel. A click outside the note box does nothing                                                  |
+| Help screen                | Click                    | Close the help screen                                                                                      |
 
 ## Theme
 

@@ -128,7 +128,7 @@ fn a_selection_ends_with_the_whole_last_character() {
 #[test]
 fn line_selection_makes_a_delete() {
     let mut app = app(LIST);
-    press(&mut app, "Vjd\n");
+    press(&mut app, "Vjd");
     let a = &app.review().expect("review").annotations[0];
     assert_eq!(a.kind, Kind::Delete);
     assert_eq!(a.quote, "- one\n- two");
@@ -138,7 +138,7 @@ fn line_selection_makes_a_delete() {
 fn no_selection_uses_the_cursor_line() {
     let mut app = app(LIST);
     // Text mode: without a selection a note covers the line of the cursor.
-    press(&mut app, "0jd\n");
+    press(&mut app, "0jd");
     assert_eq!(app.review().expect("review").annotations[0].quote, "- two");
 }
 
@@ -155,7 +155,7 @@ fn esc_clears_the_selection() {
     let mut app = app("alpha beta\n");
     press(&mut app, "vll");
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-    press(&mut app, "dx\n");
+    press(&mut app, "d");
     assert_eq!(app.review().expect("review").annotations[0].quote, "alpha beta");
 }
 
@@ -482,7 +482,6 @@ fn two_notes() -> App {
     press(&mut app, "vllc");
     press(&mut app, "Which page?\n");
     press(&mut app, "jjVjd");
-    press(&mut app, "Not needed.\n");
     app
 }
 
@@ -926,7 +925,7 @@ fn selection_gives_the_range_of_the_annotation() {
     assert_eq!(first.quote, "bold** ", "a selection over markup quotes the source, markup included");
     assert_eq!(first.range, 2..9);
     let mut lines = self::app(text);
-    press(&mut lines, "Vjdx\n");
+    press(&mut lines, "Vjd");
     let delete = &lines.review().expect("review").annotations[0];
     assert_eq!(delete.range.end, text.len() - 1, "both lines, without the final line feed");
     assert!(delete.quote.ends_with("\nsecond line"), "{:?}", delete.quote);
@@ -1143,7 +1142,7 @@ fn four_kinds() -> App {
     let mut app = app(FIVE);
     press(&mut app, "o");
     press(&mut app, "jcWhy?\n");
-    press(&mut app, "jd\n");
+    press(&mut app, "jd");
     press(&mut app, "jsnew part\n");
     press(&mut app, "j");
     assert_eq!(app.review().expect("review").annotations.len(), 4);
@@ -1300,7 +1299,7 @@ fn snapshot_cards_120x40() {
     let mut app = app(bar_text());
     press(&mut app, "o");
     press(&mut app, "jcWhich page? The old one or the new one, after the move of the login form.\n");
-    press(&mut app, "jd\n");
+    press(&mut app, "jd");
     press(&mut app, "jsThe last line.\n");
     press(&mut app, "k");
     insta::assert_snapshot!(render(&mut app, 120, 40));
@@ -1337,4 +1336,60 @@ fn the_open_list_keeps_the_text_width_at_119_columns() {
     let line = screen.lines().nth(2).expect("row");
     let border = line.chars().take_while(|&c| c != '│').count();
     assert_eq!(border, 85, "{screen}");
+}
+
+#[test]
+fn d_saves_remove_at_once() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllll");
+    let effect = press_key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE);
+    assert!(matches!(effect, Effect::SaveDraft));
+    assert!(app.editor().is_none(), "no box opens");
+    let review = app.review().expect("review");
+    assert_eq!(review.annotations.len(), 1);
+    assert_eq!((review.annotations[0].kind, review.annotations[0].quote.as_str()), (Kind::Delete, "alpha"));
+    press(&mut app, "0vlllld");
+    assert_eq!(app.review().expect("review").annotations.len(), 1);
+    assert_eq!(app.status(), Some("Already saved."));
+}
+
+#[test]
+fn looks_good_and_remove_cards_have_no_edit() {
+    for key in ["o", "d"] {
+        let mut app = app("alpha beta gamma\n");
+        press(&mut app, "vllll");
+        press(&mut app, key);
+        let screen = render(&mut app, 140, 24);
+        assert!(screen.contains("x remove"), "{key}:\n{screen}");
+        assert!(!screen.contains("e edit"), "{key}:\n{screen}");
+    }
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllc");
+    press(&mut app, "Why?\n");
+    let screen = render(&mut app, 140, 24);
+    assert!(screen.contains("e edit") && screen.contains("x remove"), "{screen}");
+}
+
+#[test]
+fn e_on_looks_good_does_not_open_box() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vlllloe");
+    assert!(app.editor().is_none());
+    assert_eq!(app.status(), Some("Looks good has no text."));
+    let mut app = self::app("alpha beta gamma\n");
+    press(&mut app, "vllllde");
+    assert!(app.editor().is_none());
+    assert_eq!(app.status(), Some("Remove has no text."));
+}
+
+#[test]
+fn an_old_looks_good_note_with_text_still_exports_its_text() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vlllld");
+    let mut draft = app.draft(Agent::ClaudeCode, "s").expect("draft");
+    draft.review.annotations[0].note = "old text".to_owned();
+    let mut fresh = self::app("alpha beta gamma\n");
+    fresh.restore("r1", draft);
+    let export = fresh.export();
+    assert!(export.contains("> old text"), "{export}");
 }

@@ -174,7 +174,11 @@ impl App {
             }
             Hit::Action(kind) if self.focus == Focus::Doc => {
                 self.bar_open = false;
-                return if kind == Kind::LooksGood { self.add_looks_good() } else { self.begin_new(kind) };
+                return if matches!(kind, Kind::LooksGood | Kind::Delete) {
+                    self.add_instant(kind)
+                } else {
+                    self.begin_new(kind)
+                };
             }
             Hit::Card(id) => self.focus_note(id),
             // The same as the edit and the remove key on the note: edit opens the editor, remove asks first.

@@ -1,6 +1,6 @@
 ---
 source: crates/annorex/tests/annotate.rs
-assertion_line: 1212
+assertion_line: 1305
 expression: "render(&mut app, 120, 40)"
 ---
 Annorex · last reply · claude (idle) · reply 1/1 · unsent in reply 1                               [ Send 4 → claude ▸ ]
@@ -14,7 +14,7 @@ Annorex · last reply · claude (idle) · reply 1/1 · unsent in reply 1        
  The end.                                                                              └───────────────────────────────┘
                                                                                        ┌ ✕ remove ─────────────────────┐
                                                                                        │                               │
-                                                                                       └─────────── e edit ─ x remove ─┘
+                                                                                       └──────────────────── x remove ─┘
                                                                                        ┌ ⇄ replace ────────────────────┐
                                                                                        │ The last line.                │
                                                                                        └───────────────────────────────┘

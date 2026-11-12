@@ -260,27 +260,31 @@ fn draw_cards(frame: &mut Frame, app: &mut App, rail: Rect) {
         frame.render_widget(Paragraph::new(lines).block(block), rect);
         app.hits.push(rect, Hit::Card(id));
         if shown.in_focus {
-            draw_card_buttons(frame, app, rect, id, (&edit, &remove));
+            draw_card_buttons(frame, app, rect, id, (&edit, &remove), annotation.kind);
         }
     }
 }
 
 /// The ` KEY edit ` and ` KEY remove ` buttons on the bottom border of a card, at its right end.
-fn draw_card_buttons(frame: &mut Frame, app: &mut App, rect: Rect, id: u64, keys: (&str, &str)) {
+fn draw_card_buttons(frame: &mut Frame, app: &mut App, rect: Rect, id: u64, keys: (&str, &str), kind: Kind) {
     let edit = format!(" {} edit ", keys.0);
     let remove = format!(" {} remove ", keys.1);
     let width = |text: &str| u16::try_from(text.width()).unwrap_or(u16::MAX);
-    let (edit_width, remove_width) = (width(&edit), width(&remove));
+    // A looks good note and a remove note have no text: they have no edit button.
+    let has_edit = matches!(kind, Kind::Comment | Kind::Replace);
+    let (edit_width, remove_width) = (if has_edit { width(&edit) } else { 0 }, width(&remove));
     if rect.width < edit_width.saturating_add(remove_width).saturating_add(4) {
         return;
     }
     let y = rect.bottom() - 1;
     let remove_x = rect.right() - 2 - remove_width;
-    let edit_x = remove_x - 1 - edit_width;
     let buffer = frame.buffer_mut();
-    buffer.set_string(edit_x, y, &edit, Style::new());
     buffer.set_string(remove_x, y, &remove, Style::new());
-    app.hits.push(Rect::new(edit_x, y, edit_width, 1), Hit::CardEdit(id));
+    if has_edit {
+        let edit_x = remove_x - 1 - edit_width;
+        buffer.set_string(edit_x, y, &edit, Style::new());
+        app.hits.push(Rect::new(edit_x, y, edit_width, 1), Hit::CardEdit(id));
+    }
     app.hits.push(Rect::new(remove_x, y, remove_width, 1), Hit::CardRemove(id));
 }
 

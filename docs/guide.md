@@ -118,8 +118,8 @@ above it.
 | `g` / `G`, `home` / `end` | Go to the first or the last block. Without a focus, only scroll to the top or the end |
 | `ctrl+d` / `ctrl+u`     | Scroll half a page, then focus the first block in the view. Without a focus, only scroll |
 | `PageDown` / `PageUp`   | Scroll one page, then focus the first block in the view          |
-| `o`                     | Note on the block: looks good (no text, no note box)               |
-| `c` / `d` / `s`         | Note on the block: comment, remove, or replace (opens the note box) |
+| `o` / `d`               | Note on the block: looks good or remove (saves at once, no text, no note box) |
+| `c` / `s`               | Note on the block: comment or replace (opens the note box)         |
 | `e` / `x`               | Edit or delete the note of the block                             |
 | `enter`                 | Show the action bar for the whole block. Block mode stays. Without a focus, focus the first block on the screen first |
 | `v`                     | Enter text mode and start a selection at the start of the block  |
@@ -197,8 +197,9 @@ the line, for example `Comment · line 20`. An empty box shows a dim hint. It ha
 footer shows the key that works. `alt+enter` also adds a new line. `esc` cancels.
 
 The box shows at most 8 rows of text. It follows the end of the text. Press `PgUp` or `PgDn`, or use the mouse wheel
-over the box, to scroll. A new character goes back to the end. A comment needs text. The note `looks good` needs no text,
-so it saves at once without the box. The text of a remove note is optional.
+over the box, to scroll. A new character goes back to the end. A comment needs text. The notes `looks good` and `remove` have no text,
+so they save at once without the box. `e` on them shows `Looks good has no text.` or `Remove has no text.` A draft
+of an older version can have text on these notes. Annorex keeps that text in the export.
 
 The config file can still have `labels`. Annorex reads them and does not use them. A note with a label keeps its label
 in the export.
@@ -239,8 +240,8 @@ Each mouse action has a key. The help screen does not list the mouse actions.
 | Block                      | Click        | Focus the block (block mode)                                            |
 | Document text              | Drag         | Select characters (text mode). At the top or the bottom row, the document scrolls. The action bar shows at the release |
 | Document text              | Double click | Select the word and show the action bar                                 |
-| Action bar item            | Click        | Add that note. Looks good saves at once. The others open the note box   |
-| Card                       | Click        | Focus the note and its block. The card shows `edit` and `remove` buttons |
+| Action bar item            | Click        | Add that note. Looks good and remove save at once. The others open the note box   |
+| Card                       | Click        | Focus the note and its block. The card shows `edit` and `remove` buttons. Looks good and remove have `remove` only |
 | Header send button         | Click        | The same as `S`, with the same dialog check and messages                |
 | Tree row                   | Click        | Open the file, or open or close the directory                           |
 | Row of a list or picker    | Click        | Open that reply, session, or file                                       |
@@ -361,7 +362,7 @@ close one first.
 
 Annorex saves one draft for each reply and for each file in `$XDG_STATE_HOME/annorex/drafts`. The default is
 `~/.local/state/annorex/drafts`. The directory has mode `0700` and the files have mode `0600`. The draft keeps the open
-editor, so a restart does not lose half a note. If a draft file is unreadable, Annorex keeps it and shows a message.
+note box, so a restart does not lose half a note. If a draft file is unreadable, Annorex keeps it and shows a message.
 
 ## The config file
 

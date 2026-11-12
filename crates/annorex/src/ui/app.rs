@@ -1282,7 +1282,7 @@ impl App {
                 Some(Action::SelectLines) => self.toggle_selection(true, strip_was_open),
                 Some(Action::Comment) => return self.begin_new(Kind::Comment),
                 Some(Action::LooksGood) => return self.add_looks_good(),
-                Some(Action::Delete) => return self.begin_new(Kind::Delete),
+                Some(Action::Delete) => return self.add_instant(Kind::Delete),
                 Some(Action::Replace) => return self.begin_new(Kind::Replace),
                 Some(Action::Label) => return self.begin_label(),
                 Some(Action::Edit) => return self.note_here(false),
@@ -1975,6 +1975,12 @@ impl App {
 
     /// `o`: a "looks good" note on the current range. No editor opens.
     pub fn add_looks_good(&mut self) -> Effect {
+        self.add_instant(Kind::LooksGood)
+    }
+
+    /// `o` and `d`: a note without text on the current range. It is saved at once and no box opens.
+    /// The strip closes and the selection ends.
+    pub(super) fn add_instant(&mut self, kind: Kind) -> Effect {
         let Some(reply) = self.shown_id.clone() else { return Effect::None };
         let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
             self.status = Some(self.no_range_message().to_owned());
@@ -1983,16 +1989,17 @@ impl App {
         let review = self.reviews.entry(reply.clone()).or_default();
         if review.annotations.iter().any(|a| {
             a.sent_at.is_none()
-                && a.kind == Kind::LooksGood
+                && a.kind == kind
                 && a.range == range
                 && a.label.is_none()
                 && a.note.is_empty()
         }) {
             self.status = Some("Already saved.".to_owned());
         } else {
-            review.add(&self.doc.source, Kind::LooksGood, range);
+            review.add(&self.doc.source, kind, range);
             self.sent.remove(&reply);
         }
+        self.bar_open = false;
         self.selection = None;
         Effect::SaveDraft
     }
@@ -2036,6 +2043,14 @@ impl App {
             return Effect::None;
         }
         let mut ids = self.notes_here();
+        if !remove {
+            // Only a note with text can be edited. Say why when no note here can.
+            let editable: Vec<u64> = ids.iter().copied().filter(|id| self.takes_text(*id)).collect();
+            if let (true, Some(first)) = (editable.is_empty(), ids.first().copied()) {
+                return self.begin_edit(first);
+            }
+            ids = editable;
+        }
         match ids.as_slice() {
             [] => self.status = Some("no note here".to_owned()),
             [id] => return self.act_on_note(*id, remove),
@@ -2077,12 +2092,30 @@ impl App {
         }
     }
 
+    /// Whether the note with this id can have text: a comment or a replace.
+    fn takes_text(&self, id: u64) -> bool {
+        self.review()
+            .and_then(|review| review.annotations.iter().find(|a| a.id == id))
+            .is_some_and(|a| matches!(a.kind, Kind::Comment | Kind::Replace))
+    }
+
     pub(super) fn begin_edit(&mut self, id: u64) -> Effect {
         let Some(annotation) =
             self.review().and_then(|review| review.annotations.iter().find(|a| a.id == id))
         else {
             return Effect::None;
         };
+        match annotation.kind {
+            Kind::LooksGood => {
+                self.status = Some("Looks good has no text.".to_owned());
+                return Effect::None;
+            }
+            Kind::Delete => {
+                self.status = Some("Remove has no text.".to_owned());
+                return Effect::None;
+            }
+            Kind::Comment | Kind::Replace => {}
+        }
         let text = if annotation.kind == Kind::Replace {
             annotation.replacement.clone().unwrap_or_default()
         } else {
