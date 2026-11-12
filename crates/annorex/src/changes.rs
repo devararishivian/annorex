@@ -41,8 +41,13 @@ pub fn resolve(
 /// with `..` that leaves it, and a file that no longer exists are dropped.
 pub fn normalize(root: &Path, raw: &[Changed]) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
+    // The agent can write the real path of a directory that Rex reports through a link (`/var` and
+    // `/private/var` on macOS).
+    let real = root.canonicalize().ok();
     for changed in raw {
-        let Some(relative) = relative_inside(root, Path::new(&changed.path)) else { continue };
+        let path = Path::new(&changed.path);
+        let relative = relative_inside(root, path).or_else(|| relative_inside(real.as_deref()?, path));
+        let Some(relative) = relative else { continue };
         if root.join(&relative).is_file() && !out.contains(&relative) {
             out.push(relative);
         }
@@ -172,6 +177,16 @@ mod tests {
             normalize(dir.path(), &changed(&["./b.rs", "a.rs", "b.rs"])),
             [PathBuf::from("b.rs"), PathBuf::from("a.rs")]
         );
+    }
+
+    #[test]
+    fn accepts_the_real_path_of_a_root_that_is_a_link() {
+        let real = root_with(&["a.rs"]);
+        let parent = tempfile::tempdir().expect("dir");
+        let link = parent.path().join("link");
+        std::os::unix::fs::symlink(real.path(), &link).expect("link");
+        let abs = real.path().canonicalize().expect("canonical").join("a.rs");
+        assert_eq!(normalize(&link, &changed(&[abs.to_str().expect("utf8")])), [PathBuf::from("a.rs")]);
     }
 
     #[test]

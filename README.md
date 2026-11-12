@@ -168,6 +168,13 @@ Annorex looks at the open files every 2 seconds. When a file changes on disk, a 
 each note moves to its quoted text. If the text is gone, the note stays and the export says `text not found`. When the
 agent deletes a file, the banner says `<path> was deleted. Your notes are kept.` and the text stays.
 
+The tree puts the files that the agent changed in its last turn at the top, under the line `* changed by the agent: N`,
+and marks them with `*`. Annorex reads the transcript of the agent: the files of its successful `Edit`, `Write`, `edit`,
+`write`, and `apply_patch` calls. The fuzzy find lists them first too. When the agent changes more files, a banner says
+`The agent changed N more files.` until you open the tree. The list is a hint, not the full list. A file that the agent
+changed with a shell command (for example `sed -i`) or with a tool of an MCP server is not shown. Neither is a file
+that the agent wrote and deleted, or that is outside the work directory.
+
 One send gives the general notes and the annotations of all open files in one message. It has one section
 `# Annotations on PATH` for each file, in the order in which you opened the files. If you press `q` with unsent notes in
 more than one file, the question counts the files.
@@ -200,6 +207,7 @@ Annorex reads `$XDG_CONFIG_HOME/annorex/config.toml`, or `~/.config/annorex/conf
 ```toml
 enter_delay_ms = 300       # 50 to 5000: the wait between the paste and Enter
 labels = ["nit"]           # more labels, after question, looks good, and must fix
+changes_turns = 1          # 1 to 20: how many of your prompts the tree looks back for changed files
 
 [keys]
 comment = "y"              # an action name and a key

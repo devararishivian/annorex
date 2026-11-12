@@ -55,6 +55,7 @@ Annorex has two parts:
 | Fuzzy find         | Built   | Ranks paths with its own scorer: a subsequence match with bonuses for word starts and for consecutive letters. At most 200 results.                                                  |
 | File viewer mode   | Built   | `App` has a second mode. Each open file is a document with the id `file:PATH`. Markdown files show as Markdown, other files as plain text. At most 50 files are open.               |
 | File tree          | Built   | A panel with the directories, the filter, and the marks for files with unsent drafts. The scan runs on a thread.                                                                      |
+| Changed files      | Built   | `annorex-hosts` reads the successful file-changing tool calls of a transcript (`changes`, `claude::changes`, `pi_changes`, `opencode_changes`; OpenCode in both table families). `changes.rs` makes the paths relative to the work directory and a thread polls every 2 seconds. The tree puts the files first and a banner counts the new ones. |
 | File watch         | Built   | A thread compares the size and the time of each open file with the values at the last read, every 2 seconds. The viewer shows a banner and places the notes again after `r`.       |
 
 ## Crates

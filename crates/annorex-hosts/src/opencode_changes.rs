@@ -21,6 +21,9 @@ const PATCH_MARKERS: [&str; 3] = ["*** Add File: ", "*** Update File: ", "*** Mo
 pub fn changed_for_session(db: &Path, session_id: &str, turns: usize) -> Result<Vec<Changed>, HostError> {
     crate::validate_session_id(session_id)?;
     let connection = open_read_only(db, WHAT)?;
+    if let Some(events) = v2_events(&connection, session_id)? {
+        return Ok(collect(events, turns));
+    }
     let mut statement = connection
         .prepare(
             "SELECT m.id, m.data, p.id, p.data FROM message m \
@@ -54,13 +57,63 @@ pub fn changed_for_session(db: &Path, session_id: &str, turns: usize) -> Result<
     Ok(collect(events, turns))
 }
 
+/// The events of a session in the `OpenCode` 2 tables, or `None` when `session_message` has no
+/// rows for it (the session is then in the `message` and `part` tables).
+fn v2_events(connection: &rusqlite::Connection, session_id: &str) -> Result<Option<Vec<Event>>, HostError> {
+    let has_table = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'session_message'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map_err(|e| sql_error(WHAT, &e))?;
+    if has_table == 0 {
+        return Ok(None);
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT id, type, data FROM session_message WHERE session_id = ?1 \
+             AND type IN ('user', 'assistant') ORDER BY seq ASC",
+        )
+        .map_err(|e| sql_error(WHAT, &e))?;
+    let rows = statement
+        .query_map(params![session_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })
+        .map_err(|e| sql_error(WHAT, &e))?;
+    let mut events = Vec::new();
+    let mut any = false;
+    for row in rows {
+        let (id, kind, data) = row.map_err(|e| sql_error(WHAT, &e))?;
+        any = true;
+        if kind == "user" {
+            events.push(Event::Prompt);
+            continue;
+        }
+        let data: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
+        for (index, item) in data.get("content").and_then(Value::as_array).into_iter().flatten().enumerate() {
+            if item.get("type").and_then(Value::as_str) != Some("tool") {
+                continue;
+            }
+            let Some(tool) = item.get("name").and_then(Value::as_str) else { continue };
+            let state = item.get("state").unwrap_or(&Value::Null);
+            events.extend(tool_events(&format!("{id}:{index}"), tool, state));
+        }
+    }
+    Ok(any.then_some(events))
+}
+
 /// The events of one `part.data` payload. Only a tool part with a file path yields calls.
 pub(crate) fn part_events(part_id: &str, part: &Value) -> Vec<Event> {
     if part.get("type").and_then(Value::as_str) != Some("tool") {
         return Vec::new();
     }
     let Some(tool) = part.get("tool").and_then(Value::as_str) else { return Vec::new() };
-    let state = part.get("state").unwrap_or(&Value::Null);
+    tool_events(part_id, tool, part.get("state").unwrap_or(&Value::Null))
+}
+
+/// The events of one tool call. `state` holds `status` and `input`.
+fn tool_events(call_id: &str, tool: &str, state: &Value) -> Vec<Event> {
     let input = state.get("input").unwrap_or(&Value::Null);
     let paths: Vec<String> = match tool {
         "edit" | "write" => {
@@ -71,9 +124,9 @@ pub(crate) fn part_events(part_id: &str, part: &Value) -> Vec<Event> {
     };
     let ok = state.get("status").and_then(Value::as_str) == Some("completed");
     let mut events: Vec<Event> =
-        paths.into_iter().map(|path| Event::Call { id: part_id.to_owned(), path }).collect();
+        paths.into_iter().map(|path| Event::Call { id: call_id.to_owned(), path }).collect();
     if !events.is_empty() {
-        events.push(Event::Result { id: part_id.to_owned(), ok });
+        events.push(Event::Result { id: call_id.to_owned(), ok });
     }
     events
 }
@@ -187,6 +240,55 @@ mod tests {
         ]);
         assert_eq!(paths(&p, 1), ["/w/new.rs"]);
         assert_eq!(paths(&p, 2), ["/w/new.rs", "/w/old.rs"]);
+    }
+
+    fn db_v2(rows: &[(&str, &str)]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("opencode.db");
+        let c = Connection::open(&path).expect("open");
+        c.execute_batch(
+            "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        )
+        .expect("schema");
+        for (i, (kind, data)) in rows.iter().enumerate() {
+            let n = i64::try_from(i).expect("small");
+            c.execute(
+                "INSERT INTO session_message VALUES (?1,'s',?2,?3,?3,?3,?4)",
+                params![format!("m{i}"), kind, n, data],
+            )
+            .expect("row");
+        }
+        (dir, path)
+    }
+    fn item(name: &str, status: &str, input: &str) -> String {
+        format!(
+            r#"{{"content":[{{"type":"tool","id":"c","name":"{name}","state":{{"status":"{status}","input":{input}}}}}]}}"#
+        )
+    }
+
+    #[test]
+    fn v2_counts_completed_edit_and_write_and_limits_turns() {
+        let (_d, p) = db_v2(&[
+            ("user", r#"{"text":"one"}"#),
+            ("assistant", &item("edit", "completed", r#"{"filePath":"/w/old.rs"}"#)),
+            ("user", r#"{"text":"two"}"#),
+            ("assistant", &item("write", "completed", r#"{"filePath":"/w/new.rs","content":"x"}"#)),
+            ("assistant", &item("edit", "error", r#"{"filePath":"/w/bad.rs"}"#)),
+            ("assistant", &item("bash", "completed", r#"{"command":"sed -i"}"#)),
+        ]);
+        assert_eq!(paths(&p, 1), ["/w/new.rs"]);
+        assert_eq!(paths(&p, 2), ["/w/new.rs", "/w/old.rs"]);
+    }
+
+    #[test]
+    fn v2_reads_an_apply_patch_and_the_path_key() {
+        let patch = "*** Begin Patch\\n*** Add File: n.rs\\n+x\\n*** End Patch";
+        let (_d, p) = db_v2(&[
+            ("user", r#"{"text":"go"}"#),
+            ("assistant", &item("apply_patch", "completed", &format!(r#"{{"patchText":"{patch}"}}"#))),
+            ("assistant", &item("write", "completed", r#"{"path":"/w/p.rs"}"#)),
+        ]);
+        assert_eq!(paths(&p, 1), ["/w/p.rs", "n.rs"]);
     }
 
     #[test]
