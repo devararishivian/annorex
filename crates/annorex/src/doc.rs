@@ -93,12 +93,44 @@ impl DocKind {
     }
 }
 
+/// The kind of a block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockKind {
+    Heading,
+    Paragraph,
+    /// The own text of one list item. A nested item is a different block.
+    ListItem,
+    /// A whole code fence or indented code block.
+    Code,
+    Table,
+    /// A whole block quote, with all the content in it.
+    Quote,
+    Rule,
+    /// A group of lines that shows as it is: lines of a plain text file between blank lines, or
+    /// an HTML block in Markdown.
+    Text,
+}
+
+/// One unit of the document that a note can cover as a whole.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block {
+    pub kind: BlockKind,
+    /// The bytes in `Doc::source` of the block, without the final line feed. For a list item it
+    /// is the item's own text only: from its first character of text to its last, without the
+    /// marker and without a nested list.
+    pub range: Range<usize>,
+    /// The `DocLine` indexes of the block. The first and the last line are not blank.
+    pub lines: Range<usize>,
+}
+
 /// A rendered document and its source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Doc {
     /// The source after `payload::sanitize`. All ranges point into this text.
     pub source: String,
     pub lines: Vec<DocLine>,
+    /// The blocks in document order. They do not overlap. A blank line is in no block.
+    pub blocks: Vec<Block>,
     line_starts: Vec<usize>,
 }
 
@@ -107,7 +139,7 @@ impl Doc {
     pub fn parse(source: &str) -> Self {
         let source = sanitize(source);
         let line_starts = line_starts(&source);
-        let lines = {
+        let (lines, blocks) = {
             let mut builder = Builder::new(&source, &line_starts);
             let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
             for (event, range) in Parser::new_ext(&source, options).into_offset_iter() {
@@ -115,7 +147,7 @@ impl Doc {
             }
             builder.finish()
         };
-        Self { source, lines, line_starts }
+        Self { source, lines, blocks, line_starts }
     }
 
     /// Show a text as it is: one `DocLine` for each source line, with the exact source of each
@@ -158,7 +190,8 @@ impl Doc {
             let range = if spans.is_empty() { start..start } else { start..end };
             lines.push(DocLine { spans, source: range, line: index + 1 });
         }
-        Self { source, lines, line_starts }
+        let blocks = plain_blocks(&lines);
+        Self { source, lines, blocks, line_starts }
     }
 
     /// Render a text as the kind says.
@@ -177,6 +210,18 @@ impl Doc {
     /// The number of source lines.
     pub fn source_lines(&self) -> usize {
         self.line_starts.len()
+    }
+
+    /// The index of the block whose source range holds the byte `offset`.
+    pub fn block_at(&self, offset: usize) -> Option<usize> {
+        self.blocks.iter().position(|block| block.range.contains(&offset))
+    }
+
+    /// The index of the block that holds `offset`, else of the next block after it, else of the last block.
+    pub fn block_near(&self, offset: usize) -> Option<usize> {
+        self.block_at(offset)
+            .or_else(|| self.blocks.iter().position(|block| block.range.start > offset))
+            .or_else(|| self.blocks.len().checked_sub(1))
     }
 
     /// The cursor stops of a `DocLine` with their display columns, in display order. A stop is
@@ -275,6 +320,37 @@ fn line_of(starts: &[usize], offset: usize) -> usize {
     starts.partition_point(|&start| start <= offset).max(1)
 }
 
+/// One `Text` block for each group of lines between blank lines.
+fn plain_blocks(lines: &[DocLine]) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    let mut first = None;
+    for index in 0..=lines.len() {
+        let blank = lines.get(index).is_none_or(DocLine::is_blank);
+        match (first, blank) {
+            (None, false) => first = Some(index),
+            (Some(start), true) => {
+                first = None;
+                let from = lines.get(start).map_or(0, |line| line.source.start);
+                let to = lines.get(index - 1).map_or(from, |line| line.source.end);
+                blocks.push(Block { kind: BlockKind::Text, range: from..to, lines: start..index });
+            }
+            _ => {}
+        }
+    }
+    blocks
+}
+
+/// The block that the builder fills now.
+struct OpenBlock {
+    kind: BlockKind,
+    /// The container depth at which the block closes.
+    depth: usize,
+    /// The source range of the container that opened the block. A list item does not use it.
+    range: Range<usize>,
+    /// The `DocLine` index of the first line of the block.
+    first_line: usize,
+}
+
 struct Pending {
     spans: Vec<DocSpan>,
     source: Range<usize>,
@@ -299,6 +375,12 @@ struct Builder<'a> {
     item_marker: Option<String>,
     quote_depth: usize,
     table: Option<Table>,
+    blocks: Vec<Block>,
+    open: Option<OpenBlock>,
+    /// The number of open block-level containers.
+    depth: usize,
+    /// The depths of the open list items that open blocks: the items outside any quote.
+    items: Vec<usize>,
 }
 
 impl<'a> Builder<'a> {
@@ -313,7 +395,119 @@ impl<'a> Builder<'a> {
             item_marker: None,
             quote_depth: 0,
             table: None,
+            blocks: Vec::new(),
+            open: None,
+            depth: 0,
+            items: Vec::new(),
         }
+    }
+
+    /// Open a block of `kind` for a container at `depth`, if no block is open. Content of a list
+    /// item after its nested list opens a new `ListItem` block that closes with the item.
+    fn open_block(&mut self, kind: BlockKind, depth: usize, range: &Range<usize>) {
+        if self.open.is_some() {
+            return;
+        }
+        let (kind, depth) = match self.items.last() {
+            Some(&item) => (BlockKind::ListItem, item),
+            None => (kind, depth),
+        };
+        self.open = Some(OpenBlock { kind, depth, range: range.clone(), first_line: self.lines.len() });
+    }
+
+    /// Close the open block. Its lines end at its last line that is not blank.
+    fn close_block(&mut self) {
+        self.flush();
+        let Some(open) = self.open.take() else { return };
+        let own = self.lines.get(open.first_line..).unwrap_or_default();
+        let Some(count) = own.iter().rposition(|line| !line.is_blank()).map(|last| last + 1) else { return };
+        let lines = open.first_line..open.first_line + count;
+        let range = if open.kind == BlockKind::ListItem {
+            // The item's own text: the source of its text spans, without the marker.
+            let mut sources = own
+                .iter()
+                .take(count)
+                .flat_map(|line| line.spans.iter())
+                .filter_map(|span| span.source.as_ref().map(|source| source.range.clone()));
+            match sources.next() {
+                Some(first) => {
+                    sources.fold(first, |all, range| all.start.min(range.start)..all.end.max(range.end))
+                }
+                None => open.range.start..open.range.start,
+            }
+        } else {
+            let text = self.source.get(open.range.clone()).unwrap_or_default();
+            open.range.start..open.range.start + text.trim_end_matches(['\n', '\r']).len()
+        };
+        self.blocks.push(Block { kind: open.kind, range, lines });
+    }
+
+    /// Close the open block if it belongs to the container at the current depth.
+    fn close_block_at_depth(&mut self) {
+        if self.open.as_ref().is_some_and(|open| open.depth == self.depth) {
+            self.close_block();
+        }
+    }
+
+    /// Keep the block boundaries before the display handles a `Start` event.
+    fn start_block(&mut self, tag: &Tag<'_>, range: &Range<usize>) {
+        let kind = match tag {
+            Tag::Paragraph => BlockKind::Paragraph,
+            Tag::Heading { .. } => BlockKind::Heading,
+            Tag::BlockQuote(_) => BlockKind::Quote,
+            Tag::CodeBlock(_) => BlockKind::Code,
+            Tag::HtmlBlock => BlockKind::Text,
+            Tag::Table(_) => BlockKind::Table,
+            Tag::List(_) => {
+                self.depth += 1;
+                // The block of an item ends where its first nested list starts.
+                if self.quote_depth == 0
+                    && self.open.as_ref().is_some_and(|open| open.kind == BlockKind::ListItem)
+                {
+                    self.close_block();
+                }
+                return;
+            }
+            Tag::Item => {
+                self.depth += 1;
+                if self.quote_depth == 0 {
+                    self.close_block();
+                    self.items.push(self.depth);
+                    self.open = Some(OpenBlock {
+                        kind: BlockKind::ListItem,
+                        depth: self.depth,
+                        range: range.clone(),
+                        first_line: self.lines.len(),
+                    });
+                }
+                return;
+            }
+            _ => return,
+        };
+        self.depth += 1;
+        self.open_block(kind, self.depth, range);
+    }
+
+    /// Keep the block boundaries after the display handles an `End` event.
+    fn end_block(&mut self, tag: TagEnd) {
+        if !matches!(
+            tag,
+            TagEnd::Paragraph
+                | TagEnd::Heading(_)
+                | TagEnd::BlockQuote(_)
+                | TagEnd::CodeBlock
+                | TagEnd::HtmlBlock
+                | TagEnd::Table
+                | TagEnd::List(_)
+                | TagEnd::Item
+        ) {
+            return;
+        }
+        self.close_block_at_depth();
+        if tag == TagEnd::Item && self.items.last() == Some(&self.depth) {
+            self.items.pop();
+        }
+        self.depth = self.depth.saturating_sub(1);
     }
 
     fn prefix_style(&self) -> SpanStyle {
@@ -393,11 +587,27 @@ impl<'a> Builder<'a> {
         }
     }
 
-    #[allow(clippy::too_many_lines, reason = "one match over the Markdown events")]
+    /// Handle one Markdown event: the display first, and the block boundaries around it.
     fn event(&mut self, event: Event<'_>, range: Range<usize>) {
         if self.table.is_some() && self.table_event(&event, &range) {
             return;
         }
+        let end = match &event {
+            Event::Start(tag) => {
+                self.start_block(tag, &range);
+                None
+            }
+            Event::End(tag) => Some(*tag),
+            _ => None,
+        };
+        self.display_event(event, range);
+        if let Some(tag) = end {
+            self.end_block(tag);
+        }
+    }
+
+    #[allow(clippy::too_many_lines, reason = "one match over the Markdown events")]
+    fn display_event(&mut self, event: Event<'_>, range: Range<usize>) {
         match event {
             Event::Start(tag) => match tag {
                 Tag::Heading { level, .. } => {
@@ -502,7 +712,12 @@ impl<'a> Builder<'a> {
             Event::HardBreak => self.flush(),
             Event::Rule => {
                 self.flush();
+                let top = self.open.is_none() && self.items.is_empty();
+                self.open_block(BlockKind::Rule, self.depth, &range);
                 self.push("───", SpanStyle { rule: true, ..self.prefix_style() }, &range);
+                if top {
+                    self.close_block();
+                }
                 self.blank();
             }
             Event::TaskListMarker(done) => {
@@ -542,6 +757,7 @@ impl<'a> Builder<'a> {
                     self.emit_table(&table);
                 }
                 self.blank();
+                self.end_block(TagEnd::Table);
             }
             _ => {}
         }
@@ -579,12 +795,12 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn finish(mut self) -> Vec<DocLine> {
-        self.flush();
+    fn finish(mut self) -> (Vec<DocLine>, Vec<Block>) {
+        self.close_block();
         while self.lines.last().is_some_and(DocLine::is_blank) {
             self.lines.pop();
         }
-        self.lines
+        (self.lines, self.blocks)
     }
 }
 
@@ -829,6 +1045,122 @@ mod tests {
         assert_eq!(plains(&doc), ["- item"]);
         assert_eq!(doc.stops(0).len(), 4);
         assert_eq!(doc.locate(doc.stops(0)[0]), (0, 2));
+    }
+
+    fn kinds(doc: &Doc) -> Vec<BlockKind> {
+        doc.blocks.iter().map(|block| block.kind).collect()
+    }
+
+    #[test]
+    fn blocks_of_markdown() {
+        use BlockKind::{Code, Heading, ListItem, Paragraph, Quote, Rule, Table};
+        let doc = Doc::parse(
+            "# T\n\npara one\nstill one\n\n- a\n  - b\n- c\n\n```\nx\n\ny\n```\n\n|h|\n|-|\n|v|\n\n> q\n\n---\n",
+        );
+        assert_eq!(kinds(&doc), [Heading, Paragraph, ListItem, ListItem, ListItem, Code, Table, Quote, Rule]);
+        assert!(
+            doc.blocks.windows(2).all(|pair| pair[0].range.end <= pair[1].range.start),
+            "{:?}",
+            doc.blocks
+        );
+        assert!(
+            doc.blocks.windows(2).all(|pair| pair[0].lines.end <= pair[1].lines.start),
+            "{:?}",
+            doc.blocks
+        );
+    }
+
+    #[test]
+    fn list_item_has_its_own_text_only() {
+        let doc = Doc::parse("- a\n  - b\n- c\n");
+        assert_eq!(kinds(&doc), [BlockKind::ListItem; 3]);
+        let text = |index: usize| &doc.source[doc.blocks[index].range.clone()];
+        assert_eq!(text(0), "a");
+        assert_eq!(text(1), "b");
+        assert_eq!(text(2), "c");
+        assert_eq!(doc.blocks[0].lines, 0..1);
+        assert_eq!(doc.blocks[1].lines, 1..2);
+    }
+
+    #[test]
+    fn code_fence_is_one_block() {
+        let doc = Doc::parse("text\n\n```\nx\n\ny\n```\n");
+        assert_eq!(kinds(&doc), [BlockKind::Paragraph, BlockKind::Code]);
+        let code = &doc.blocks[1];
+        assert_eq!(&doc.source[code.range.clone()], "```\nx\n\ny\n```");
+        assert_eq!(plains(&doc)[code.lines.clone()], ["x", "", "y"]);
+    }
+
+    #[test]
+    fn plain_blocks_split_on_blank_lines() {
+        let doc = Doc::plain("a\nb\n\nc\n");
+        assert_eq!(kinds(&doc), [BlockKind::Text; 2]);
+        assert_eq!(doc.blocks[0].lines, 0..2);
+        assert_eq!(doc.blocks[1].lines, 3..4);
+        assert_eq!(&doc.source[doc.blocks[0].range.clone()], "a\nb");
+        assert_eq!(&doc.source[doc.blocks[1].range.clone()], "c");
+        assert_eq!(Doc::for_kind(DocKind::Plain, "a\n").blocks.len(), 1);
+        assert_eq!(Doc::for_kind(DocKind::Markdown, "a\n").blocks.len(), 1);
+    }
+
+    #[test]
+    fn every_line_with_source_is_in_one_block() {
+        let doc = Doc::parse(include_str!("../tests/fixtures/payload-markdown.md"));
+        for (index, line) in doc.lines.iter().enumerate() {
+            let count = doc.blocks.iter().filter(|block| block.lines.contains(&index)).count();
+            let expected = usize::from(!line.is_blank());
+            assert_eq!(count, expected, "line {index} {:?} in {:?}", line.plain(), doc.blocks);
+        }
+    }
+
+    #[test]
+    fn a_nested_list_inside_a_quote_stays_in_the_quote() {
+        let doc = Doc::parse("> q\n> - a\n>   - b\n\n- c\n  > d\n  > - e\n");
+        assert_eq!(plains(&doc), ["│ q", "", "│ - a", "│   - b", "", "- c", "│   d", "│   - e"]);
+        assert_eq!(kinds(&doc), [BlockKind::Quote, BlockKind::ListItem]);
+        assert_eq!(doc.blocks[0].lines, 0..4, "the blank line inside the quote is in the quote");
+        assert_eq!(doc.blocks[1].lines, 5..8);
+    }
+
+    #[test]
+    fn item_text_after_a_nested_list_is_an_item_block() {
+        let doc = Doc::parse("- a\n  - b\n\n  more\n- c\n");
+        let lines = (0..doc.lines.len()).filter(|&index| !doc.lines[index].is_blank());
+        for index in lines {
+            assert_eq!(
+                doc.blocks.iter().filter(|block| block.lines.contains(&index)).count(),
+                1,
+                "line {index}"
+            );
+        }
+        assert!(doc.blocks.iter().all(|block| block.kind == BlockKind::ListItem), "{:?}", doc.blocks);
+        assert!(
+            doc.blocks.iter().any(|block| &doc.source[block.range.clone()] == "more"),
+            "{:?}",
+            doc.blocks
+        );
+    }
+
+    #[test]
+    fn block_near_falls_forward_then_back() {
+        let doc = Doc::parse("- a\n\nb\n");
+        assert_eq!(doc.blocks.len(), 2);
+        assert_eq!(doc.block_at(0), None, "the list marker is in no block");
+        assert_eq!(doc.block_near(0), Some(0), "before the first block");
+        assert_eq!(doc.block_at(2), Some(0));
+        assert_eq!(doc.block_near(2), Some(0));
+        assert_eq!(doc.block_at(3), None);
+        assert_eq!(doc.block_near(3), Some(1), "between two blocks");
+        assert_eq!(doc.block_near(99), Some(1), "after the last block");
+    }
+
+    #[test]
+    fn empty_doc_has_no_blocks() {
+        assert_eq!(Doc::parse("").blocks, []);
+        assert_eq!(Doc::parse("  \n\n").blocks, []);
+        assert_eq!(Doc::plain("").blocks, []);
+        assert_eq!(Doc::plain("\n\n").blocks, []);
+        assert_eq!(Doc::parse("").block_near(0), None);
     }
 
     #[test]
