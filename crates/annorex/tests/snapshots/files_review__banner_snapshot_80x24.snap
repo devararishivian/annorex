@@ -5,7 +5,7 @@ expression: "render(&mut app, 80, 24)"
 Annorex · files · claude (idle)                  file 1/1 · unsent 1  [Send 1 ▸]
 a.txt changed on disk. Press r to read it again.
  1 alpha beta
- 2 second line
+ 2 [o looks good] [c comment] [d remove] [s replace]
 
 
 

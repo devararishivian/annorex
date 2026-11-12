@@ -1,0 +1,44 @@
+---
+source: crates/annorex/tests/annotate.rs
+expression: "render(&mut app, 120, 40)"
+---
+Annorex · last reply · claude (idle)                                                                           reply 1/1
+ Plan
+
+▍We change the login page. The old page stays for a week.
+ [o looks good] [c comment] [d remove] [s replace]
+ - one
+ - two
+
+ The end.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+j/k move  v select  c/d/s annotate  S send  ? help  a list  p replies  / find  q quit

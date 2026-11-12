@@ -4,7 +4,7 @@ expression: "render(&mut viewer(), 218, 69)"
 ---
 Annorex · last reply · claude (idle)                                                                                                                                                                             reply 1/3
 ▍Migration plan
-
+ [o looks good] [c comment] [d remove] [s replace]
  We change the login page and the session store. The work has four steps, and each step has a test.
 
  Steps

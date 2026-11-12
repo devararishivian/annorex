@@ -1,6 +1,7 @@
 //! The viewer: state, keys, and drawing.
 
 mod app;
+mod bar;
 mod draw;
 mod editor;
 mod focus;

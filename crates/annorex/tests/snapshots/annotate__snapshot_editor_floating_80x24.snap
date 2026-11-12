@@ -1,0 +1,28 @@
+---
+source: crates/annorex/tests/annotate.rs
+expression: "render(&mut app, 80, 24)"
+---
+Annorex · last reply · claude (idle)                                   reply 1/1
+ Plan
+
+▍We change the login page. The old page stays for a week.
+ ┌ comment · l.3 ──────────────────────────────────────────────────────────────┐
+ │Comment on: "We change the login page.…"                                     │
+ │label: question                                                              │
+ │Which page?▏                                                                 │
+ └───────────────────────────────────────────────────────────── save ─ cancel ─┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+enter save  ctrl+j new line  tab label  esc cancel

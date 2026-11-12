@@ -164,6 +164,8 @@ pub struct App {
     pub(crate) mode: Mode,
     /// The width of the text in the last frame. 0 before the first frame.
     pub(crate) width: u16,
+    /// The index of the first visual row on the screen in the last frame.
+    pub(crate) top_row: usize,
     pub(crate) panel_open: bool,
     pub(crate) panel_index: usize,
     pub(crate) picker_index: usize,
@@ -249,6 +251,7 @@ impl App {
             cursor: 0,
             mode: Mode::Block(0),
             width: 0,
+            top_row: 0,
             panel_open: false,
             panel_index: 0,
             picker_index: 0,
@@ -1638,7 +1641,7 @@ impl App {
 
     /// The range of an annotation: the focused block in block mode; in text mode the selection, else
     /// the `DocLine` of the cursor.
-    fn action_range(&self) -> Option<Range<usize>> {
+    pub(crate) fn action_range(&self) -> Option<Range<usize>> {
         if let Mode::Block(index) = self.mode {
             return self.doc.blocks.get(index).map(|block| block.range.clone());
         }

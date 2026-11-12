@@ -10,10 +10,11 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Confirm, Focus, PanelView, ReplySource, Screen, match_ranges};
+use super::bar::{draw_action_bar, shown_rows};
 use super::focus::{Mode, View};
 use super::hits::Hit;
 use crate::agent::Agent;
-use crate::doc::{DocKind, DocSpan, SpanStyle};
+use crate::doc::{Doc, DocKind, DocSpan, SpanStyle};
 use crate::files::TREE_LIMIT;
 use crate::keys::{Action, KeyMap};
 use crate::layout::{Layout, compute};
@@ -439,6 +440,14 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         _ => doc_area,
     };
     draw_doc(frame, app, doc_area);
+    let (margin, gutter) = margin_and_gutter(&app.doc, doc_area);
+    let text_area = Rect::new(
+        doc_area.x + margin + gutter,
+        doc_area.y,
+        doc_area.width.saturating_sub(margin + gutter),
+        doc_area.height,
+    );
+    draw_action_bar(frame, text_area, app);
     if let Some(panel) = panel_area {
         let borders = match layout {
             Layout::Side { .. } => Borders::LEFT,
@@ -455,7 +464,7 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
             PanelView::Finder => draw_finder(frame, app, panel, borders),
         }
     }
-    draw_editor(frame, app, doc_area);
+    draw_editor(frame, app, text_area);
     let prompt = app.confirm.map(|what| prompt_text(app, what));
     let message = prompt
         .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")))
@@ -489,13 +498,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     let height = usize::from(area.height);
     app.page = height;
-    // Column 0 is the margin for the focus bar. Plain text and code keep the line number gutter.
-    let margin = 1.min(area.width.saturating_sub(1));
-    let gutter = if app.doc.kind == DocKind::Plain {
-        gutter_width(&app.doc).min(area.width.saturating_sub(1 + margin))
-    } else {
-        0
-    };
+    let (margin, gutter) = margin_and_gutter(&app.doc, area);
     let text_width = area.width - margin - gutter;
     let cursor_line = app.cursor_line();
     let annotated: Vec<std::ops::Range<usize>> = app
@@ -527,6 +530,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
     app.top = rows.get(top_row).map_or(0, |row| row.doc_line);
+    app.top_row = top_row;
     let query = app.query.clone();
     // The cursor cell: the first row of the cursor line that shows the cursor stop.
     // Block mode has no cursor cell: the focus bar is the only focus mark.
@@ -586,6 +590,18 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     push_doc_hits(app, area, top_row, margin + gutter);
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// The width of the margin and of the line number gutter in a document area. Column 0 is the
+/// margin for the focus bar. Plain text and code keep the line number gutter.
+fn margin_and_gutter(doc: &Doc, area: Rect) -> (u16, u16) {
+    let margin = 1.min(area.width.saturating_sub(1));
+    let gutter = if doc.kind == DocKind::Plain {
+        gutter_width(doc).min(area.width.saturating_sub(1 + margin))
+    } else {
+        0
+    };
+    (margin, gutter)
 }
 
 /// The margin cell of a row: the focus bar in a focused block, else blanks.
@@ -978,9 +994,11 @@ fn draw_annotation_list(frame: &mut Frame, app: &App, area: Rect, borders: Borde
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// The editor box at the bottom of the document area.
-fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
-    let Some(editor) = &app.editor else { return };
+/// The editor box. `area` is the text area of the document. The box has the width of the text
+/// and goes directly below the rows of its range. When it does not fit there, it goes directly
+/// above them. When it fits in neither place, or the range is not on the screen, it stays in `area`.
+fn draw_editor(frame: &mut Frame, app: &mut App, area: Rect) {
+    let Some(editor) = app.editor.clone() else { return };
     if area.width < 4 || area.height < 5 {
         return;
     }
@@ -1008,8 +1026,11 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
     let text_rows: usize = typed.split('\n').map(|line| line.width().max(1).div_ceil(width)).sum();
     lines.extend(typed.split('\n').map(|line| Line::raw(line.to_owned())));
     let fixed = 2 + lines.len() - typed.split('\n').count();
+    // At most 10 rows with the borders.
     let height = u16::try_from(text_rows.min(6) + fixed).unwrap_or(u16::MAX).min(area.height);
-    let rect = Rect::new(area.x, area.bottom() - height, area.width, height);
+    let anchor = if editor.general { None } else { shown_rows(app, &editor.range) };
+    let y = editor_top(area, height, anchor);
+    let rect = Rect::new(area.x, y, area.width, height);
     let prefix = if app.editing_id.is_some() { "Edit " } else { "" };
     let title = if editor.general {
         " Note ".to_owned()
@@ -1019,6 +1040,44 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, rect);
     let block = Block::new().borders(Borders::ALL).title(title);
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(block), rect);
+    draw_editor_buttons(frame, app, rect);
+}
+
+/// The first row of the editor box of `height` rows. `anchor` is the first and the last row of the
+/// range on the screen, as offsets from the top of `area`.
+fn editor_top(area: Rect, height: u16, anchor: Option<(usize, usize)>) -> u16 {
+    let lowest = area.bottom().saturating_sub(height);
+    let Some((first, last)) = anchor else { return lowest };
+    let offset = |row: usize| area.y.saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
+    let below = offset(last + 1);
+    let above = offset(first);
+    if below.saturating_add(height) <= area.bottom() {
+        below
+    } else if above >= area.y.saturating_add(height) {
+        above - height
+    } else {
+        below.min(lowest)
+    }
+}
+
+/// The ` save ` and ` cancel ` buttons on the bottom border of the editor box, at its right end.
+fn draw_editor_buttons(frame: &mut Frame, app: &mut App, rect: Rect) {
+    const SAVE: &str = " save ";
+    const CANCEL: &str = " cancel ";
+    let width = |text: &str| u16::try_from(text.width()).unwrap_or(u16::MAX);
+    let (save, cancel) = (width(SAVE), width(CANCEL));
+    // The corners and one border cell before each button.
+    if rect.height < 2 || rect.width < save + cancel + 4 {
+        return;
+    }
+    let y = rect.bottom() - 1;
+    let cancel_x = rect.right() - 2 - cancel;
+    let save_x = cancel_x - 1 - save;
+    let buffer = frame.buffer_mut();
+    buffer.set_string(save_x, y, SAVE, Style::new().add_modifier(Modifier::BOLD));
+    buffer.set_string(cancel_x, y, CANCEL, Style::new());
+    app.hits.push(Rect::new(save_x, y, save, 1), Hit::EditorSave);
+    app.hits.push(Rect::new(cancel_x, y, cancel, 1), Hit::EditorCancel);
 }
 
 /// `MM-DD HH:MM` in `zone` for an RFC 3339 time. Other text stays as it is.
@@ -1063,18 +1122,21 @@ fn age(now: SystemTime, then: SystemTime) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+#[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
     use jiff::tz::{TimeZone, offset};
 
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
     use super::super::hits::Hit;
     use super::super::{AgentState, App, Screen};
     use super::{draw, short_time};
     use crate::config::Config;
     use crate::replies::Reply;
+    use crate::review::Kind;
     use crate::safety::Safety;
 
     #[test]
@@ -1106,6 +1168,62 @@ mod tests {
         assert_eq!(app.hits.at(0, row_of("two")), Some(&Hit::Block(1)));
         // The blank row between blocks is in no block.
         assert_eq!(app.hits.at(0, row_of("one") - 1), None);
+    }
+
+    /// The column and the row of the first cell where `text` starts on the screen.
+    fn find(screen: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
+        let area = screen.area;
+        for y in 0..area.height {
+            let row: Vec<&str> =
+                (0..area.width).map(|x| screen.cell((x, y)).map_or(" ", |c| c.symbol())).collect();
+            let line = row.concat();
+            if let Some(at) = line.find(text) {
+                let x = line.get(..at).map_or(0, |head| head.chars().count());
+                return (u16::try_from(x).expect("x"), y);
+            }
+        }
+        panic!("no {text:?} on the screen");
+    }
+
+    fn drawn(text: &str, keys: &str) -> (App, ratatui::buffer::Buffer) {
+        let reply = Reply { id: "r".to_owned(), text: text.to_owned(), at: None };
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        for c in keys.chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        let screen = terminal.backend().buffer().clone();
+        (app, screen)
+    }
+
+    #[test]
+    fn the_bar_buttons_are_in_the_hit_map() {
+        let (app, screen) = drawn("# T\n\none\n\ntwo\n", "j");
+        for (text, kind) in [
+            ("[o looks good]", Kind::LooksGood),
+            ("[c comment]", Kind::Comment),
+            ("[d remove]", Kind::Delete),
+            ("[s replace]", Kind::Replace),
+        ] {
+            let (x, y) = find(&screen, text);
+            let last = x + u16::try_from(text.len()).expect("len") - 1;
+            assert_eq!(app.hits.at(x, y), Some(&Hit::Action(kind)), "{text}");
+            assert_eq!(app.hits.at(last, y), Some(&Hit::Action(kind)), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_editor_has_save_and_cancel_in_the_hit_map() {
+        let (app, screen) = drawn("# T\n\none\n\ntwo\n", "jc");
+        let (x, y) = find(&screen, " save ");
+        assert_eq!(app.hits.at(x, y), Some(&Hit::EditorSave));
+        assert_eq!(app.hits.at(x + 5, y), Some(&Hit::EditorSave));
+        let (x, y) = find(&screen, " cancel ");
+        assert_eq!(app.hits.at(x, y), Some(&Hit::EditorCancel));
+        assert_eq!(app.hits.at(x + 7, y), Some(&Hit::EditorCancel));
+        assert_ne!(app.hits.at(x + 8, y), Some(&Hit::EditorCancel));
     }
 
     #[test]

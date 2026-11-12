@@ -894,3 +894,127 @@ fn a_sent_note_can_be_added_again() {
     assert_eq!(app.review().expect("review").annotations.len(), 2);
     assert_eq!(app.unsent_count(), 1);
 }
+
+/// The index of the first screen row that holds `needle`.
+fn row_of(screen: &str, needle: &str) -> usize {
+    screen
+        .lines()
+        .position(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("no {needle:?} in\n{screen}"))
+}
+
+const BAR: &str = "[o looks good] [c comment] [d remove] [s replace]";
+
+#[test]
+fn the_bar_shows_under_the_focused_block_with_live_keys() {
+    let dir = tempfile::tempdir().expect("dir");
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[keys]\nlooks_good = \"y\"\n").expect("config");
+    let config = Config::load(&file).expect("config");
+    let mut app = app_with("# Title\n\nfirst para\n\nsecond para\n", &config);
+    press(&mut app, "j");
+    let screen = render(&mut app, 120, 40);
+    let bar = row_of(&screen, "[y looks good] [c comment] [d remove] [s replace]");
+    assert_eq!(bar, row_of(&screen, "first para") + 1, "{screen}");
+    assert!(!screen.contains("[o looks good]"), "{screen}");
+    let line = screen.lines().nth(bar).expect("bar row");
+    assert!(line.starts_with(" [y looks good]"), "the bar starts at the text column: {line:?}");
+}
+
+#[test]
+fn the_bar_shows_under_a_selection_in_text_mode() {
+    let mut app = app(LIST);
+    // Text mode at the first item, then select the first two lines.
+    press(&mut app, "\nVj");
+    let screen = render(&mut app, 80, 24);
+    assert_eq!(row_of(&screen, BAR), row_of(&screen, "two") + 1, "{screen}");
+    assert!(!screen.contains("three"), "the bar lies over the next row: {screen}");
+    let mut chars = self::app("alpha beta gamma\n\nnext line\n");
+    press(&mut chars, "vll");
+    let screen = render(&mut chars, 80, 24);
+    assert_eq!(row_of(&screen, BAR), row_of(&screen, "alpha") + 1, "{screen}");
+}
+
+#[test]
+fn no_bar_while_the_editor_is_open() {
+    let mut app = app("alpha beta\n\nsecond\n");
+    assert!(render(&mut app, 80, 24).contains(BAR));
+    press(&mut app, "c");
+    assert!(!render(&mut app, 80, 24).contains("[c comment]"));
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "?");
+    assert!(!render(&mut app, 80, 24).contains("[c comment]"), "no bar under the help screen");
+    let mut empty = self::app("");
+    assert!(!render(&mut empty, 80, 24).contains("[c comment]"), "no bar for an empty document");
+}
+
+/// Thirty paragraphs: more than one screen of 80x24.
+fn many_paragraphs() -> String {
+    (1..=30).map(|n| format!("paragraph {n}\n\n")).collect::<Vec<_>>().concat()
+}
+
+/// The rows of the top and the bottom border of the editor box.
+fn editor_rows(screen: &str) -> (usize, usize) {
+    let top = screen
+        .lines()
+        .position(|line| line.contains('┌') && line.contains("comment"))
+        .unwrap_or_else(|| panic!("no editor in\n{screen}"));
+    let bottom = row_of(screen, " save ");
+    (top, bottom)
+}
+
+#[test]
+fn the_editor_opens_below_the_block_or_above_at_the_bottom() {
+    let mut app = app(&many_paragraphs());
+    press(&mut app, "jc");
+    let screen = render(&mut app, 80, 24);
+    let (top, bottom) = editor_rows(&screen);
+    assert_eq!(top, row_of(&screen, "paragraph 2") + 1, "below the block:\n{screen}");
+    assert!(screen.lines().nth(bottom).is_some_and(|line| line.contains(" cancel ")), "{screen}");
+    let box_line = screen.lines().nth(top).expect("top");
+    assert!(box_line.starts_with(" ┌"), "the box starts at the text column: {box_line:?}");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "Gc");
+    let screen = render(&mut app, 80, 24);
+    let (_, bottom) = editor_rows(&screen);
+    assert_eq!(
+        bottom + 1,
+        row_of(&screen, "\u{258d}paragraph 30"),
+        "above the block at the bottom:\n{screen}"
+    );
+}
+
+#[test]
+fn a_resize_keeps_the_focused_block_and_the_editor_text() {
+    let mut app = app(&many_paragraphs());
+    render(&mut app, 120, 40);
+    press(&mut app, "jjc");
+    press(&mut app, "half a note");
+    render(&mut app, 120, 40);
+    let screen = render(&mut app, 60, 20);
+    assert_eq!(app.focused_block(), Some(2));
+    assert_eq!(app.editor().expect("editor").text, "half a note");
+    assert!(screen.contains("half a note▏"), "{screen}");
+    let (top, _) = editor_rows(&screen);
+    assert_eq!(top, row_of(&screen, "paragraph 3") + 1, "{screen}");
+}
+
+fn bar_text() -> &'static str {
+    "# Plan\n\nWe change the login page.\nThe old page stays for a week.\n\n- one\n- two\n\nThe end.\n"
+}
+
+#[test]
+fn snapshot_action_bar_120x40() {
+    let mut app = app(bar_text());
+    press(&mut app, "j");
+    insta::assert_snapshot!(render(&mut app, 120, 40));
+}
+
+#[test]
+fn snapshot_editor_floating_80x24() {
+    let mut app = app(bar_text());
+    press(&mut app, "jc");
+    press(&mut app, "Which page?");
+    press_key(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    insta::assert_snapshot!(render(&mut app, 80, 24));
+}
