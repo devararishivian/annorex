@@ -801,3 +801,21 @@ fn selection_gives_the_range_of_the_annotation() {
     assert_eq!(delete.range.end, text.len() - 1, "both lines, without the final line feed");
     assert!(delete.quote.ends_with("\nsecond line"), "{:?}", delete.quote);
 }
+
+#[test]
+fn a_second_identical_note_is_not_added() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllcWhich page?\n");
+    press(&mut app, "hhhhvllllcWhich page?\n");
+    assert_eq!(app.review().expect("review").annotations.len(), 1);
+    assert!(render(&mut app, 60, 12).contains("Already saved."));
+}
+
+#[test]
+fn a_note_with_other_text_on_the_same_range_is_added() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllcWhich page?\n");
+    press(&mut app, "hhhhvllllcWhich book?\n");
+    assert_eq!(app.review().expect("review").annotations.len(), 2);
+    assert!(!render(&mut app, 60, 12).contains("Already saved."));
+}

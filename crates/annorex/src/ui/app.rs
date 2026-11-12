@@ -1698,6 +1698,20 @@ impl App {
         };
         let review = self.reviews.entry(reply.clone()).or_default();
         let existing = self.editing_id.take().filter(|id| review.annotations.iter().any(|a| a.id == *id));
+        if existing.is_none() {
+            let same_text = |a: &Annotation| {
+                if kind == Kind::Replace { a.replacement.as_ref() == Some(&text) } else { a.note == text }
+            };
+            if review
+                .annotations
+                .iter()
+                .any(|a| a.kind == kind && a.range == range && a.label == label && same_text(a))
+            {
+                self.status = Some("Already saved.".to_owned());
+                self.selection = None;
+                return;
+            }
+        }
         let id = existing.unwrap_or_else(|| review.add(&self.doc.source, kind, range));
         review.update(id, |annotation: &mut Annotation| {
             annotation.label = label;
