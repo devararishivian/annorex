@@ -226,7 +226,7 @@ impl Action {
             Action::Tree => "file tree",
             Action::FindFile => "find a file",
             Action::Help => "this help",
-            Action::Quit => "quit at any time",
+            Action::Quit => "quit (not while typing)",
         }
     }
 

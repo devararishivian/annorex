@@ -350,7 +350,7 @@ fn question_mark_shows_every_key_and_any_key_closes_the_help() {
         "ctrl+p",
         "find a file",
         "q",
-        "quit at any time",
+        "quit (not while typing)",
         "step back; with nothing",
         "selected, it quits",
     ] {

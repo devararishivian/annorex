@@ -293,11 +293,11 @@ agent pane. When the agent is busy, Claude Code queues the message. Pi and OpenC
 
 `Y` copies the notes with an OSC 52 sequence and with `pbcopy`. If only the OSC 52 part works, the footer says so.
 
-`q` quits at any time. `esc` steps back one level: it closes a box, then clears the selection, then removes the focus.
+`q` quits when no note box or text input is open. In a box, `q` types a letter. `esc` steps back one level: it closes a box, then clears the selection, then removes the focus.
 When nothing is selected or focused, `esc` quits too. The footer ends with `q quit`. It shows `esc unselect` only while
 something is selected or focused. `P` and `Y` do not close Annorex.
 
-`q`, `esc` at the top, and `ctrl+c` with unsent notes ask what to do: send (`s`), keep the draft (`k`), discard (`d`), or go back
+`q`, `esc` with nothing selected, and `ctrl+c` with unsent notes ask what to do: send (`s`), keep the draft (`k`), discard (`d`), or go back
 (`esc`).
 
 ## Review files

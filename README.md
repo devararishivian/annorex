@@ -56,7 +56,7 @@ require("annorex").setup{ bin = "/path/to/annorex" }
    selection and show the action bar. Press `esc` twice to go back to block mode.
 6. Press `S` to send all notes to the agent. After a good send, Annorex closes. If the send fails, Annorex stays open
    and the footer shows the reason.
-7. To leave Annorex, press `q` at any time. Press `esc` when nothing is selected or focused. With unsent notes, Annorex
+7. To leave Annorex, press `q` when no note box or text input is open. Press `esc` when nothing is selected or focused. With unsent notes, Annorex
    asks first.
 
 In the viewer, press `?` to see all keys.
@@ -111,11 +111,11 @@ The list of replies (`p`), the file finder (`ctrl+p`), and the session picker op
 | `ctrl+d` / `ctrl+u`  | Scroll half a page                                                       |
 | `v` / `V`            | Select characters or lines (text mode)                                   |
 | `h` `l` `w` `b`      | Move by character or by word (text mode)                                 |
-| `o` / `d`            | Note: looks good or remove. Both save at once and need no text          |
-| `c` / `s`            | Note: comment or replace. Both open the note box                        |
+| `o` / `d`            | Note: looks good or remove. Both save at once and need no text           |
+| `c` / `s`            | Note: comment or replace. Both open the note box                         |
 | `e` / `x`            | Edit or delete the note at the focus                                     |
 | `esc`                | Step back: clear the selection, leave text mode, then remove the focus. With nothing selected, quit |
-| `q`                  | Quit at any time. With unsent notes, Annorex asks first                  |
+| `q`                  | Quit when no note box or text input is open. Unsent notes: asks first |
 | `S`                  | Send the notes to the agent                                              |
 | `M`                  | Write a general note, then send                                          |
 | `P`                  | Paste the notes into the agent input box, without Enter                  |
