@@ -559,11 +559,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
             };
             let number_width = usize::from(gutter.saturating_sub(1));
             let in_focus = focused.as_ref().is_some_and(|block| block.lines.contains(&row.doc_line));
-            let mut spans = vec![if in_focus && margin > 0 {
-                Span::styled("\u{258d}", Style::new().fg(Color::Cyan))
-            } else {
-                Span::raw(" ".repeat(usize::from(margin)))
-            }];
+            let mut spans = vec![margin_span(in_focus, margin)];
             if gutter > 0 {
                 spans.push(Span::styled(format!("{number:>number_width$}"), number_style));
                 spans.push(Span::raw(" "));
@@ -578,12 +574,39 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
             };
             let marks = Marks { underline: flags(&annotated), selected: flags(selection.as_slice()) };
             spans.extend(row_spans(row, &matches, cursor, &marks));
-            let line = Line::from(spans);
-            if in_focus { line.style(Style::new().bg(Color::DarkGray)) } else { line }
+            Line::from(spans)
         })
         .collect();
+    if let Some(block) = &focused {
+        fill_focus(
+            frame,
+            area,
+            rows.iter().skip(top_row).take(height).map(|row| block.lines.contains(&row.doc_line)),
+        );
+    }
     push_doc_hits(app, area, top_row, margin + gutter);
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// The margin cell of a row: the focus bar in a focused block, else blanks.
+fn margin_span(in_focus: bool, margin: u16) -> Span<'static> {
+    if in_focus && margin > 0 {
+        Span::styled("\u{258d}", Style::new().fg(Color::Cyan))
+    } else {
+        Span::raw(" ".repeat(usize::from(margin)))
+    }
+}
+
+/// Give the rows of the focused block the focus background over the whole width, also the blank
+/// rows inside the block. `inside` tells for each row on the screen if it is in the block.
+fn fill_focus(frame: &mut Frame, area: Rect, inside: impl Iterator<Item = bool>) {
+    let fill = Style::new().bg(Color::DarkGray);
+    for (offset, inside) in inside.enumerate() {
+        if inside {
+            let y = area.y + u16::try_from(offset).unwrap_or(0);
+            frame.buffer_mut().set_style(Rect::new(area.x, y, area.width, 1), fill);
+        }
+    }
 }
 
 /// Push the hit areas of the document rows on the screen. A block reaches the whole row, and the

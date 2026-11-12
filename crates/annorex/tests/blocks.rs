@@ -484,3 +484,30 @@ fn a_forward_scroll_never_focuses_a_lower_block() {
     press_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
     assert_eq!(app.mode(), Mode::Block(0));
 }
+
+#[test]
+fn the_focus_background_fills_every_row_of_the_block_to_the_last_column() {
+    let text = "intro\n\n```\nalpha\n\nbeta\n```\n\nafter\n";
+    let mut app = open(text);
+    press(&mut app, "j");
+    let top = rows_with(&mut app, "alpha", 80, 24)[0];
+    let buffer = buffer_of(&mut app, 80, 24);
+    let bg = |x: u16, y: u16| buffer.cell((x, y)).expect("cell").bg;
+    // The fence has a blank row between alpha and beta. Every row has the bar and the background
+    // in the first column, in a column past the text, and in the last column of the doc area.
+    let beta = rows_with(&mut app, "beta", 80, 24)[0];
+    assert!(beta - top >= 2, "a blank row lies inside the block");
+    for y in top..=beta {
+        for x in [0, 30, 79] {
+            assert_eq!(bg(x, y), Color::DarkGray, "cell ({x}, {y})");
+        }
+    }
+    // The rows outside the block have no background.
+    let after = rows_with(&mut app, "after", 80, 24)[0];
+    assert_ne!(bg(79, after), Color::DarkGray);
+    assert_ne!(bg(79, rows_with(&mut app, "intro", 80, 24)[0]), Color::DarkGray);
+    // Text mode has no focus background.
+    press(&mut app, "\n");
+    let buffer = buffer_of(&mut app, 80, 24);
+    assert_ne!(buffer.cell((79, top)).expect("cell").bg, Color::DarkGray);
+}

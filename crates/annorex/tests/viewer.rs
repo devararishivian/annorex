@@ -78,10 +78,16 @@ fn render(app: &mut App, width: u16, height: u16) -> String {
     lines.join("\n")
 }
 
-/// The source line number in the gutter of the first document row (row 1).
-fn first_gutter_number(screen: &str) -> Option<usize> {
-    let row = screen.lines().nth(1)?;
-    row.split_whitespace().next()?.parse().ok()
+/// The text of the first document row (row 1), without the margin.
+fn first_row_text(screen: &str) -> String {
+    screen.lines().nth(1).unwrap_or_default().trim_start_matches(['\u{258d}', ' ']).trim_end().to_owned()
+}
+
+/// True when the first document row shows the start of the display line `index`.
+fn top_shows(app: &App, screen: &str, index: usize) -> bool {
+    let row = first_row_text(screen);
+    let line = app.doc().lines[index].plain();
+    !row.is_empty() && line.starts_with(&row)
 }
 
 fn first_text_line_at_or_after(app: &App, index: usize) -> usize {
@@ -127,11 +133,10 @@ fn header_names_view_agent_state_and_reply() {
 fn resize_sequence_keeps_top_line() {
     let mut app = viewer();
     let index = first_text_line_at_or_after(&app, 30);
-    let expected = app.doc().lines[index].line;
     app.jump_to_line(index);
     for (width, height) in [(218, 69), (40, 12), (120, 40), (80, 24)] {
         let screen = render(&mut app, width, height);
-        assert_eq!(first_gutter_number(&screen), Some(expected), "at {width}×{height}:\n{screen}");
+        assert!(top_shows(&app, &screen, index), "at {width}×{height}:\n{screen}");
     }
 }
 
@@ -139,11 +144,12 @@ fn resize_sequence_keeps_top_line() {
 fn resize_below_minimum_and_back_keeps_top_line() {
     let mut app = viewer();
     let index = first_text_line_at_or_after(&app, 30);
-    let expected = app.doc().lines[index].line;
     app.jump_to_line(index);
-    assert_eq!(first_gutter_number(&render(&mut app, 218, 69)), Some(expected));
+    let screen = render(&mut app, 218, 69);
+    assert!(top_shows(&app, &screen, index), "{screen}");
     assert!(render(&mut app, 30, 8).contains("pane too small"));
-    assert_eq!(first_gutter_number(&render(&mut app, 218, 69)), Some(expected));
+    let screen = render(&mut app, 218, 69);
+    assert!(top_shows(&app, &screen, index), "{screen}");
 }
 
 #[test]
@@ -156,9 +162,9 @@ fn cursor_line_stays_visible_when_moving_down() {
     }
     let cursor = app.cursor_line();
     let screen = render(&mut app, 80, 24);
-    let number = app.doc().lines[cursor].line.to_string();
+    let start: String = app.doc().lines[cursor].plain().chars().take(12).collect();
     let doc_rows: Vec<&str> = screen.lines().skip(1).take(22).collect();
-    assert!(doc_rows.iter().any(|row| row.split_whitespace().next() == Some(number.as_str())), "{screen}");
+    assert!(doc_rows.iter().any(|row| row.contains(&start)), "{screen}");
 }
 
 #[test]
@@ -324,11 +330,11 @@ fn reload_shows_a_new_newest_reply() {
 fn reload_without_new_reply_keeps_the_position() {
     let mut app = viewer();
     let index = first_text_line_at_or_after(&app, 30);
-    let expected = app.doc().lines[index].line;
     app.jump_to_line(index);
     render(&mut app, 120, 40);
     app.set_replies(replies());
-    assert_eq!(first_gutter_number(&render(&mut app, 120, 40)), Some(expected));
+    let screen = render(&mut app, 120, 40);
+    assert!(top_shows(&app, &screen, index), "{screen}");
 }
 
 #[test]
@@ -506,8 +512,8 @@ fn cursor_cell_is_reversed() {
     let buffer = terminal.backend().buffer();
     let reversed =
         |x: u16| buffer.cell((x, 1)).expect("cell").style().add_modifier.contains(Modifier::REVERSED);
-    assert_eq!(buffer.cell((3, 1)).expect("cell").symbol(), "l");
-    assert!(reversed(3), "the second character is the cursor");
-    assert!(!reversed(2), "the first character is not");
-    assert!(!reversed(4));
+    assert_eq!(buffer.cell((2, 1)).expect("cell").symbol(), "l");
+    assert!(reversed(2), "the second character is the cursor");
+    assert!(!reversed(1), "the first character is not");
+    assert!(!reversed(3));
 }
