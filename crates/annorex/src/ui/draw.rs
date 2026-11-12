@@ -207,8 +207,8 @@ fn send_button(app: &App) -> Option<Part> {
     if let Some(at) = app.shown_sent() {
         return Some((format!("[Sent {}]", clock(at, &app.zone)), bold));
     }
-    let count = app.annotation_count();
-    let note = app.review().is_some_and(|review| !review.note.trim().is_empty());
+    let count = app.unsent_count();
+    let note = app.has_unsent_note();
     if count == 0 && !note {
         return None;
     }

@@ -248,3 +248,21 @@ fn opening_a_file_gives_the_keys_back_to_the_document_when_a_session_choice_wait
     press(&mut app, "cnote\n");
     assert!(app.export().contains("> note"), "the keys must reach the file:\n{}", app.export());
 }
+
+#[test]
+fn the_send_button_counts_only_unsent_notes_of_all_documents() {
+    let mut app = noted();
+    app.finish_send("2026-11-12T10:00:00Z");
+    press(&mut app, "cnote two\n");
+    let screen = render(&mut app, 100, 24);
+    assert!(screen.contains("[Send 1"), "one new note, not three:\n{screen}");
+}
+
+#[test]
+fn a_new_reply_does_not_move_the_screen_off_an_open_file() {
+    let mut app = files_only();
+    app.set_reply_source(ReplySource::Missing("no reply yet".to_owned()));
+    app.open_file(loaded("a.md", "# Title\n\nalpha text\n"));
+    app.set_replies(vec![reply("r1", "hello\n")]);
+    assert_eq!(app.shown_file(), Some(std::path::Path::new("a.md")));
+}

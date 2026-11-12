@@ -661,9 +661,10 @@ impl App {
         // The open files stay after the replies.
         let mut replies = replies;
         replies.extend(self.replies.iter().filter(|reply| self.files.contains_key(&reply.id)).cloned());
+        let on_file = current.as_ref().is_some_and(|id| self.files.contains_key(id));
         let keep = current
             .and_then(|id| replies.iter().position(|reply| reply.id == id))
-            .filter(|&index| self.selected > 0 || index == 0);
+            .filter(|&index| on_file || self.selected > 0 || index == 0);
         let changed = self.changed_texts(&replies);
         self.replies = replies;
         self.screen = Screen::Viewer;
@@ -1392,6 +1393,23 @@ impl App {
         } else {
             "Nothing to send: no annotations yet.".to_owned()
         }
+    }
+
+    /// The number of annotations that no send took, in all documents.
+    pub fn unsent_count(&self) -> usize {
+        self.replies
+            .iter()
+            .filter_map(|reply| self.reviews.get(&reply.id))
+            .map(|review| review.unsent().len())
+            .sum()
+    }
+
+    /// True when a document has a general note that no send took.
+    pub fn has_unsent_note(&self) -> bool {
+        self.replies
+            .iter()
+            .filter_map(|reply| self.reviews.get(&reply.id))
+            .any(|review| !review.note.trim().is_empty())
     }
 
     /// The number of annotations of the reply on the screen.

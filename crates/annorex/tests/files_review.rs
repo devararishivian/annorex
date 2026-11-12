@@ -540,7 +540,7 @@ fn header_and_nothing_to_send_look_at_all_open_files() {
     // A new note in b.txt makes the header a send button again.
     press(&mut app, "cmore\n");
     let screen = render(&mut app, 100, 12);
-    assert!(screen.contains("[Send 2") && !screen.contains("[Sent"), "{screen}");
+    assert!(screen.contains("[Send 1") && !screen.contains("[Sent"), "{screen}");
 }
 
 #[test]

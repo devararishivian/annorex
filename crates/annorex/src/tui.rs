@@ -152,12 +152,10 @@ pub fn run_viewer(
         enter_delay: config.enter_delay,
         config: config.clone(),
         work: None,
+        start: start.clone(),
     };
     let mut app = viewer.start_app(start);
     app.set_state(viewer.state.clone());
-    if viewer.store.is_none() {
-        app.set_save_error(Some("no home directory, so no place for drafts".to_owned()));
-    }
     let (sender, updates) = mpsc::channel();
     let watcher = Rex::new(rex.bin.clone(), rex.session.clone(), SystemRunner);
     let pane = target.to_owned();
@@ -223,6 +221,8 @@ struct Viewer<'a, R: Runner> {
     config: Config,
     /// The agent process and its directory. `None` before the first start or when there is none.
     work: Option<Source>,
+    /// What the viewer was asked to show first. A new start after an error uses it again.
+    start: Start,
 }
 
 /// The `session` part of the draft key of a file: the notes belong to the work directory, not to one
@@ -235,6 +235,15 @@ impl<R: Runner> Viewer<'_, R> {
     /// Find the agent, its work directory, and its replies, and build the app. Only a missing agent or
     /// work directory gives a message in place of the viewer. Other problems show in the reply list.
     fn start_app(&mut self, start: &Start) -> App {
+        self.start = start.clone();
+        let mut app = self.build_app(start);
+        if self.store.is_none() {
+            app.set_save_error(Some("no home directory, so no place for drafts".to_owned()));
+        }
+        app
+    }
+
+    fn build_app(&mut self, start: &Start) -> App {
         let source = match self.locate() {
             Ok(source) => source,
             Err(message) => {
@@ -268,7 +277,7 @@ impl<R: Runner> Viewer<'_, R> {
         }
         self.restore_drafts(&mut app);
         self.refresh_marks(&mut app);
-        if app.reply_ids().is_empty() || matches!(start, Start::Files(paths) if paths.is_empty()) {
+        if opens_tree(start, &app) {
             app.open_tree();
         }
         if !problems.is_empty() {
@@ -279,19 +288,24 @@ impl<R: Runner> Viewer<'_, R> {
 
     /// Read the agent and its state, and find its process and work directory.
     fn locate(&mut self) -> Result<Source, String> {
-        self.work = None;
-        self.state = read_state(self.rex, self.target).map_err(|error| error.to_string())?;
-        let Some(agent) = self.state.agent else { return Err(NOT_AGENT.to_owned()) };
+        // A failed look must not clear what the viewer already knows, or the drafts could not be saved.
+        let state = read_state(self.rex, self.target).map_err(|error| error.to_string())?;
+        let Some(agent) = state.agent else {
+            if self.work.is_none() {
+                self.state = state;
+            }
+            return Err(NOT_AGENT.to_owned());
+        };
         let process = self.rex.process(self.target).map_err(|error| error.to_string())?;
         let source = Source::from_process(agent, &process)
             .ok_or_else(|| "Rex does not report the directory of the agent process".to_owned())?;
+        self.state = state;
         self.work = Some(source.clone());
         Ok(source)
     }
 
     /// Find the session of the agent and read its replies. A problem is a [`ReplySource`], not an error.
     fn find_replies(&mut self) -> (ReplySource, Vec<Reply>) {
-        self.session = None;
         let missing = |message: String| (ReplySource::Missing(message), Vec::new());
         let (Some(source), Some(agent)) = (self.work.clone(), self.state.agent) else {
             return missing(NOT_AGENT.to_owned());
@@ -404,7 +418,14 @@ impl<R: Runner> Viewer<'_, R> {
         else {
             return;
         };
-        let Some(session) = self.session_of(&id) else { return };
+        let Some(session) = self.session_of(&id) else {
+            if app.review().is_some_and(|review| !review.is_empty()) {
+                app.set_save_error(Some(
+                    "no session for this document, so the draft cannot be saved".to_owned(),
+                ));
+            }
+            return;
+        };
         let error = app.draft(agent, &session).and_then(|draft| store.save(&draft).err());
         app.set_save_error(error.map(|error| error.to_string()));
     }
@@ -412,8 +433,13 @@ impl<R: Runner> Viewer<'_, R> {
     /// Save the drafts of all documents: after a send, every document changed its sent state.
     fn save_drafts(&self, app: &mut App) {
         let (Some(store), Some(agent)) = (&self.store, self.state.agent) else { return };
-        let error =
-            app.drafts(agent, |id| self.session_of(id)).iter().find_map(|draft| store.save(draft).err());
+        // Try every draft. One failed write must not leave the others unsaved.
+        let errors: Vec<_> = app
+            .drafts(agent, |id| self.session_of(id))
+            .iter()
+            .filter_map(|draft| store.save(draft).err())
+            .collect();
+        let error = errors.into_iter().next();
         app.set_save_error(error.map(|error| error.to_string()));
     }
 
@@ -448,7 +474,8 @@ impl<R: Runner> Viewer<'_, R> {
     fn reload(&mut self, app: &mut App) {
         if matches!(app.screen, Screen::Error(_)) {
             // The start found no agent or no directory. Look again.
-            *app = self.start_app(&Start::Last);
+            let start = self.start.clone();
+            *app = self.start_app(&start);
             app.set_state(self.state.clone());
             return;
         }
@@ -474,6 +501,14 @@ impl<R: Runner> Viewer<'_, R> {
         }
         app.set_state(self.state.clone());
     }
+}
+
+/// True when the viewer starts on the file tree: with no document, or for `files` with no path. A choice of
+/// sessions that `last` shows stays on the screen.
+fn opens_tree(start: &Start, app: &App) -> bool {
+    let no_paths = matches!(start, Start::Files(paths) if paths.is_empty());
+    let picking = matches!(start, Start::Last) && matches!(app.reply_source(), ReplySource::Pick(_));
+    no_paths || (app.reply_ids().is_empty() && !picking)
 }
 
 /// Read the replies of a session.
@@ -718,6 +753,7 @@ mod tests {
             enter_delay: Duration::ZERO,
             config: Config::default(),
             work,
+            start: super::Start::Last,
         }
     }
 
@@ -742,5 +778,39 @@ mod tests {
         viewer.session = None;
         assert!(viewer.draft_key("r1").is_none(), "a reply needs its session");
         assert!(viewer.draft_key("file:a.md").is_some(), "a file needs only the directory");
+    }
+    #[test]
+    fn a_failed_look_keeps_the_known_agent_and_directory() {
+        let rex = crate::rex::Rex::new(std::path::PathBuf::from("rex"), "session:s".to_owned(), NoRex);
+        let mut viewer = viewer(&rex, Some(source()));
+        assert!(viewer.locate().is_err(), "the runner always fails");
+        assert!(viewer.work.is_some() && viewer.state.agent.is_some(), "the drafts need them");
+        assert!(viewer.draft_key("file:a.md").is_some());
+    }
+
+    #[test]
+    fn last_with_a_choice_of_sessions_keeps_the_choice_and_files_open_the_tree() {
+        let candidate = crate::replies::Candidate {
+            session: crate::replies::SessionRef::Pi(std::path::PathBuf::from("/s.jsonl")),
+            updated: std::time::SystemTime::now(),
+            last_line: "x".to_owned(),
+        };
+        let mut app = App::new(
+            AgentState { agent: Some(Agent::Pi), safety: Safety::Clear { state: None } },
+            Screen::Viewer,
+            Vec::new(),
+            &Config::default(),
+        )
+        .with_root(std::path::PathBuf::from("/work"));
+        app.set_reply_source(crate::ui::ReplySource::Pick(vec![candidate]));
+        assert!(!super::opens_tree(&super::Start::Last, &app));
+        assert!(super::opens_tree(&super::Start::Files(Vec::new()), &app));
+        let empty = App::new(
+            AgentState { agent: Some(Agent::Pi), safety: Safety::Clear { state: None } },
+            Screen::Viewer,
+            Vec::new(),
+            &Config::default(),
+        );
+        assert!(super::opens_tree(&super::Start::Last, &empty), "no document at all: the tree");
     }
 }

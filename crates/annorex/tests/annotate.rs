@@ -440,7 +440,7 @@ fn send_marks_the_draft_sent_and_a_change_makes_it_unsent_again() {
     assert!(top.contains("[Sent 14:30]") && !top.contains("unsent"), "{top}");
     press(&mut app, "cmore\n");
     assert!(app.draft(Agent::ClaudeCode, "s").expect("draft").sent_at.is_none());
-    assert!(header(&mut app).contains("[Send 2 ▸]"));
+    assert!(header(&mut app).contains("[Send 1 ▸]"));
 }
 
 #[test]
