@@ -421,6 +421,12 @@ fn footer_changes_with_the_mode() {
 #[test]
 fn footer_drops_hints_from_the_end_but_keeps_help() {
     let mut app = both();
+    // A file on the screen has the file keys, with `find`.
+    app.open_file(LoadedFile {
+        relative: PathBuf::from("a.md"),
+        text: "alpha\n".to_owned(),
+        stamp: Stamp { size: 6, modified: None },
+    });
     let wide = footer_of(&mut app, 200);
     assert!(wide.contains("ctrl+p find"), "{wide}");
     let narrow = footer_of(&mut app, 60);

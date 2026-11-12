@@ -140,6 +140,8 @@ impl App {
             match hit {
                 Some(Hit::ListRow(index)) => return self.box_row(view, index),
                 Some(Hit::BoxInside) => {}
+                // A stray click must not end the start list, because `esc` there quits.
+                _ if self.start_box => {}
                 _ => self.close_box(),
             }
             return Effect::None;

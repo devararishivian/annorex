@@ -208,6 +208,8 @@ pub struct App {
     pub(crate) list_open: bool,
     /// The centered box, when one is open.
     pub(crate) boxed: Option<BoxView>,
+    /// The reply list at the start of the last-reply view is open. `esc` quits there.
+    pub(crate) start_box: bool,
     /// What the last frame showed beside the document. The keys `tab`, `T`, and `a` use it.
     pub(crate) docked: Docked,
     /// The cursor of the reply list.
@@ -312,6 +314,7 @@ impl App {
             start_view: StartView::default(),
             list_open: false,
             boxed: None,
+            start_box: false,
             docked: Docked::default(),
             panel_index: 0,
             picker_index: 0,
@@ -384,9 +387,26 @@ impl App {
         self
     }
 
+    /// Open the reply list at the start of the last-reply view, with the newest reply selected. One reply
+    /// or none gives no list. `esc` quits from this list.
+    pub fn open_start_list(&mut self) {
+        let ready = self.screen == Screen::Viewer && self.reply_source == ReplySource::Ready;
+        if self.start_view == StartView::Last && ready && self.replies.len() >= 2 && self.boxed.is_none() {
+            self.boxed = Some(BoxView::Replies);
+            self.focus = Focus::Box;
+            self.panel_index = 0;
+            self.start_box = true;
+        }
+    }
+
     /// The view that the viewer started as.
     pub(crate) fn start_view(&self) -> StartView {
         self.start_view
+    }
+
+    /// The id of the document on the screen. `None` when there is none.
+    pub(crate) fn shown_id(&self) -> Option<&str> {
+        self.shown_id.as_deref()
     }
 
     /// True when the viewer has a work directory, so it has files.
@@ -505,7 +525,7 @@ impl App {
     /// Show the file tree. The viewer starts with it when no file is open.
     pub fn open_tree(&mut self) {
         self.tree_open = true;
-        self.boxed = None;
+        self.close_box_only();
         self.focus_tree();
     }
 
@@ -1316,7 +1336,7 @@ impl App {
             return;
         }
         self.list_open = true;
-        self.boxed = None;
+        self.close_box_only();
         self.focus = Focus::Rail;
         // Start at the first note at the focus of the document, else keep the place.
         let here = self.notes_here().first().copied();
@@ -1335,6 +1355,7 @@ impl App {
             return;
         }
         self.boxed = Some(view);
+        self.start_box = false;
         self.focus = Focus::Box;
         match view {
             BoxView::Replies => self.panel_index = self.selected,
@@ -1343,8 +1364,14 @@ impl App {
     }
 
     pub(super) fn close_box(&mut self) {
-        self.boxed = None;
+        self.close_box_only();
         self.focus = Focus::Doc;
+    }
+
+    /// Remove the box and forget that it was the start list.
+    fn close_box_only(&mut self) {
+        self.boxed = None;
+        self.start_box = false;
     }
 
     /// The keys that work the same in the tree, the rail, and the reply list. `None` when the key is
@@ -1496,6 +1523,8 @@ impl App {
         }
         match key.code {
             KeyCode::Enter => return self.replies_enter(),
+            // The start list is the way in: `esc` there ends the session.
+            KeyCode::Esc if self.start_box => return self.request_quit(),
             KeyCode::Esc => self.close_box(),
             KeyCode::Tab => {}
             _ => {

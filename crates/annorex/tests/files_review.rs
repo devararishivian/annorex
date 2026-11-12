@@ -13,7 +13,7 @@ use annorex::ui::{AgentState, App, Effect, Screen, StartView, draw};
 use annorex::watch::{Change, ChangeKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use unicode_width::UnicodeWidthStr;
 
 fn state() -> AgentState {
@@ -259,6 +259,111 @@ fn the_last_reply_view_starts_without_the_tree_and_shows_the_reply_keys() {
     let footer = footer(&screen);
     assert!(footer.contains("S send · a notes · p list · T tree · ? help"), "{footer}");
     assert!(!footer.contains("find"), "the find key is a file key: {footer}");
+}
+
+/// The last-reply view with `count` replies (newest first), as `open last` starts it.
+fn last_app_with(count: usize) -> (tempfile::TempDir, App) {
+    let (dir, app) = tree_app(&Config::default());
+    let mut app = app.with_start_view(StartView::Last);
+    let replies = (0..count)
+        .map(|n| Reply {
+            id: format!("r{n}"),
+            text: format!("# Reply {n}\n\nText of reply {n}.\n"),
+            at: None,
+        })
+        .collect();
+    app.set_replies(replies);
+    app.open_start_list();
+    (dir, app)
+}
+
+#[test]
+fn the_last_reply_view_starts_with_the_reply_list_and_the_newest_selected() {
+    let (_dir, mut app) = last_app_with(3);
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Documents"), "the box is open at the start: {screen}");
+    assert!(footer(&screen).contains("j/k move · enter open · esc quit"), "{screen}");
+    press(&mut app, "\n");
+    assert_eq!(app.reply_position(), (0, 3), "enter opens the newest reply");
+    let screen = render(&mut app, 120, 20);
+    assert!(!screen.contains("Documents") && screen.contains("Text of reply 0."), "{screen}");
+}
+
+#[test]
+fn enter_on_the_second_row_opens_that_reply() {
+    let (_dir, mut app) = last_app_with(3);
+    press(&mut app, "j\n");
+    assert_eq!(app.reply_position(), (1, 3));
+    assert!(render(&mut app, 120, 20).contains("Text of reply 1."));
+}
+
+#[test]
+fn esc_in_the_start_box_quits_and_a_later_box_closes_on_esc() {
+    let (_dir, mut app) = last_app_with(2);
+    assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::Quit);
+    let (_dir, mut app) = last_app_with(2);
+    assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::Quit, "the quit key too");
+    let (_dir, mut app) = last_app_with(2);
+    press(&mut app, "\n");
+    press(&mut app, "p");
+    assert!(render(&mut app, 120, 20).contains("Documents"));
+    assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::None);
+    assert!(!render(&mut app, 120, 20).contains("Documents"), "esc closes a later box");
+}
+
+#[test]
+fn one_reply_or_none_gives_no_start_box() {
+    for count in [0, 1] {
+        let (_dir, mut app) = last_app_with(count);
+        assert!(!render(&mut app, 120, 20).contains("Documents"), "{count} replies");
+    }
+}
+
+#[test]
+fn a_click_outside_the_start_box_does_nothing_and_a_click_on_a_row_opens_it() {
+    let (_dir, mut app) = last_app_with(3);
+    let click = |app: &mut App, column, row| {
+        let kind = MouseEventKind::Down(MouseButton::Left);
+        app.handle_mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE })
+    };
+    render(&mut app, 120, 20);
+    assert_eq!(click(&mut app, 0, 0), Effect::None);
+    assert_eq!(click(&mut app, 119, 19), Effect::None);
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Documents"), "a stray click keeps the start box: {screen}");
+    let row = screen.lines().position(|line| line.contains("Reply 1")).expect("second row");
+    let column = screen.lines().nth(row).and_then(|line| line.find("Reply 1")).expect("column");
+    click(&mut app, u16::try_from(column).expect("column"), u16::try_from(row).expect("row"));
+    assert_eq!(app.reply_position(), (1, 3));
+    assert!(!render(&mut app, 120, 20).contains("Documents"));
+}
+
+#[test]
+fn new_reply_while_the_start_box_is_open_keeps_the_selection_valid() {
+    let (_dir, mut app) = last_app_with(2);
+    press(&mut app, "j");
+    let replies =
+        (0..4).map(|n| Reply { id: format!("n{n}"), text: format!("# New {n}\n"), at: None }).collect();
+    app.set_replies(replies);
+    assert!(render(&mut app, 120, 20).contains("Documents"));
+    press(&mut app, "jjjjj\n");
+    assert_eq!(app.reply_position(), (3, 4));
+}
+
+#[test]
+fn the_footer_follows_the_document_on_the_screen() {
+    let (_dir, mut app) = last_app();
+    assert!(footer(&render(&mut app, 120, 20)).contains("S send · a notes · p list · T tree · ? help"));
+    app.open_file(loaded("a.md", "# Title\n\nalpha text\n"));
+    let screen = render(&mut app, 120, 20);
+    let footer_row = footer(&screen);
+    assert!(footer_row.contains("S send · a notes · T tree · ctrl+p find · p list · ? help"), "{footer_row}");
+    // The files view with a reply on the screen shows the reply keys.
+    let (_dir, app) = tree_app(&Config::default());
+    let mut app = app.with_start_view(StartView::Files);
+    app.set_replies(vec![Reply { id: "r1".to_owned(), text: "# Reply\n".to_owned(), at: None }]);
+    let screen = render(&mut app, 120, 20);
+    assert!(footer(&screen).contains("S send · a notes · p list · T tree · ? help"), "{screen}");
 }
 
 #[test]

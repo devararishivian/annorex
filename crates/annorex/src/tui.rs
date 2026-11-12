@@ -289,6 +289,7 @@ impl<R: Runner> Viewer<'_, R> {
         app.start_changes(crate::changes::looker(source, Roots::from_env(), root.clone(), turns));
         let (reply_source, replies) = self.find_replies();
         show(&mut app, reply_source, replies);
+        app.open_start_list();
         self.watch_replies(&mut app);
         let mut problems: Vec<String> = Vec::new();
         if let Start::Files(paths) = start {

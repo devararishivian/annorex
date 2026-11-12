@@ -20,7 +20,7 @@ the [README](../README.md). For the design, read [ARCHITECTURE.md](ARCHITECTURE.
 ## What Annorex does
 
 - **One viewer for replies and files.** A Rex action opens Annorex in a floating layer over the full window of the
-  agent. Annorex shows the newest reply of the agent as formatted Markdown. You can select one of the 25 newest replies.
+  agent. Annorex lets you choose a reply, and shows it as formatted Markdown. You can select one of the 25 newest replies.
   The layout follows the size of the window. A second Rex action starts the same viewer on the files of the work
   directory of the agent. A tree and a fuzzy find help you to open files. You can open many files and annotate each one.
 - **Notes.** Select text in a reply or in a file. Add a comment, mark the text for removal, or give a replacement.
@@ -87,7 +87,7 @@ Press `q` there to close it.
 The replies of the agent and the files of its work directory are in the same Annorex. `annorex_last` and
 `annorex_files` open the same viewer. They differ in the first document: the newest reply, or the files that you
 name (the file tree when you name none). The file viewer shows the tree on the left and the file keys in the footer.
-The last-reply viewer hides the tree until you press `T`. Its footer shows the reply keys. All keys work in both viewers. One send gives the notes on all replies and files to the agent.
+The last-reply viewer hides the tree until you press `T`. With two or more replies, it opens the reply list first. The newest reply is selected. Press `enter` to open the selected reply. Press `esc` to quit Annorex. The footer shows the keys of the document on the screen: reply keys for a reply, file keys for a file. All keys work in both viewers. One send gives the notes on all replies and files to the agent.
 
 ## Review the last reply
 

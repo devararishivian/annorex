@@ -83,19 +83,24 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
     if app.pick.is_some() {
         return vec![plain("1-9 choose"), plain("esc close")];
     }
-    // The keys of the view: the last-reply view puts the reply list first, the files view the file keys.
-    let view = app.has_root().then(|| app.start_view());
+    // The keys of the document on the screen: a file has the file keys, a reply has the reply keys.
+    // With no document on the screen, the view that the viewer started as decides.
+    let file_keys = app.has_root()
+        && match app.shown_file() {
+            Some(_) => true,
+            None => app.shown_id().is_none() && app.start_view() == StartView::Files,
+        };
     let lists = |out: &mut Vec<Hint>| {
         out.push(hint(Action::Send, format!("{} send", k(Action::Send))));
         out.push(hint(Action::Annotations, format!("{} notes", k(Action::Annotations))));
         let list = hint(Action::Replies, format!("{} list", k(Action::Replies)));
         let tree = hint(Action::Tree, format!("{} tree", k(Action::Tree)));
-        match view {
-            None => out.push(list),
-            Some(StartView::Last) => out.extend([list, tree]),
-            Some(StartView::Files) => {
-                out.extend([tree, hint(Action::FindFile, format!("{} find", k(Action::FindFile))), list]);
-            }
+        if file_keys {
+            out.extend([tree, hint(Action::FindFile, format!("{} find", k(Action::FindFile))), list]);
+        } else if app.has_root() {
+            out.extend([list, tree]);
+        } else {
+            out.push(list);
         }
     };
     let mut out = match app.focus {
@@ -106,6 +111,9 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
                 plain("ctrl+n/ctrl+p move"),
                 plain("esc close"),
             ];
+        }
+        Focus::Box if app.start_box => {
+            vec![hint(Action::Down, format!("{up_down} move")), plain("enter open"), plain("esc quit")]
         }
         Focus::Box => {
             vec![hint(Action::Down, format!("{up_down} move")), plain("enter open"), plain("esc close")]
