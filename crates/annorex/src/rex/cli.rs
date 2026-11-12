@@ -138,9 +138,25 @@ pub struct Rex<R: Runner> {
     pub(crate) runner: R,
 }
 
+/// Find the `rex` binary: `$REX_BIN_DIR/rex` if that file exists, else `rex` in a `PATH` directory.
+pub fn find_binary(env: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, RexError> {
+    let mut tried = Vec::new();
+    let bin_dir = env("REX_BIN_DIR").filter(|dir| !dir.is_empty()).map(PathBuf::from);
+    let path_dirs =
+        env("PATH").map(|path| std::env::split_paths(&path).collect::<Vec<_>>()).unwrap_or_default();
+    for dir in bin_dir.into_iter().chain(path_dirs.into_iter().filter(|dir| !dir.as_os_str().is_empty())) {
+        let candidate = dir.join("rex");
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        tried.push(candidate);
+    }
+    Err(RexError::BinaryNotFound { tried })
+}
+
 impl Rex<SystemRunner> {
-    /// Find the `rex` binary and the session. The binary is `$REX_BIN_DIR/rex` if that file
-    /// exists, else `rex` in a `PATH` directory. The session is `session`, else `REX_SESSION`.
+    /// Find the `rex` binary and the session. The binary is found by [`find_binary`]. The session is
+    /// `session`, else `REX_SESSION`.
     pub fn discover_with(
         env: impl Fn(&str) -> Option<OsString>,
         session: Option<String>,
@@ -149,19 +165,7 @@ impl Rex<SystemRunner> {
             .filter(|s| !s.is_empty())
             .or_else(|| env("REX_SESSION").and_then(|s| s.into_string().ok()).filter(|s| !s.is_empty()))
             .ok_or(RexError::NoSession)?;
-        let mut tried = Vec::new();
-        let bin_dir = env("REX_BIN_DIR").filter(|dir| !dir.is_empty()).map(PathBuf::from);
-        let path_dirs =
-            env("PATH").map(|path| std::env::split_paths(&path).collect::<Vec<_>>()).unwrap_or_default();
-        for dir in bin_dir.into_iter().chain(path_dirs.into_iter().filter(|dir| !dir.as_os_str().is_empty()))
-        {
-            let candidate = dir.join("rex");
-            if candidate.is_file() {
-                return Ok(Self::new(candidate, session, SystemRunner));
-            }
-            tried.push(candidate);
-        }
-        Err(RexError::BinaryNotFound { tried })
+        Ok(Self::new(find_binary(env)?, session, SystemRunner))
     }
 }
 
@@ -654,5 +658,25 @@ mod tests {
             SystemRunner.run(&[OsString::from("/bin/cat")], Some(data.as_bytes())).expect("cat runs");
         assert!(output.status.success());
         assert_eq!(output.stdout, data.as_bytes());
+    }
+    #[test]
+    fn find_binary_prefers_rex_bin_dir_over_path() {
+        let dir = std::env::temp_dir().join(format!("annorex-find-binary-{}", std::process::id()));
+        let (first, second) = (dir.join("first"), dir.join("second"));
+        std::fs::create_dir_all(&first).expect("dir");
+        std::fs::create_dir_all(&second).expect("dir");
+        std::fs::write(first.join("rex"), "").expect("file");
+        std::fs::write(second.join("rex"), "").expect("file");
+        let env = |name: &str| match name {
+            "REX_BIN_DIR" => Some(first.clone().into_os_string()),
+            "PATH" => Some(second.clone().into_os_string()),
+            _ => None,
+        };
+        assert_eq!(find_binary(env).expect("binary"), first.join("rex"));
+        let only_path = |name: &str| (name == "PATH").then(|| second.clone().into_os_string());
+        assert_eq!(find_binary(only_path).expect("binary"), second.join("rex"));
+        let none = |_: &str| None;
+        assert!(matches!(find_binary(none), Err(RexError::BinaryNotFound { .. })));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

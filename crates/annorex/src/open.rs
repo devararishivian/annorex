@@ -12,28 +12,23 @@ use crate::rex::{
 /// The flavor of a new terminal block.
 pub const TERMINAL_FLAVOR: &str = "com.superlogical.terminal.shell";
 
-/// The label prefix of the reply viewer. The target agent block follows it.
-const LAST_PREFIX: &str = "annorex:";
-/// The label prefix of the file viewer. The target agent block follows it.
-const FILES_PREFIX: &str = "annorex-files:";
+/// The label prefix of the viewer. The target agent block follows it.
+const LABEL_PREFIX: &str = "annorex:";
+/// The label prefix of the file viewer of M3 to M5. An open layer with it still counts as the one Annorex.
+const OLD_FILES_PREFIX: &str = "annorex-files:";
 
 /// The bounds of the layer: the full window.
 const FULL_WINDOW: [u8; 4] = [0, 0, 1, 1];
 
 /// The label of the viewer pane for one agent pane.
 pub fn pane_label(target: &str) -> String {
-    format!("{LAST_PREFIX}{target}")
+    format!("{LABEL_PREFIX}{target}")
 }
 
-/// The label of the files viewer pane for one agent pane.
-pub fn pane_label_files(target: &str) -> String {
-    format!("{FILES_PREFIX}{target}")
-}
-
-/// Which viewer to open.
+/// What the viewer shows first. Both start the same viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View<'a> {
-    /// The replies of the agent.
+    /// The newest reply of the agent.
     Last,
     /// The files of the work directory. The paths open at the start.
     Files(&'a [String]),
@@ -48,18 +43,14 @@ impl View<'_> {
     }
 }
 
-/// The viewer and the agent block of an Annorex label, or `None` for another label.
-fn parse_label(label: &str) -> Option<(&'static str, &str)> {
-    if let Some(target) = label.strip_prefix(FILES_PREFIX) {
-        Some(("files", target))
-    } else {
-        label.strip_prefix(LAST_PREFIX).map(|target| ("last", target))
-    }
+/// The agent block of an Annorex label, or `None` for another label.
+fn parse_label(label: &str) -> Option<&str> {
+    label.strip_prefix(OLD_FILES_PREFIX).or_else(|| label.strip_prefix(LABEL_PREFIX))
 }
 
 /// A label of Annorex has a block id after the prefix, so a label such as `annorex: notes` does not count.
 fn is_annorex(block: &BlockInfo) -> bool {
-    parse_label(&block.label).is_some_and(|(_, target)| target.starts_with("block:"))
+    parse_label(&block.label).is_some_and(|target| target.starts_with("block:"))
 }
 
 /// The `session.new_layer` request for a viewer of `view`: the full `window`, with focus. File paths
@@ -82,10 +73,7 @@ pub fn layer_request_for(
         command.push("--".to_owned());
         command.extend(paths.iter().cloned());
     }
-    let label = match view {
-        View::Last => pane_label(target),
-        View::Files(_) => pane_label_files(target),
-    };
+    let label = pane_label(target);
     let mut options = serde_json::Map::new();
     options.insert("command".to_owned(), serde_json::json!(command));
     if let Some(cwd) = cwd {
@@ -143,29 +131,24 @@ impl<R: Runner> OpenApi for Rex<R> {
 /// The Annorex that was already open in the session, when `open_view` showed it and opened nothing.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Existing {
-    /// `last` or `files`.
-    pub viewer: String,
     /// The agent block that the open Annorex serves.
     pub target: String,
     /// The name of that agent (`claude-code`, `pi`, or `opencode`), when Rex still reports it.
     pub agent: Option<String>,
     /// True when the open Annorex serves the agent block that the user asked for.
     pub same_target: bool,
-    /// True when the open Annorex is the viewer that the user asked for.
-    pub same_viewer: bool,
 }
 
 impl Existing {
-    /// What to tell the user when the open Annorex is not the one that was asked for: the agent it
-    /// serves, the viewer it shows, and how to close it. `None` when it is the one asked for.
+    /// What to tell the user when the open Annorex serves another agent: which agent, and how to close it.
+    /// `None` when it serves the agent that the user asked for.
     pub fn notice(&self) -> Option<String> {
-        if self.same_target && self.same_viewer {
+        if self.same_target {
             return None;
         }
-        let viewer = if self.viewer == "files" { "file viewer" } else { "reply viewer" };
         let agent = self.agent.as_deref().unwrap_or("an agent");
         Some(format!(
-            "Annorex is already open in this session, for {agent} ({viewer}). It is in front now; press q there to close it, then start Annorex again."
+            "Annorex is already open in this session, for {agent}. It is in front now; press q there to close it, then start Annorex again."
         ))
     }
 }
@@ -217,35 +200,24 @@ fn show(api: &impl OpenApi, found: &Located<'_>) -> Result<(), RexError> {
 }
 
 /// What the user needs to know about an open Annorex that is not the one that they asked for.
-fn describe(api: &impl OpenApi, found: &Located<'_>, view: &View<'_>, target: &str) -> Option<Existing> {
-    let (viewer, served) = parse_label(&found.block.label)?;
+fn describe(api: &impl OpenApi, found: &Located<'_>, target: &str) -> Option<Existing> {
+    let served = parse_label(&found.block.label)?;
     let agent = api
         .process(served)
         .ok()
         .zip(api.program_status(served).ok())
         .and_then(|(process, status)| detect(&process, &status))
         .map(|agent: Agent| agent.status_app().to_owned());
-    Some(Existing {
-        viewer: viewer.to_owned(),
-        target: served.to_owned(),
-        agent,
-        same_target: served == target,
-        same_viewer: viewer == view.name(),
-    })
+    Some(Existing { target: served.to_owned(), agent, same_target: served == target })
 }
 
 /// Show the open Annorex `found` and say so.
-fn focus_existing(
-    api: &impl OpenApi,
-    found: &Located<'_>,
-    view: &View<'_>,
-    target: &str,
-) -> Result<Opened, OpenError> {
+fn focus_existing(api: &impl OpenApi, found: &Located<'_>, target: &str) -> Result<Opened, OpenError> {
     show(api, found)?;
     Ok(Opened {
         block_id: found.block.block_id.clone(),
         focused_existing: true,
-        existing: describe(api, found, view, target),
+        existing: describe(api, found, target),
     })
 }
 
@@ -265,7 +237,7 @@ pub fn open_view(
     }
     let before = api.view()?;
     if let Some(found) = before.locate(is_annorex).first() {
-        return focus_existing(api, found, view, target);
+        return focus_existing(api, found, target);
     }
     let window = api.window_of(target)?;
     let cwd = process.foreground.as_ref().and_then(|fg| fg.cwd.as_deref());
@@ -286,7 +258,7 @@ pub fn open_view(
         {
             // The kept Annorex is the one that matters. A failed close must not hide it.
             let _ = api.close_layer(&layer.layer_id);
-            return focus_existing(api, oldest, view, target);
+            return focus_existing(api, oldest, target);
         }
     }
     Ok(Opened { block_id, focused_existing: false, existing: None })
@@ -476,7 +448,7 @@ mod tests {
         assert!(opened.focused_existing);
         assert_eq!(opened.block_id, "block:a");
         let existing = opened.existing.expect("existing");
-        assert!(existing.same_target && existing.same_viewer);
+        assert!(existing.same_target);
         assert!(!fake.called().contains(&"new_layer".to_owned()));
         assert!(
             fake.called().contains(&"set_layer_state layer:a Normal true".to_owned()),
@@ -494,24 +466,37 @@ mod tests {
         let existing = opened.existing.expect("existing");
         assert_eq!(existing.target, OTHER);
         assert_eq!(existing.agent.as_deref(), Some("claude-code"));
-        assert!(!existing.same_target && existing.same_viewer);
+        assert!(!existing.same_target);
         assert!(!fake.called().contains(&"new_layer".to_owned()));
     }
 
-    // S5: the file viewer is open and the user starts the reply viewer, and the reverse.
+    // S5: `last` and `files` use one label, so either command shows the open Annorex.
     #[test]
-    fn the_other_viewer_counts_as_the_one_annorex() {
-        let files_open = view(&[("layer:a", None, &[("block:a", &pane_label_files(TARGET))])]);
-        let opened = open(&Fake::claude(vec![files_open])).expect("open");
-        let existing = opened.existing.expect("existing");
-        assert_eq!(existing.viewer, "files");
-        assert!(existing.same_target && !existing.same_viewer);
-        let last_open = view(&[("layer:a", None, &[("block:a", &pane_label(TARGET))])]);
-        let fake = Fake::claude(vec![last_open]);
+    fn last_and_files_use_the_same_label() {
+        let request = |view: &View<'_>| layer_request_for(view, TARGET, "session:s", WINDOW, &exe(), None);
+        assert_eq!(request(&View::Last)["layout"]["block"]["label"], pane_label(TARGET));
+        assert_eq!(request(&View::Files(&[]))["layout"]["block"]["label"], pane_label(TARGET));
+    }
+
+    #[test]
+    fn the_open_viewer_is_shown_for_either_command() {
+        let open_json = view(&[("layer:a", None, &[("block:a", &pane_label(TARGET))])]);
+        let fake = Fake::claude(vec![open_json.clone()]);
         let opened = open_files(&fake, TARGET, "session:s", &exe(), &[]).expect("open");
-        let existing = opened.existing.expect("existing");
-        assert_eq!(existing.viewer, "last");
-        assert!(!existing.same_viewer);
+        assert!(opened.focused_existing && opened.existing.expect("existing").same_target);
+        assert!(!fake.called().contains(&"new_layer".to_owned()));
+        let fake = Fake::claude(vec![open_json]);
+        assert!(open(&fake).expect("open").focused_existing);
+        assert!(!fake.called().contains(&"new_layer".to_owned()));
+    }
+
+    // An Annorex of M5 has the label `annorex-files:`. It counts after the upgrade.
+    #[test]
+    fn a_layer_with_the_old_files_label_counts_as_the_one_annorex() {
+        let old = view(&[("layer:a", None, &[("block:a", &format!("annorex-files:{TARGET}"))])]);
+        let fake = Fake::claude(vec![old]);
+        let opened = open(&fake).expect("open");
+        assert!(opened.focused_existing);
         assert!(!fake.called().contains(&"new_layer".to_owned()));
     }
 
@@ -606,7 +591,7 @@ mod tests {
             None,
         );
         let block = &request["layout"]["block"];
-        assert_eq!(block["label"], format!("annorex-files:{TARGET}"));
+        assert_eq!(block["label"], pane_label(TARGET));
         assert_eq!(
             block["options"]["command"],
             json!([
@@ -625,12 +610,10 @@ mod tests {
     }
 
     #[test]
-    fn labels_fit_the_rex_limit_and_differ() {
+    fn the_label_fits_the_rex_limit_and_the_old_files_label_is_still_read() {
         assert_eq!(pane_label(TARGET).len(), 50);
-        assert!(pane_label_files(TARGET).len() <= 128);
-        assert_ne!(pane_label_files(TARGET), pane_label(TARGET));
-        assert_eq!(parse_label(&pane_label_files(TARGET)), Some(("files", TARGET)));
-        assert_eq!(parse_label(&pane_label(TARGET)), Some(("last", TARGET)));
+        assert_eq!(parse_label(&pane_label(TARGET)), Some(TARGET));
+        assert_eq!(parse_label(&format!("annorex-files:{TARGET}")), Some(TARGET));
         assert_eq!(parse_label("claude"), None);
     }
 
@@ -657,20 +640,12 @@ mod tests {
     }
 
     #[test]
-    fn the_notice_names_the_agent_and_the_viewer_when_they_differ() {
-        let same = Existing {
-            viewer: "last".into(),
-            target: TARGET.into(),
-            agent: Some("pi".into()),
-            same_target: true,
-            same_viewer: true,
-        };
+    fn the_notice_names_the_agent_when_the_target_differs() {
+        let same = Existing { target: TARGET.into(), agent: Some("pi".into()), same_target: true };
         assert_eq!(same.notice(), None);
-        let other = Existing { same_target: false, ..same.clone() };
+        let other = Existing { same_target: false, ..same };
         let text = other.notice().expect("notice");
-        assert!(text.contains("pi") && text.contains("reply") && text.contains("press q"), "{text}");
-        let files = Existing { viewer: "files".into(), same_viewer: false, ..same };
-        assert!(files.notice().expect("notice").contains("file"));
+        assert!(text.contains("pi") && text.contains("press q"), "{text}");
     }
 
     #[test]

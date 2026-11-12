@@ -374,8 +374,11 @@ fn rex_install(
         lines.push(format!("  require(\"annorex\").setup{{ bin = \"{}\" }}", exe.display()));
     }
     let scratch = std::env::temp_dir().join(format!("annorex-check-{}", std::process::id()));
-    let checked = std::fs::create_dir_all(&scratch)
-        .map_or(Check::Skipped, |()| check_module(&scratch, run_rex_config_check));
+    let checked = match crate::rex::find_binary(env) {
+        Ok(rex) => std::fs::create_dir_all(&scratch)
+            .map_or(Check::Skipped, |()| check_module(&scratch, |init| run_rex_config_check(&rex, init))),
+        Err(_) => Check::Skipped,
+    };
     let _ = std::fs::remove_dir_all(&scratch);
     lines.push(String::new());
     match &checked {

@@ -103,9 +103,10 @@ pub fn check_module(scratch: &Path, run: impl FnOnce(&Path) -> std::io::Result<P
     }
 }
 
-/// Run `rex config check` on `init` with `REX_CONFIG` set to it, for this call only.
-pub fn run_rex_config_check(init: &Path) -> std::io::Result<Probe> {
-    let output = std::process::Command::new("rex")
+/// Run `rex config check` on `init` with `REX_CONFIG` set to it, for this call only. `rex` is the binary
+/// that the other commands use.
+pub fn run_rex_config_check(rex: &Path, init: &Path) -> std::io::Result<Probe> {
+    let output = std::process::Command::new(rex)
         .args(["config", "check"])
         .arg(init)
         .env("REX_CONFIG", init)
