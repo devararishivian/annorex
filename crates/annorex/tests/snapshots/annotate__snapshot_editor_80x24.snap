@@ -3,10 +3,10 @@ source: crates/annorex/tests/annotate.rs
 expression: "render(&mut app, 80, 24)"
 ---
 Annorex · last reply · claude (idle)                                   reply 1/1
-1 We change the login page.
+ We change the login page.
 
-3 - one
-4 - two
+ - one
+ - two
 
 
 

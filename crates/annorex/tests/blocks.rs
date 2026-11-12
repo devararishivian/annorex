@@ -12,6 +12,7 @@ use annorex::ui::{AgentState, App, Effect, Mode, Screen, draw};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::{Color, Modifier};
 use unicode_width::UnicodeWidthStr;
 
 fn state() -> AgentState {
@@ -343,4 +344,143 @@ fn a_new_read_keeps_the_focus_on_the_same_text() {
     app.set_replies(vec![reply("r1", "")]);
     assert_eq!(app.focused_block(), None);
     render(&mut app, 80, 24);
+}
+
+/// The buffer after one draw.
+fn buffer_of(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    terminal.backend().buffer().clone()
+}
+
+/// The rows of the screen where column 0 shows the focus bar.
+fn bar_rows(app: &mut App, width: u16, height: u16) -> Vec<u16> {
+    let buffer = buffer_of(app, width, height);
+    (0..height).filter(|&y| buffer.cell((0, y)).is_some_and(|cell| cell.symbol() == "\u{258d}")).collect()
+}
+
+/// The rows of the screen where the text `needle` starts.
+fn rows_with(app: &mut App, needle: &str, width: u16, height: u16) -> Vec<u16> {
+    let screen = render(app, width, height);
+    (0..height).zip(screen.lines()).filter(|(_, line)| line.contains(needle)).map(|(y, _)| y).collect()
+}
+
+#[test]
+fn markdown_has_no_line_numbers() {
+    let mut app = open(DOC);
+    let screen = render(&mut app, 80, 24);
+    for line in screen.lines() {
+        let trimmed = line.trim_start_matches(['\u{258d}', ' ']);
+        let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
+        assert!(digits == 0 || !trimmed[digits..].starts_with(' '), "{line:?}\n{screen}");
+    }
+    assert!(screen.contains("First paragraph here"), "{screen}");
+    let buffer = buffer_of(&mut app, 80, 24);
+    let row = rows_with(&mut app, "Title", 80, 24)[0];
+    // Margin column 0, then the text at column 1.
+    assert_eq!(buffer.cell((1, row)).map(|c| c.symbol().to_owned()).as_deref(), Some("T"));
+}
+
+#[test]
+fn plain_files_keep_line_numbers_and_the_bar_is_at_column_zero() {
+    let mut app = open("x");
+    app.open_file(annorex::files::LoadedFile {
+        relative: std::path::PathBuf::from("a.rs"),
+        text: "fn a() {}\n\nfn b() {}\n".to_owned(),
+        stamp: annorex::files::Stamp { size: 22, modified: None },
+    });
+    let screen = render(&mut app, 80, 24);
+    let line = screen.lines().find(|line| line.contains("fn b()")).expect("line");
+    assert!(line.trim_start_matches(['\u{258d}', ' ']).starts_with("3 fn b()"), "{screen}");
+    assert_eq!(bar_rows(&mut app, 80, 24), rows_with(&mut app, "fn a()", 80, 24), "{screen}");
+}
+
+#[test]
+fn the_focused_block_has_a_bar() {
+    let mut app = open(DOC);
+    let first = rows_with(&mut app, "First paragraph", 80, 24)[0];
+    assert_eq!(bar_rows(&mut app, 80, 24), vec![rows_with(&mut app, "Title", 80, 24)[0]]);
+    press(&mut app, "j");
+    assert_eq!(bar_rows(&mut app, 80, 24), vec![first]);
+    let buffer = buffer_of(&mut app, 80, 24);
+    let cell = buffer.cell((0, first)).expect("cell");
+    assert_eq!(cell.bg, Color::DarkGray);
+    assert_eq!(buffer.cell((10, first)).expect("cell").bg, Color::DarkGray);
+    let other = rows_with(&mut app, "Second paragraph", 80, 24)[0];
+    assert_ne!(buffer.cell((10, other)).expect("cell").bg, Color::DarkGray);
+    // A block of several rows: the bar is on each of them.
+    press(&mut app, "G");
+    let alpha = rows_with(&mut app, "alpha", 80, 24)[0];
+    let gamma = rows_with(&mut app, "gamma", 80, 24)[0];
+    let bars = bar_rows(&mut app, 80, 24);
+    assert!(gamma > alpha && bars.len() > usize::from(gamma - alpha), "{bars:?}");
+    assert!((alpha..=gamma).all(|y| bars.contains(&y)), "{bars:?}");
+    assert!(bars.windows(2).all(|pair| pair[1] == pair[0] + 1), "one block: {bars:?}");
+}
+
+#[test]
+fn text_mode_has_no_bar_and_the_text_does_not_shift() {
+    let mut app = open(DOC);
+    let before = render(&mut app, 80, 24);
+    press(&mut app, "\n");
+    assert_eq!(bar_rows(&mut app, 80, 24), Vec::<u16>::new());
+    let after = render(&mut app, 80, 24);
+    let col = |screen: &str| {
+        screen.lines().find(|l| l.contains("Title")).and_then(|l| l.chars().position(|c| c == 'T'))
+    };
+    assert_eq!(col(&before), col(&after));
+}
+
+#[test]
+fn block_mode_draws_no_cursor_cell_but_text_mode_does() {
+    let mut app = open(DOC);
+    let reversed = |app: &mut App| {
+        let buffer = buffer_of(app, 80, 24);
+        let row = rows_with(app, "First paragraph", 80, 24)[0];
+        (0..80)
+            .filter(|&x| buffer.cell((x, row)).is_some_and(|c| c.modifier.contains(Modifier::REVERSED)))
+            .count()
+    };
+    press(&mut app, "j");
+    assert_eq!(reversed(&mut app), 0);
+    press(&mut app, "\n");
+    assert_eq!(reversed(&mut app), 1);
+}
+
+#[test]
+fn ctrl_d_at_the_end_keeps_the_focus_and_ctrl_u_at_the_start_too() {
+    let mut app = open(DOC);
+    render(&mut app, 80, 24);
+    let last = app.doc().blocks.len() - 1;
+    press(&mut app, "G");
+    render(&mut app, 80, 24);
+    press_key(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+    render(&mut app, 80, 24);
+    assert_eq!(app.mode(), Mode::Block(last));
+    press_key(&mut app, KeyCode::PageDown, KeyModifiers::NONE);
+    assert_eq!(app.mode(), Mode::Block(last));
+    press(&mut app, "g");
+    render(&mut app, 80, 24);
+    press_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    assert_eq!(app.mode(), Mode::Block(0));
+    press_key(&mut app, KeyCode::PageUp, KeyModifiers::NONE);
+    assert_eq!(app.mode(), Mode::Block(0));
+}
+
+#[test]
+fn a_forward_scroll_never_focuses_a_lower_block() {
+    let mut text = String::new();
+    for i in 0..40 {
+        writeln!(text, "paragraph {i:02}\n").expect("write");
+    }
+    let mut app = open(&text);
+    render(&mut app, 80, 12);
+    press(&mut app, "G");
+    render(&mut app, 80, 12);
+    press_key(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+    assert_eq!(app.mode(), Mode::Block(39));
+    press(&mut app, "g");
+    render(&mut app, 80, 12);
+    press_key(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    assert_eq!(app.mode(), Mode::Block(0));
 }

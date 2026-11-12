@@ -11,8 +11,9 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Confirm, Focus, PanelView, ReplySource, Screen, match_ranges};
 use super::focus::{Mode, View};
+use super::hits::Hit;
 use crate::agent::Agent;
-use crate::doc::{DocSpan, SpanStyle};
+use crate::doc::{DocKind, DocSpan, SpanStyle};
 use crate::files::TREE_LIMIT;
 use crate::keys::{Action, KeyMap};
 use crate::layout::{Layout, compute};
@@ -488,8 +489,14 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     let height = usize::from(area.height);
     app.page = height;
-    let gutter = gutter_width(&app.doc).min(area.width.saturating_sub(1));
-    let text_width = area.width - gutter;
+    // Column 0 is the margin for the focus bar. Plain text and code keep the line number gutter.
+    let margin = 1.min(area.width.saturating_sub(1));
+    let gutter = if app.doc.kind == DocKind::Plain {
+        gutter_width(&app.doc).min(area.width.saturating_sub(1 + margin))
+    } else {
+        0
+    };
+    let text_width = area.width - margin - gutter;
     let cursor_line = app.cursor_line();
     let annotated: Vec<std::ops::Range<usize>> = app
         .review()
@@ -522,7 +529,8 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
     app.top = rows.get(top_row).map_or(0, |row| row.doc_line);
     let query = app.query.clone();
     // The cursor cell: the first row of the cursor line that shows the cursor stop.
-    let cursor_cell = (app.focus == Focus::Doc)
+    // Block mode has no cursor cell: the focus bar is the only focus mark.
+    let cursor_cell = (app.focus == Focus::Doc && focused.is_none())
         .then(|| {
             let start = first_row(cursor_line)?;
             rows.iter()
@@ -540,7 +548,7 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
         .map(|(offset, row)| {
             let matches =
                 query.as_deref().map(|query| row_matches(rows, top_row + offset, query)).unwrap_or_default();
-            let number_style = if row.doc_line == cursor_line {
+            let number_style = if focused.is_none() && row.doc_line == cursor_line {
                 Style::new().add_modifier(Modifier::REVERSED)
             } else {
                 Style::new().add_modifier(Modifier::DIM)
@@ -550,10 +558,16 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
                 _ => String::new(),
             };
             let number_width = usize::from(gutter.saturating_sub(1));
-            let mut spans = vec![
-                Span::styled(format!("{number:>number_width$}"), number_style),
-                Span::raw(if gutter > 0 { " " } else { "" }),
-            ];
+            let in_focus = focused.as_ref().is_some_and(|block| block.lines.contains(&row.doc_line));
+            let mut spans = vec![if in_focus && margin > 0 {
+                Span::styled("\u{258d}", Style::new().fg(Color::Cyan))
+            } else {
+                Span::raw(" ".repeat(usize::from(margin)))
+            }];
+            if gutter > 0 {
+                spans.push(Span::styled(format!("{number:>number_width$}"), number_style));
+                spans.push(Span::raw(" "));
+            }
             let cursor = cursor_cell.filter(|&(index, _)| index == top_row + offset).map(|(_, cell)| cell);
             let offsets = row.offsets();
             let flags = |ranges: &[std::ops::Range<usize>]| -> Vec<bool> {
@@ -564,10 +578,50 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect) {
             };
             let marks = Marks { underline: flags(&annotated), selected: flags(selection.as_slice()) };
             spans.extend(row_spans(row, &matches, cursor, &marks));
-            Line::from(spans)
+            let line = Line::from(spans);
+            if in_focus { line.style(Style::new().bg(Color::DarkGray)) } else { line }
         })
         .collect();
+    push_doc_hits(app, area, top_row, margin + gutter);
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Push the hit areas of the document rows on the screen. A block reaches the whole row, and the
+/// text area lies over it, so a click in the margin or the gutter gives the block and a click in the
+/// text gives the cell. `DocCell` holds the index of the visual row and the column where the text starts.
+fn push_doc_hits(app: &mut App, area: Rect, top_row: usize, left: u16) {
+    let height = usize::from(area.height);
+    let text_x = area.x + left;
+    let text_width = area.width.saturating_sub(left);
+    let rows = app.cache.get(&app.doc, app.width);
+    let shown = rows.len().saturating_sub(top_row).min(height);
+    let mut block_rects: Vec<(usize, u16, u16)> = Vec::new();
+    for offset in 0..shown {
+        let Some(row) = rows.get(top_row + offset) else { break };
+        let y = area.y + u16::try_from(offset).unwrap_or(0);
+        let Some(index) =
+            app.doc.blocks.partition_point(|block| block.lines.start <= row.doc_line).checked_sub(1).filter(
+                |&index| app.doc.blocks.get(index).is_some_and(|block| block.lines.end > row.doc_line),
+            )
+        else {
+            continue;
+        };
+        match block_rects.last_mut() {
+            Some((last, from, count)) if *last == index && *from + *count == y => *count += 1,
+            _ => block_rects.push((index, y, 1)),
+        }
+    }
+    for (index, y, count) in block_rects {
+        app.hits.push(Rect::new(area.x, y, area.width, count), Hit::Block(index));
+    }
+    if text_width == 0 {
+        return;
+    }
+    for offset in 0..shown {
+        let Ok(row) = u16::try_from(top_row + offset) else { break };
+        let y = area.y + u16::try_from(offset).unwrap_or(0);
+        app.hits.push(Rect::new(text_x, y, text_width, 1), Hit::DocCell { row, col: text_x });
+    }
 }
 
 fn style_of(style: SpanStyle) -> Style {
@@ -986,10 +1040,50 @@ fn age(now: SystemTime, then: SystemTime) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
 mod tests {
     use jiff::tz::{TimeZone, offset};
 
-    use super::short_time;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    use super::super::hits::Hit;
+    use super::super::{AgentState, App, Screen};
+    use super::{draw, short_time};
+    use crate::config::Config;
+    use crate::replies::Reply;
+    use crate::safety::Safety;
+
+    #[test]
+    fn each_visible_block_is_in_the_hit_map() {
+        let reply = Reply { id: "r".to_owned(), text: "# T\n\none\ntwo\n\nthree\n".to_owned(), at: None };
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        let screen = terminal.backend().buffer().clone();
+        let row_of = |text: &str| {
+            (0..24u16)
+                .find(|&y| {
+                    (0..80u16)
+                        .map(|x| screen.cell((x, y)).map_or(" ", |c| c.symbol()))
+                        .collect::<String>()
+                        .contains(text)
+                })
+                .expect("row")
+        };
+        let blocks = app.doc.blocks.len();
+        assert_eq!(blocks, 3);
+        for (text, index) in [("T", 0), ("one", 1), ("three", 2)] {
+            let y = row_of(text);
+            assert_eq!(app.hits.at(0, y), Some(&Hit::Block(index)), "margin of {text}");
+            assert!(matches!(app.hits.at(2, y), Some(Hit::DocCell { .. })), "text of {text}");
+        }
+        // The second row of the block with two lines.
+        assert_eq!(app.hits.at(0, row_of("two")), Some(&Hit::Block(1)));
+        // The blank row between blocks is in no block.
+        assert_eq!(app.hits.at(0, row_of("one") - 1), None);
+    }
 
     #[test]
     fn reply_time_is_local() {

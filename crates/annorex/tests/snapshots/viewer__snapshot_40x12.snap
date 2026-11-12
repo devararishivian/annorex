@@ -3,14 +3,14 @@ source: crates/annorex/tests/viewer.rs
 expression: "render(&mut viewer(), 40, 12)"
 ---
 Annorex · last reply · claude (idle)
- 1 Migration plan
+▍Migration plan
 
- 3 We change the login page and the
-   session store. The work has four
-   steps, and each step has a test.
+ We change the login page and the
+ session store. The work has four steps,
+ and each step has a test.
 
- 5 Steps
+ Steps
 
- 7 1. Step 1: update the module number 1
-   and run its tests. This item is long,
+ 1. Step 1: update the module number 1
+ and run its tests. This item is long,
 j/k move  v select  c/d/s annotate  S s…

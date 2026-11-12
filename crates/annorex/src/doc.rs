@@ -131,6 +131,8 @@ pub struct Doc {
     pub lines: Vec<DocLine>,
     /// The blocks in document order. They do not overlap. A blank line is in no block.
     pub blocks: Vec<Block>,
+    /// How the document shows. Plain text and code show a line number gutter.
+    pub kind: DocKind,
     line_starts: Vec<usize>,
 }
 
@@ -147,7 +149,7 @@ impl Doc {
             }
             builder.finish()
         };
-        Self { source, lines, blocks, line_starts }
+        Self { source, lines, blocks, kind: DocKind::Markdown, line_starts }
     }
 
     /// Show a text as it is: one `DocLine` for each source line, with the exact source of each
@@ -191,7 +193,7 @@ impl Doc {
             lines.push(DocLine { spans, source: range, line: index + 1 });
         }
         let blocks = plain_blocks(&lines);
-        Self { source, lines, blocks, line_starts }
+        Self { source, lines, blocks, kind: DocKind::Plain, line_starts }
     }
 
     /// Render a text as the kind says.

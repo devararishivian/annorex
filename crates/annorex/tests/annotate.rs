@@ -365,10 +365,10 @@ fn annotated_ranges_are_underlined_and_the_selection_is_reversed() {
     terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
     let buffer = terminal.backend().buffer();
     let has = |x: u16, modifier| buffer.cell((x, 1)).expect("cell").style().add_modifier.contains(modifier);
-    assert!(has(2, Modifier::UNDERLINED) && has(4, Modifier::UNDERLINED), "alp is annotated");
-    assert!(!has(5, Modifier::UNDERLINED), "the space is not");
-    assert!(has(8, Modifier::REVERSED) && has(9, Modifier::REVERSED), "the selection is reversed");
-    assert!(!has(10, Modifier::REVERSED));
+    assert!(has(1, Modifier::UNDERLINED) && has(3, Modifier::UNDERLINED), "alp is annotated");
+    assert!(!has(4, Modifier::UNDERLINED), "the space is not");
+    assert!(has(7, Modifier::REVERSED) && has(8, Modifier::REVERSED), "the selection is reversed");
+    assert!(!has(9, Modifier::REVERSED));
 }
 
 fn two_notes() -> App {
@@ -750,17 +750,17 @@ fn ctrl_c_asks_once() {
 #[test]
 fn cursor_is_visible_on_a_trailing_space() {
     use ratatui::style::Modifier;
-    let text = format!("{} {}\n", "a".repeat(37), "b".repeat(10));
+    let text = format!("{} {}\n", "a".repeat(38), "b".repeat(10));
     let mut app = app(&text);
     press(&mut app, "0");
-    for _ in 0..37 {
+    for _ in 0..38 {
         press(&mut app, "l");
     }
-    assert_eq!(app.cursor(), 37, "the cursor is on the space");
+    assert_eq!(app.cursor(), 38, "the cursor is on the space");
     let mut terminal = Terminal::new(TestBackend::new(40, 12)).expect("terminal");
     terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
     let buffer = terminal.backend().buffer();
-    let reversed = (2..40u16)
+    let reversed = (1..40u16)
         .flat_map(|x| (1..4u16).map(move |y| (x, y)))
         .filter(|&(x, y)| {
             buffer.cell((x, y)).expect("cell").style().add_modifier.contains(Modifier::REVERSED)

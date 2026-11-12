@@ -3,9 +3,9 @@ source: crates/annorex/tests/files_review.rs
 expression: "render(&mut app, 80, 24)"
 ---
 Annorex · files · claude (idle)                  file 2/2 · unsent 2  [Send 1 ▸]
-1 Title
+▍Title
 
-3 alpha text
+ alpha text
 
 
 

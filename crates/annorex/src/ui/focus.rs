@@ -31,7 +31,8 @@ pub(crate) enum Move {
     Up,
     First,
     Last,
-    /// Scroll by this number of rows, then focus the first block that starts in the view.
+    /// Scroll by this number of rows, then focus the first block that starts in the view. The focus
+    /// moves only in the direction of the scroll.
     Scroll {
         forward: bool,
         rows: usize,
@@ -141,6 +142,9 @@ impl View<'_> {
                 });
                 let holds_top = || blocks.iter().position(|b| self.block_rows(b).contains(&next));
                 let index = starts_in_view.or_else(holds_top).unwrap_or(focus);
+                // The focus never goes against the direction of the scroll. A view that cannot move
+                // must not throw the focus back.
+                let index = if forward { index.max(focus) } else { index.min(focus) };
                 show(index, next)
             }
         }
