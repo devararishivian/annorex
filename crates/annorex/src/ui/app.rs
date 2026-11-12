@@ -56,6 +56,17 @@ pub enum Screen {
     Error(String),
 }
 
+/// Where the replies come from. A problem here does not block the files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplySource {
+    /// The replies of the agent are loaded.
+    Ready,
+    /// More than one session can be the session of the agent. The user chooses one.
+    Pick(Vec<Candidate>),
+    /// No replies, with the reason, for example "no reply yet". `r` tries again.
+    Missing(String),
+}
+
 /// What the caller must do after a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
@@ -150,6 +161,7 @@ pub struct App {
     pub(crate) panel_open: bool,
     pub(crate) panel_index: usize,
     pub(crate) picker_index: usize,
+    pub(crate) reply_source: ReplySource,
     pub(crate) focus: Focus,
     /// The text of the find input while the user types it.
     pub(crate) find_input: Option<String>,
@@ -222,6 +234,7 @@ impl App {
             panel_open: false,
             panel_index: 0,
             picker_index: 0,
+            reply_source: ReplySource::Ready,
             focus: Focus::Doc,
             find_input: None,
             query: None,
@@ -649,6 +662,7 @@ impl App {
         let changed = self.changed_texts(&replies);
         self.replies = replies;
         self.screen = Screen::Viewer;
+        self.reply_source = ReplySource::Ready;
         match keep {
             Some(index) => {
                 self.show_reply(index);
@@ -726,12 +740,39 @@ impl App {
 
     /// Show the session picker, with the first session selected.
     pub fn set_picker(&mut self, candidates: Vec<Candidate>) {
+        if self.root.is_some() {
+            self.set_reply_source(ReplySource::Pick(candidates));
+            return;
+        }
         self.screen = Screen::Picker(candidates);
         self.picker_index = 0;
     }
 
+    /// A message instead of the viewer. With files, the problem is about the replies only: the reply list
+    /// shows it and the files stay usable.
     pub fn set_error(&mut self, message: String) {
+        if self.root.is_some() {
+            self.set_reply_source(ReplySource::Missing(message));
+            return;
+        }
         self.screen = Screen::Error(message);
+    }
+
+    /// Tell where the replies come from. A choice of sessions opens the reply list when no document is
+    /// on the screen.
+    pub fn set_reply_source(&mut self, source: ReplySource) {
+        self.picker_index = 0;
+        if matches!(source, ReplySource::Pick(_)) && self.shown_id.is_none() {
+            self.panel_open = true;
+            self.panel_view = PanelView::Replies;
+            self.focus = Focus::Panel;
+        }
+        self.reply_source = source;
+        self.screen = Screen::Viewer;
+    }
+
+    pub fn reply_source(&self) -> &ReplySource {
+        &self.reply_source
     }
 
     /// Show a message in the footer until the next key.
@@ -985,8 +1026,10 @@ impl App {
             KeyCode::Esc => self.selection = None,
             _ => match self.action_of(key) {
                 Some(Action::Quit) => return self.request_quit(),
-                Some(Action::Reload) if self.shown_file().is_some() => self.reload_shown(),
-                Some(Action::Reload) => return Effect::Reload,
+                Some(Action::Reload) => {
+                    self.reload_shown();
+                    return Effect::Reload;
+                }
                 Some(Action::Down) => self.move_cursor(1),
                 Some(Action::Up) => self.move_cursor(-1),
                 Some(Action::Left) => self.step(false),
@@ -1132,8 +1175,10 @@ impl App {
                 Some(Action::Right) if self.panel_view == PanelView::Tree => self.tree.expand(),
                 Some(Action::Find) if self.panel_view == PanelView::Tree => self.tree.start_filter(),
                 Some(Action::Quit) => return self.request_quit(),
-                Some(Action::Reload) if self.shown_file().is_some() => self.reload_shown(),
-                Some(Action::Reload) => return Effect::Reload,
+                Some(Action::Reload) => {
+                    self.reload_shown();
+                    return Effect::Reload;
+                }
                 Some(Action::Down) => self.panel_move(1),
                 Some(Action::Up) => self.panel_move(-1),
                 Some(Action::Replies) => self.toggle_panel(PanelView::Replies),
@@ -1157,6 +1202,11 @@ impl App {
     fn panel_move(&mut self, delta: isize) {
         match self.panel_view {
             PanelView::Replies => {
+                if let ReplySource::Pick(candidates) = &self.reply_source {
+                    let last = candidates.len().saturating_sub(1);
+                    self.picker_index = self.picker_index.saturating_add_signed(delta).min(last);
+                    return;
+                }
                 let last = self.replies.len().saturating_sub(1);
                 self.panel_index = self.panel_index.saturating_add_signed(delta).min(last);
             }
@@ -1177,6 +1227,13 @@ impl App {
     fn panel_enter(&mut self) -> Effect {
         match self.panel_view {
             PanelView::Replies => {
+                if let ReplySource::Pick(candidates) = &self.reply_source {
+                    return if candidates.is_empty() {
+                        Effect::None
+                    } else {
+                        Effect::PickSession(self.picker_index)
+                    };
+                }
                 self.show_reply(self.panel_index);
                 self.close_panel_if_overlay();
             }

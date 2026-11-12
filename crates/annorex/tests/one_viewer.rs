@@ -8,9 +8,13 @@ use annorex::agent::Agent;
 use annorex::config::Config;
 use annorex::files::{LoadedFile, Stamp};
 use annorex::replies::Reply;
+use annorex::replies::{Candidate, SessionRef};
 use annorex::safety::Safety;
-use annorex::ui::{AgentState, App, Effect, Screen};
+use annorex::ui::{AgentState, App, Effect, ReplySource, Screen, draw};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use unicode_width::UnicodeWidthStr;
 
 fn state() -> AgentState {
     AgentState { agent: Some(Agent::ClaudeCode), safety: Safety::Clear { state: Some("idle".to_owned()) } }
@@ -133,4 +137,79 @@ fn discard_removes_only_the_shown_document() {
     press(&mut app, "y");
     assert_eq!(app.take_discarded(), vec!["file:a.md".to_owned()]);
     assert!(app.export().contains("> note reply"), "{}", app.export());
+}
+
+fn render(app: &mut App, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let mut lines = Vec::new();
+    for y in 0..height {
+        let mut line = String::new();
+        let mut x = 0;
+        while x < width {
+            let symbol = buffer.cell((x, y)).map_or(" ", |cell| cell.symbol());
+            line.push_str(symbol);
+            x += u16::try_from(symbol.width().max(1)).unwrap_or(1);
+        }
+        lines.push(line.trim_end().to_owned());
+    }
+    lines.join("\n")
+}
+
+/// No reply is loaded. The work directory is `/work`.
+fn files_only() -> App {
+    let mut app =
+        App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(PathBuf::from("/work"));
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    app
+}
+
+fn candidate(name: &str) -> Candidate {
+    Candidate {
+        session: SessionRef::Pi(PathBuf::from(format!("/{name}.jsonl"))),
+        updated: std::time::SystemTime::now(),
+        last_line: name.to_owned(),
+    }
+}
+
+#[test]
+fn a_missing_session_shows_its_reason_in_the_reply_list_and_the_files_still_open() {
+    let mut app = files_only();
+    app.set_reply_source(ReplySource::Missing("no reply yet".to_owned()));
+    assert!(matches!(app.screen, Screen::Viewer), "the files must not be blocked");
+    app.open_file(loaded("a.md", "# Title\n"));
+    assert_eq!(app.shown_file(), Some(std::path::Path::new("a.md")));
+    press(&mut app, "p");
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.contains("no reply yet"), "{screen}");
+    assert!(screen.contains("a.md"), "the open file is still listed:\n{screen}");
+}
+
+#[test]
+fn the_picker_lists_the_sessions_in_the_reply_panel_and_enter_loads_one() {
+    let mut app = files_only();
+    app.set_reply_source(ReplySource::Pick(vec![candidate("first"), candidate("second")]));
+    assert!(matches!(app.screen, Screen::Viewer));
+    // With no document on the screen, the reply list opens by itself.
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.contains("first") && screen.contains("second"), "{screen}");
+    press(&mut app, "j");
+    assert_eq!(press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE), Effect::PickSession(1));
+}
+
+#[test]
+fn r_looks_for_the_reply_session_again_also_with_a_file_on_the_screen() {
+    let mut app = files_only();
+    app.set_reply_source(ReplySource::Missing("no reply yet".to_owned()));
+    app.open_file(loaded("a.md", "# Title\n"));
+    assert_eq!(press_key(&mut app, KeyCode::Char('r'), KeyModifiers::NONE), Effect::Reload);
+}
+
+#[test]
+fn new_replies_make_the_source_ready() {
+    let mut app = files_only();
+    app.set_reply_source(ReplySource::Missing("no reply yet".to_owned()));
+    app.set_replies(vec![reply("r1", "hello\n")]);
+    assert_eq!(app.reply_source(), &ReplySource::Ready);
 }

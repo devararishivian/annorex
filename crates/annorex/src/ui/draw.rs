@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Confirm, Focus, PanelView, Screen, match_ranges};
+use super::app::{App, Confirm, Focus, PanelView, ReplySource, Screen, match_ranges};
 use crate::agent::Agent;
 use crate::doc::{DocSpan, SpanStyle};
 use crate::files::TREE_LIMIT;
@@ -660,14 +660,29 @@ fn draw_finder(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
 }
 
 fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
-    let files = app.has_root();
-    let block = Block::new().borders(borders).title(if files { " Files " } else { " Replies " });
+    let has_replies = app.replies.iter().any(|reply| !app.files.contains_key(&reply.id));
+    let title = match (app.has_root(), has_replies) {
+        (false, _) => " Replies ",
+        (true, false) => " Files ",
+        (true, true) => " Documents ",
+    };
+    let block = Block::new().borders(borders).title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
         return;
     }
-    let height = usize::from(inner.height);
+    if let ReplySource::Pick(candidates) = &app.reply_source {
+        draw_picker(frame, inner, candidates, app.picker_index);
+        return;
+    }
+    let reason: Vec<Line<'static>> = match &app.reply_source {
+        ReplySource::Missing(message) => {
+            vec![Line::raw(fit(message, inner.width)), Line::raw(fit("r looks again", inner.width))]
+        }
+        _ => Vec::new(),
+    };
+    let height = usize::from(inner.height).saturating_sub(reason.len()).max(1);
     let offset = app.panel_index.saturating_sub(height.saturating_sub(1));
     let lines: Vec<Line<'static>> = app
         .replies
@@ -676,6 +691,7 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
         .skip(offset)
         .take(height)
         .map(|(index, reply)| {
+            let files = app.files.contains_key(&reply.id);
             let marker = if index == app.selected { "▸" } else { " " };
             let time = short_time(reply.at.as_deref(), &app.zone);
             let unsent = app.reviews.get(&reply.id).is_some_and(Review::has_unsent);
@@ -706,6 +722,7 @@ fn draw_reply_list(frame: &mut Frame, app: &App, area: Rect, borders: Borders) {
             Line::styled(fit(&text, inner.width), style)
         })
         .collect();
+    let lines: Vec<Line<'static>> = reason.into_iter().chain(lines).collect();
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
