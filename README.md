@@ -115,7 +115,7 @@ The list of replies (`p`), the file finder (`ctrl+p`), and the session picker op
 | `c` / `s`            | Note: comment or replace. Both open the note box                         |
 | `e` / `x`            | Edit or delete the note at the focus                                     |
 | `esc`                | Step back: clear the selection, leave text mode, then remove the focus. With nothing selected, quit |
-| `q`                  | Quit when no note box or text input is open. Unsent notes: asks first |
+| `q`                  | Quit when no note box or text input is open. Unsent notes: asks first    |
 | `S`                  | Send the notes to the agent                                              |
 | `M`                  | Write a general note, then send                                          |
 | `P`                  | Paste the notes into the agent input box, without Enter                  |
