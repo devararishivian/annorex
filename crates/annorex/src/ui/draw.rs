@@ -542,6 +542,9 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         Layout::TooSmall => return,
     };
     let narrow = matches!(layout, Layout::Single { .. });
+    if tree.is_some() {
+        app.tree_seen();
+    }
     let doc_area = match app.banner() {
         Some(text) if body.height > 1 => {
             let row = Rect::new(body.x, body.y, body.width, 1);
@@ -579,11 +582,16 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         doc_area.height,
     );
     draw_action_bar(frame, text_area, doc_area.x, app);
+    if let Side::Rail(rail) = side {
+        app.hits.push(rail, Hit::RailPane);
+    }
     draw_side(frame, app, side);
     if let Some(tree) = tree {
+        app.hits.push(tree, Hit::TreePane);
         draw_tree(frame, app, tree, Borders::RIGHT);
     }
     if let Some(list) = list {
+        app.hits.push(list, Hit::NotesPane);
         draw_annotation_list(frame, app, list, Borders::LEFT);
     }
     // In one column, the tree and the annotation list cover the document while they have the focus.
@@ -962,6 +970,14 @@ fn list_top(wanted: Option<usize>, cursor: usize, count: usize, height: usize) -
     }
 }
 
+/// After a draw, the wheel scroll of a list is the first row that the list shows. A wheel step past the
+/// end then builds no hidden rows, so the next step back moves the view at once.
+fn settle(wanted: &mut Option<usize>, shown: usize) {
+    if wanted.is_some() {
+        *wanted = Some(shown);
+    }
+}
+
 /// The lines of a list: the first line is a header, and the rest scrolls with the cursor, or from
 /// `wanted` after the wheel. The result is the index of the first row on the screen and the screen
 /// row where it is.
@@ -1080,6 +1096,7 @@ fn draw_tree(frame: &mut Frame, app: &mut App, area: Rect, borders: Borders) {
     let cursor = (app.tree.index, app.scroll.tree);
     let place = draw_list(frame, inner, header, &rows, cursor, app.focus == Focus::Tree);
     app.tops.tree = place.0;
+    settle(&mut app.scroll.tree, place.0);
     push_rows(app, inner, place, rows.len(), Hit::TreeRow);
 }
 
@@ -1112,6 +1129,7 @@ fn draw_finder(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     let place = draw_list(frame, inner, header, &rows, (app.finder.index, app.scroll.boxed), true);
     app.tops.boxed = place.0;
+    settle(&mut app.scroll.boxed, place.0);
     push_rows(app, inner, place, rows.len(), Hit::ListRow);
 }
 
@@ -1142,6 +1160,7 @@ fn draw_reply_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let height = usize::from(inner.height).saturating_sub(reason.len()).max(1);
     let offset = list_top(app.scroll.boxed, app.panel_index, app.replies.len(), height);
     app.tops.boxed = offset;
+    settle(&mut app.scroll.boxed, offset);
     let lines: Vec<Line<'static>> = app
         .replies
         .iter()
@@ -1237,6 +1256,7 @@ fn draw_annotation_list(frame: &mut Frame, app: &mut App, area: Rect, borders: B
     }
     frame.render_widget(Paragraph::new(lines), inner);
     app.tops.notes = offset;
+    settle(&mut app.scroll.notes, offset);
     // Each item has two lines. Both lines reach the item.
     for (position, index) in rows.into_iter().enumerate() {
         let y = inner.y + u16::try_from(position * 2).unwrap_or(u16::MAX);
@@ -1355,6 +1375,7 @@ fn draw_picker(frame: &mut Frame, app: &mut App, area: Rect, candidates: &[Candi
     let rows = usize::from(area.height).saturating_sub(lines.len()).max(1);
     let offset = list_top(app.scroll.boxed, index, candidates.len(), rows);
     app.tops.boxed = offset;
+    settle(&mut app.scroll.boxed, offset);
     for (position, candidate) in candidates.iter().enumerate().skip(offset).take(rows) {
         let marker = if position == index { "▸" } else { " " };
         let text = format!("{marker} {} · {}", age(now, candidate.updated), candidate.last_line);

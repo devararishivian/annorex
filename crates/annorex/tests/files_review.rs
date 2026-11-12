@@ -643,6 +643,19 @@ fn banner_names_the_count_of_new_files_and_clears_when_the_tree_opens() {
 }
 
 #[test]
+fn a_docked_tree_shows_the_changed_files_so_the_banner_does_not_stay() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Tree"), "the tree is docked at 120 columns: {screen}");
+    app.changed_list(vec!["src/main.rs".into()]);
+    app.changed_list(vec!["src/lib.rs".into(), "README.md".into(), "src/main.rs".into()]);
+    assert!(!render(&mut app, 120, 20).contains("The agent changed"), "the tree shows the files");
+    // The tree key hides the tree. The banner does not come back.
+    press(&mut app, "T");
+    assert!(!render(&mut app, 120, 20).contains("The agent changed"));
+}
+
+#[test]
 fn the_same_list_again_raises_no_banner() {
     let (_dir, mut app) = tree_app(&Config::default());
     app.changed_list(vec!["src/main.rs".into()]);
@@ -685,7 +698,8 @@ fn the_agent_banner_shows_beside_the_banner_of_the_open_file() {
     app.changed_list(vec!["a.md".into()]);
     app.changed_list(vec!["b.txt".into(), "a.md".into()]);
     app.file_changed(&Change { path: "a.md".into(), kind: ChangeKind::Modified });
-    let screen = render(&mut app, 160, 20);
+    // Below 100 columns the tree is not docked, so the banner about its files stays.
+    let screen = render(&mut app, 99, 20);
     assert!(
         screen.contains("a.md was deleted") && screen.contains("The agent changed 1 more file."),
         "{screen}"

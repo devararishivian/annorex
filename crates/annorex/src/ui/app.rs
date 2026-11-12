@@ -489,6 +489,12 @@ impl App {
         self.new_changed = 0;
     }
 
+    /// The tree is on the screen at the left of the document. The user sees the changed files, so the
+    /// banner about them ends.
+    pub(crate) fn tree_seen(&mut self) {
+        self.new_changed = 0;
+    }
+
     /// Show the tree with a directory open and the cursor on it.
     pub fn reveal_dir(&mut self, relative: &Path) {
         self.tree.reveal(relative);
@@ -550,7 +556,7 @@ impl App {
     /// raises the banner.
     pub fn changed_list(&mut self, list: Vec<PathBuf>) {
         let fresh = list.iter().filter(|path| !self.tree.is_changed(path)).count();
-        if self.changes_seen && self.focus != Focus::Tree {
+        if self.changes_seen && self.focus != Focus::Tree && !self.docked.tree {
             self.new_changed += fresh;
         }
         self.changes_seen = true;
@@ -927,6 +933,9 @@ impl App {
         self.top = 0;
         // The wheel scrolled the old text: the view of the new text follows its focus again.
         self.scroll.doc = false;
+        // A drag or a double click of the old text must not carry over to the new text.
+        self.drag = None;
+        self.last_click = None;
         let first = self.doc.lines.iter().position(|line| !line.is_blank());
         self.cursor = first.and_then(|index| self.line_start(index)).unwrap_or(0);
         if self.shown_id.as_deref() != Some(id.as_str()) {

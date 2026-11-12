@@ -309,7 +309,8 @@ fn the_reply_banner_shows_beside_the_banner_of_files() {
     app.changed_list(vec!["a.rs".into()]);
     app.changed_list(vec!["b.rs".into(), "a.rs".into()]);
     app.reply_polled("r9");
-    let screen = screen_with_banner(&mut app);
+    // Below 100 columns the tree is not docked, so the banner about its files stays.
+    let screen = render(&mut app, 99, 24);
     assert!(screen.contains(NEW_REPLY) && screen.contains("The agent changed 1 more file"), "{screen}");
 }
 

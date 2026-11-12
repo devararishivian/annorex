@@ -30,6 +30,11 @@ pub(crate) enum Hit {
     EditorCancel,
     BoxInside,
     BoxOutside,
+    /// The docked tree, the side annotation list, and the card rail. A row or a card lies over it.
+    /// A click there does nothing, and the wheel scrolls the part.
+    TreePane,
+    NotesPane,
+    RailPane,
 }
 
 /// The areas of the last frame, in the order of drawing.

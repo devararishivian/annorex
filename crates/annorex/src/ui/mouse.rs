@@ -179,7 +179,7 @@ impl App {
                     self.focus_note(id);
                 }
             }
-            // The empty part of the action bar, the cover of an overlay, a stale pick, or a stale editor button.
+            // The empty part of the action bar or of a side part, the cover of an overlay, a stale pick, or a stale editor button.
             _ => {}
         }
         Effect::None
@@ -361,8 +361,8 @@ impl App {
         let part = match hit {
             Some(Hit::ListRow(_) | Hit::BoxInside) if boxed => Part::Box,
             _ if boxed => return,
-            Some(Hit::TreeRow(_)) => Part::Tree,
-            Some(Hit::ListRow(_)) => Part::Notes,
+            Some(Hit::TreeRow(_) | Hit::TreePane) => Part::Tree,
+            Some(Hit::ListRow(_) | Hit::NotesPane) => Part::Notes,
             Some(Hit::BoxInside) if self.focus == Focus::Tree => Part::Tree,
             Some(Hit::BoxInside) if self.focus == Focus::Rail => Part::Notes,
             Some(
@@ -371,6 +371,7 @@ impl App {
                 | Hit::Bar
                 | Hit::Action(_)
                 | Hit::Card(_)
+                | Hit::RailPane
                 | Hit::CardEdit(_)
                 | Hit::CardRemove(_)
                 | Hit::Pick(_)

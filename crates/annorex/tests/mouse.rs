@@ -98,6 +98,10 @@ fn wheel_down(app: &mut App, at: (u16, u16)) {
     app.handle_mouse(event(MouseEventKind::ScrollDown, at));
 }
 
+fn wheel_up(app: &mut App, at: (u16, u16)) {
+    app.handle_mouse(event(MouseEventKind::ScrollUp, at));
+}
+
 fn footer(buffer: &Buffer) -> String {
     rows(buffer).last().cloned().unwrap_or_default()
 }
@@ -492,4 +496,102 @@ fn a_new_document_after_the_wheel_follows_its_focus() {
     let screen = frame(&mut app, WIDE);
     assert!(rows(&screen).iter().any(|row| row.contains("bpara 0")), "{}", rows(&screen).join("\n"));
     assert!(!app.doc_scrolled(), "a new document ends the wheel scroll of the old one");
+}
+
+fn forty_files() -> (tempfile::TempDir, App) {
+    let dir = tempfile::tempdir().expect("dir");
+    for n in 0..40 {
+        std::fs::write(dir.path().join(format!("f{n:02}.txt")), "text\n").expect("write");
+    }
+    let app = files_app(dir.path());
+    (dir, app)
+}
+
+#[test]
+fn wheel_past_the_end_of_a_list_builds_no_dead_zone() {
+    let (_dir, mut app) = forty_files();
+    let screen = frame(&mut app, WIDE);
+    let first = find(&screen, "f00.txt");
+    for _ in 0..30 {
+        wheel_down(&mut app, first);
+    }
+    let screen = frame(&mut app, WIDE);
+    let end = find(&screen, "f39.txt").1;
+    wheel_up(&mut app, first);
+    let screen = frame(&mut app, WIDE);
+    assert_eq!(find(&screen, "f36.txt").1, end, "one step up moves the tree at once");
+
+    // The reply list in the centered box.
+    let replies: Vec<Reply> = (0..40).map(|n| reply(&format!("r{n}"), &format!("reply-{n:02}\n"))).collect();
+    let mut app = App::new(state(), Screen::Viewer, replies, &Config::default());
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    press(&mut app, "p");
+    let screen = frame(&mut app, NARROW);
+    let second = find(&screen, "reply-01");
+    for _ in 0..30 {
+        wheel_down(&mut app, second);
+    }
+    let screen = frame(&mut app, NARROW);
+    let end = find(&screen, "reply-39").1;
+    wheel_up(&mut app, second);
+    let screen = frame(&mut app, NARROW);
+    assert_eq!(find(&screen, "reply-36").1, end, "one step up moves the box at once");
+}
+
+#[test]
+fn wheel_past_the_end_of_the_annotation_list_builds_no_dead_zone() {
+    let mut app = viewer(&paragraphs(40));
+    for n in 0..30 {
+        press(&mut app, &format!("cnote{n:02}\nj"));
+    }
+    // Between 100 and 119 columns, the annotation list opens at the right of the document.
+    press(&mut app, "a");
+    let size = (110, 20);
+    let screen = frame(&mut app, size);
+    let at = find(&screen, "note00");
+    for _ in 0..40 {
+        wheel_down(&mut app, at);
+    }
+    let screen = frame(&mut app, size);
+    let end = find(&screen, "note29").1;
+    wheel_up(&mut app, at);
+    let screen = frame(&mut app, size);
+    assert_eq!(
+        find(&screen, "note28").1,
+        end,
+        "one step up moves the list at once:\n{}",
+        rows(&screen).join("\n")
+    );
+}
+
+#[test]
+fn wheel_over_the_empty_part_of_a_side_part_scrolls_it() {
+    // The border of the docked tree has no row.
+    let (_dir, mut app) = forty_files();
+    let screen = frame(&mut app, WIDE);
+    let (_, y) = find(&screen, "f00.txt");
+    let (border, _) = find(&screen, "│");
+    wheel_down(&mut app, (border, y));
+    let screen = frame(&mut app, WIDE);
+    assert_eq!(find(&screen, "f03.txt").1, y, "the tree scrolled:\n{}", rows(&screen).join("\n"));
+
+    // The card rail with no note is empty. The wheel there scrolls the document.
+    let mut app = viewer(&paragraphs(60));
+    let _ = frame(&mut app, WIDE);
+    wheel_down(&mut app, (WIDE.0 - 2, 5));
+    assert!(app.doc_scrolled(), "the wheel on the empty rail scrolled the document");
+}
+
+#[test]
+fn showing_a_document_ends_a_drag_and_a_double_click() {
+    let mut app = viewer("alpha beta gamma\n");
+    let screen = frame(&mut app, NARROW);
+    let (x, y) = find(&screen, "beta");
+    app.handle_mouse(event(MouseEventKind::Down(MouseButton::Left), (x, y)));
+    // A key shows the reply again while the button is still down.
+    press(&mut app, "p\n");
+    assert!(app.mode() != Mode::Text, "no selection yet");
+    let _ = frame(&mut app, NARROW);
+    app.handle_mouse(event(MouseEventKind::Drag(MouseButton::Left), (x + 4, y)));
+    assert!(app.mode() != Mode::Text, "the drag of the old text ended");
 }
