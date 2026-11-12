@@ -1121,3 +1121,26 @@ fn the_block_status_shows_only_when_the_document_has_the_focus() {
     let screen = render(&mut app, 120, 20);
     assert!(!footer(&screen).contains("block"), "{screen}");
 }
+
+#[test]
+fn the_compact_unsent_header_fits_at_80_columns() {
+    let mut app = two_files();
+    press(&mut app, "jcx\n");
+    let header = render(&mut app, 80, 20).lines().next().expect("header").to_owned();
+    assert!(header.contains("unsent 1 file"), "{header}");
+}
+
+#[test]
+fn unsent_reply_numbers_match_the_reply_list_with_files_open() {
+    let mut app = files_app();
+    app.open_file(loaded("a.md", "# Title\n\nalpha\n"));
+    app.set_replies(vec![
+        Reply { id: "r1".to_owned(), text: "# One\n\nfirst\n".to_owned(), at: None },
+        Reply { id: "r2".to_owned(), text: "# Two\n\nsecond\n".to_owned(), at: None },
+    ]);
+    press(&mut app, "p");
+    press(&mut app, "k\n");
+    press(&mut app, "jcx\n");
+    assert_eq!(app.reply_position(), (1, 3));
+    assert_eq!(app.unsent_replies(), vec![2]);
+}

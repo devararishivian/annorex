@@ -307,9 +307,7 @@ impl<R: Runner> Viewer<'_, R> {
                 }
             }
         }
-        if matches!(start, Start::Files(_)) && app.shown_file().is_none() {
-            app.show_no_document();
-        }
+        hide_reply_for_files(start, &mut app);
         self.restore_drafts(&mut app);
         self.refresh_marks(&mut app);
         if opens_tree(start, &app) {
@@ -566,6 +564,13 @@ fn opens_tree(start: &Start, app: &App) -> bool {
     let no_paths = matches!(start, Start::Files(paths) if paths.is_empty());
     let picking = matches!(start, Start::Last) && matches!(app.reply_source(), ReplySource::Pick(_));
     no_paths || (app.reply_ids().is_empty() && !picking)
+}
+
+/// The files view shows no document until a file is open: a reply stays behind the list.
+fn hide_reply_for_files(start: &Start, app: &mut App) {
+    if matches!(start, Start::Files(_)) && app.shown_file().is_none() {
+        app.show_no_document();
+    }
 }
 
 /// Read the replies of a session.
@@ -902,6 +907,18 @@ mod tests {
     #[test]
     fn last_starts_the_last_reply_view_and_files_the_files_view() {
         use crate::ui::StartView;
+        let mut app = App::new(
+            AgentState { agent: Some(Agent::Pi), safety: Safety::Clear { state: None } },
+            Screen::Viewer,
+            Vec::new(),
+            &Config::default(),
+        )
+        .with_root(std::path::PathBuf::from("/work"));
+        app.set_replies(vec![Reply { id: "r".into(), text: "hi\n".into(), at: None }]);
+        super::hide_reply_for_files(&super::Start::Last, &mut app);
+        assert!(app.shown_reply_id().is_some(), "the last view keeps its reply");
+        super::hide_reply_for_files(&super::Start::Files(Vec::new()), &mut app);
+        assert!(app.shown_reply_id().is_none(), "the files view with no file shows no document");
         assert_eq!(super::start_view(&super::Start::Last), StartView::Last);
         assert_eq!(super::start_view(&super::Start::Files(Vec::new())), StartView::Files);
         assert_eq!(super::start_view(&super::Start::Files(vec!["a.md".into()])), StartView::Files);

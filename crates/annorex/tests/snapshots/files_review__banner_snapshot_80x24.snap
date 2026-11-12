@@ -3,7 +3,7 @@ source: crates/annorex/tests/files_review.rs
 assertion_line: 668
 expression: "render(&mut app, 80, 24)"
 ---
-Annorex · files · claude (idle) · file 1/1                 [ Send 1 → claude ▸ ]
+Annorex · files · claude (idle) · file 1/1 · unsent 1 file [ Send 1 → claude ▸ ]
 a.txt changed on disk. Press r to read it again.
  1 alpha beta                                                                  ●
     o looks good   c comment   d remove   s replace

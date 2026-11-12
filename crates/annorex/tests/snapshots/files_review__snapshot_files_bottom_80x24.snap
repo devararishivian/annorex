@@ -3,7 +3,7 @@ source: crates/annorex/tests/files_review.rs
 assertion_line: 221
 expression: "render(&mut app, 80, 24)"
 ---
-Annorex · files · claude (idle) · file 2/2                 [ Send 1 → claude ▸ ]
+Annorex · files · claude (idle) · file 2/2 · unsent 1 file [ Send 1 → claude ▸ ]
 ▍Title                                                                         ●
 
  alpha text

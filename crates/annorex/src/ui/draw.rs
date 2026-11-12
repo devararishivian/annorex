@@ -567,6 +567,12 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
     let mut lefts = Vec::new();
     if !unsent.is_empty() {
         lefts.push(format!("{base} · {}", unsent.join(" · ")));
+        // The compact form: `unsent 1,3`, `unsent 2 files`, or both.
+        let compact: Vec<String> = unsent
+            .iter()
+            .map(|part| part.replace("unsent in reply ", "").replace("unsent in ", ""))
+            .collect();
+        lefts.push(format!("{base} · unsent {}", compact.join(" · ")));
     }
     lefts.push(base);
     // A narrow header keeps the position and the agent before the name of the view.
@@ -691,7 +697,6 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
     draw_footer(frame, app, footer, Some(left), hints);
 }
 
-/// Draw the document in `area`. The focus background fills `fill_width` columns from the left of `area`.
 /// The empty state of the files view while no document is on the screen.
 fn draw_no_document(frame: &mut Frame, app: &App, area: Rect) {
     if area.height == 0 {
@@ -706,6 +711,7 @@ fn draw_no_document(frame: &mut Frame, app: &App, area: Rect) {
         .render_widget(Paragraph::new(fit(&text, area.width)).style(style).alignment(Alignment::Center), row);
 }
 
+/// Draw the document in `area`. The focus background fills `fill_width` columns from the left of `area`.
 fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
     if area.width == 0 || area.height == 0 {
         return;
