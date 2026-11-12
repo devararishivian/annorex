@@ -17,6 +17,9 @@ use crate::keys::KeyMap;
 const DEFAULT_LABELS: [&str; 3] = ["question", "looks good", "must fix"];
 /// The range of `enter_delay_ms`.
 const DELAY_RANGE_MS: std::ops::RangeInclusive<u64> = 50..=5000;
+/// The range of `changes_turns`, and its default.
+const TURNS_RANGE: std::ops::RangeInclusive<usize> = 1..=20;
+const DEFAULT_TURNS: usize = 1;
 
 /// A problem with the config file.
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +39,8 @@ pub struct Config {
     pub labels: Vec<String>,
     /// The keys of the viewer.
     pub keys: KeyMap,
+    /// How many turns of the human the tree looks back for files that the agent changed.
+    pub changes_turns: usize,
 }
 
 impl Default for Config {
@@ -44,6 +49,7 @@ impl Default for Config {
             enter_delay: ENTER_DELAY,
             labels: DEFAULT_LABELS.iter().map(|label| (*label).to_owned()).collect(),
             keys: KeyMap::default(),
+            changes_turns: DEFAULT_TURNS,
         }
     }
 }
@@ -54,6 +60,7 @@ struct Raw {
     enter_delay_ms: Option<u64>,
     labels: Option<Vec<String>>,
     keys: Option<BTreeMap<String, String>>,
+    changes_turns: Option<usize>,
 }
 
 /// The path of the config file: `$XDG_CONFIG_HOME/annorex/config.toml` when that variable is an
@@ -90,6 +97,16 @@ impl Config {
                 )));
             }
             config.enter_delay = Duration::from_millis(ms);
+        }
+        if let Some(turns) = raw.changes_turns {
+            if !TURNS_RANGE.contains(&turns) {
+                return Err(invalid(format!(
+                    "changes_turns is {turns}, but it must be from {} to {}",
+                    TURNS_RANGE.start(),
+                    TURNS_RANGE.end()
+                )));
+            }
+            config.changes_turns = turns;
         }
         for label in raw.labels.unwrap_or_default() {
             if label.trim().is_empty() {
@@ -204,6 +221,16 @@ mod tests {
         for value in ["10", "6000"] {
             let error = load(&format!("enter_delay_ms = {value}\n")).expect_err(value);
             assert!(error.contains("enter_delay_ms"), "{error}");
+        }
+    }
+
+    #[test]
+    fn changes_turns_default_and_range() {
+        assert_eq!(load("").expect("empty").changes_turns, 1);
+        assert_eq!(load("changes_turns = 3\n").expect("three").changes_turns, 3);
+        for value in ["0", "21"] {
+            let error = load(&format!("changes_turns = {value}\n")).expect_err(value);
+            assert!(error.contains("changes_turns"), "{error}");
         }
     }
 
