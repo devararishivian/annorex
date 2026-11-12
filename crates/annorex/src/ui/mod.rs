@@ -4,6 +4,7 @@ mod app;
 mod draw;
 mod editor;
 mod focus;
+mod hits;
 mod tree;
 
 pub use app::{AgentState, App, Effect, ReplySource, Screen, file_id};

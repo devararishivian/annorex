@@ -8,6 +8,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::editor::{Editor, EditorResult};
 use super::focus::Mode;
+use super::hits::HitMap;
 use super::tree::{Finder, Tree};
 use crate::agent::Agent;
 use crate::config::Config;
@@ -179,6 +180,8 @@ pub struct App {
     pub(crate) page: usize,
     /// True when the last frame showed the panel over the document.
     pub(crate) overlay: bool,
+    /// The clickable areas of the last frame.
+    pub(crate) hits: HitMap,
     /// The time zone of the times in the reply list. The default is the system zone.
     pub(crate) zone: jiff::tz::TimeZone,
     pub(crate) config: Config,
@@ -257,6 +260,7 @@ impl App {
             status: None,
             page: 20,
             overlay: false,
+            hits: HitMap::default(),
             zone: jiff::tz::TimeZone::system(),
             config: config.clone(),
             reviews: HashMap::new(),

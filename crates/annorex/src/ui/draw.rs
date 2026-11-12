@@ -132,6 +132,7 @@ const EDITOR_KEYS: &str = "enter save  ctrl+j new line  tab label  esc cancel";
 
 /// Draw the whole viewer.
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    app.hits.clear();
     let area = frame.area();
     let layout = compute(area, app.panel_open);
     let Some((header, footer)) = header_footer(&layout) else {
