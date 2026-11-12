@@ -1,5 +1,6 @@
 ---
 source: crates/annorex/tests/files_review.rs
+assertion_line: 806
 expression: "render(&mut app, 40, 12)"
 ---
 claude (idle) · no file open  [ Send ▸ ]
@@ -13,4 +14,4 @@ claude (idle) · no file open  [ Send ▸ ]
 │                                      │
 │                                      │
 └──────────────────────────────────────┘
-block 0/0              j/k move · ? help
+          j/k move · enter open · ? help

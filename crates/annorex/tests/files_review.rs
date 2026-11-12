@@ -128,7 +128,7 @@ fn list_marks_unsent_files() {
     let mut app = two_files();
     press(&mut app, "jcnote a\n");
     let screen = render(&mut app, 120, 20);
-    assert!(screen.lines().next().expect("header").contains("unsent 2"), "{screen}");
+    assert!(screen.lines().next().expect("header").contains("unsent in 1 file"), "{screen}");
     press(&mut app, "p");
     let screen = render(&mut app, 120, 20);
     assert!(screen.contains("Files") && screen.contains("b.txt") && screen.contains("a.md"), "{screen}");
@@ -1075,4 +1075,49 @@ fn one_column_below_100() {
     let screen = render(&mut app, 80, 20);
     assert!(screen.lines().nth(1).unwrap_or_default().starts_with("┌ Annotations"), "{screen}");
     assert!(screen.contains("note"), "{screen}");
+}
+
+/// The files view with two replies and no file open.
+fn files_view_with_replies() -> (tempfile::TempDir, App) {
+    let (dir, app) = tree_app(&Config::default());
+    let mut app = app.with_start_view(StartView::Files);
+    app.set_replies(vec![
+        Reply { id: "r1".to_owned(), text: "# One\n\nfirst reply text\n".to_owned(), at: None },
+        Reply { id: "r2".to_owned(), text: "# Two\n\nsecond reply text\n".to_owned(), at: None },
+    ]);
+    app.show_no_document();
+    app.open_tree();
+    (dir, app)
+}
+
+#[test]
+fn the_files_view_with_no_path_shows_no_document() {
+    let (_dir, mut app) = files_view_with_replies();
+    let screen = render(&mut app, 120, 20);
+    let header = screen.lines().next().expect("header");
+    assert!(header.contains("files · claude (idle)") && !header.contains("reply"), "{header}");
+    assert!(!screen.contains("first reply text"), "{screen}");
+    assert!(screen.contains("Open a file from the tree (enter), or find one (ctrl+p)."), "{screen}");
+    // A reply stays reachable from the list.
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "p\n");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("first reply text") && !screen.contains("Open a file from"), "{screen}");
+}
+
+#[test]
+fn the_header_names_the_unsent_files() {
+    let mut app = two_files();
+    press(&mut app, "jcx\n");
+    let header = render(&mut app, 120, 20).lines().next().expect("header").to_owned();
+    assert!(header.contains("unsent in 1 file") && !header.contains("unsent in 1 files"), "{header}");
+}
+
+#[test]
+fn the_block_status_shows_only_when_the_document_has_the_focus() {
+    let mut app = two_files();
+    assert!(footer(&render(&mut app, 120, 20)).contains("block"));
+    app.open_tree();
+    let screen = render(&mut app, 120, 20);
+    assert!(!footer(&screen).contains("block"), "{screen}");
 }

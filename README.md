@@ -85,7 +85,7 @@ The layout follows the size of the window.
 - Less than 100 columns, or less than 16 rows: one column. The tree and the lists open over the document.
 - Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
 
-The file viewer starts with the tree. The last-reply viewer starts without it. It opens the reply list first when the agent has two or more replies. Press `enter` to open a reply, or `esc` to quit. `T` shows and hides the tree in both viewers.
+The file viewer starts with the tree. With no path, it shows no document until you open a file. The last-reply viewer starts without it. It opens the reply list first when the agent has two or more replies. Press `enter` to open a reply, or `esc` to quit. `T` shows and hides the tree in both viewers.
 
 The header shows the agent and the send button `[ Send N → agent ▸ ]`. The footer shows the keys of the current view and mode.
 The list of replies (`p`), the file finder (`ctrl+p`), and the session picker open in a box in the center.

@@ -1,5 +1,6 @@
 ---
 source: crates/annorex/tests/files_review.rs
+assertion_line: 572
 expression: "render(&mut app, 80, 24)"
 ---
 Annorex · files · claude (idle) · no file open                        [ Send ▸ ]
@@ -25,4 +26,4 @@ Annorex · files · claude (idle) · no file open                        [ Send 
   │                                                                          │
   └──────────────────────────────────────────────────────────────────────────┘
 
-block 0/0           type to filter · enter open · ctrl+n/ctrl+p move · esc close
+                    type to filter · enter open · ctrl+n/ctrl+p move · esc close

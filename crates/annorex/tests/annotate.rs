@@ -344,7 +344,7 @@ fn a_new_change_makes_a_sent_draft_unsent() {
     assert!(!render(&mut app, 80, 12).contains("unsent"));
     press(&mut app, "jcy\n");
     assert!(app.draft(Agent::ClaudeCode, "s").expect("draft").sent_at.is_none());
-    assert!(render(&mut app, 100, 12).contains("unsent 1"));
+    assert!(render(&mut app, 100, 12).contains("unsent in reply 1"));
 }
 
 #[test]
@@ -357,7 +357,7 @@ fn header_lists_unsent_replies() {
     press(&mut app, "jcthree\np");
     let screen = render(&mut app, 120, 24);
     let header = screen.lines().next().expect("header");
-    assert!(header.contains("unsent 1,3"), "{header}");
+    assert!(header.contains("unsent in reply 1,3"), "{header}");
     assert!(screen.lines().any(|line| line.contains(" 1●")), "{screen}");
 }
 

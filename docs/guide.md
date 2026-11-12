@@ -186,11 +186,11 @@ The layout changes with the size of the window:
   The dots also show in the right margin when the document is 21 columns or more wide.
 - Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
 
-The file viewer starts with the tree. The last-reply viewer starts without the tree. `T` shows the tree with the focus.
+The file viewer starts with the tree. With no path, it shows no document until you open a file. Press `p` to open a reply. The last-reply viewer starts without the tree. `T` shows the tree with the focus.
 A second `T` hides it. Over a narrow window, `T` opens and closes the tree.
 The list of replies (`p`), the file finder (`ctrl+p`), and the session picker open in a box in the center, at all widths.
 
-The header shows the view, the agent and its state, and the position. On the right, it has the send button
+The header shows the view, the agent and its state, and the position. It adds `unsent in reply 1,3` or `unsent in 2 files` when notes are not sent. On the right, it has the send button
 `[ Send N → agent ▸ ]`. With no notes, the button is dim: `[ Send ▸ ]`. It is dim while the agent shows a dialog too. While the agent works, the button adds
 `queued` for Claude Code or `steers` for Pi and OpenCode. After a send, it shows `[ Sent HH:MM ]`. The footer shows the
 keys of the current mode. Annorex leaves out the hints that do not fit, from the end. `? help` stays while it fits.

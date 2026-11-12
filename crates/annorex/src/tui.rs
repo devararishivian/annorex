@@ -307,6 +307,9 @@ impl<R: Runner> Viewer<'_, R> {
                 }
             }
         }
+        if matches!(start, Start::Files(_)) && app.shown_file().is_none() {
+            app.show_no_document();
+        }
         self.restore_drafts(&mut app);
         self.refresh_marks(&mut app);
         if opens_tree(start, &app) {

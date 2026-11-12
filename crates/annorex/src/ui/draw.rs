@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
@@ -509,6 +509,9 @@ fn position_text(app: &App) -> String {
         return if app.has_root() { "no file open" } else { "reply 1/0" }.to_owned();
     }
     let open_files = app.files.len();
+    if app.shown_id().is_none() {
+        return "no file open".to_owned();
+    }
     if app.shown_file().is_some() {
         let before =
             app.replies.iter().take(selected).filter(|reply| app.files.contains_key(&reply.id)).count();
@@ -521,7 +524,9 @@ fn position_text(app: &App) -> String {
 /// The status on the left of the footer: the focused block or the line of the cursor, and the
 /// number of notes of the document.
 fn doc_status(app: &App) -> String {
+    // The block and the line belong to the document: the tree and the rail show only the notes.
     let place = match app.mode {
+        _ if app.focus != Focus::Doc => String::new(),
         Mode::Block(index) => match app.doc.blocks.len() {
             0 => "block 0/0".to_owned(),
             count => format!("block {}/{count}", index.min(count - 1) + 1),
@@ -535,11 +540,12 @@ fn doc_status(app: &App) -> String {
             format!("line {}/{lines}", app.doc.line_of(app.cursor))
         }
     };
-    match app.review().map_or(0, |review| review.annotations.len()) {
-        0 => place,
-        1 => format!("{place} · 1 note"),
-        count => format!("{place} · {count} notes"),
-    }
+    let notes = match app.review().map_or(0, |review| review.annotations.len()) {
+        0 => return place,
+        1 => "1 note".to_owned(),
+        count => format!("{count} notes"),
+    };
+    if place.is_empty() { notes } else { format!("{place} · {notes}") }
 }
 
 #[allow(clippy::too_many_lines, reason = "one place that puts the parts of the viewer on the screen")]
@@ -547,11 +553,20 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
     let position = position_text(app);
     let state = app.state.header_text();
     let base = format!("Annorex · {} · {state} · {position}", title_of(app));
-    let unsent = app.unsent_replies();
+    let mut unsent = Vec::new();
+    let replies = app.unsent_replies();
+    if !replies.is_empty() {
+        let numbers: Vec<String> = replies.iter().map(ToString::to_string).collect();
+        unsent.push(format!("unsent in reply {}", numbers.join(",")));
+    }
+    match app.unsent_open_files() {
+        0 => {}
+        1 => unsent.push("unsent in 1 file".to_owned()),
+        count => unsent.push(format!("unsent in {count} files")),
+    }
     let mut lefts = Vec::new();
     if !unsent.is_empty() {
-        let numbers: Vec<String> = unsent.iter().map(ToString::to_string).collect();
-        lefts.push(format!("{base} · unsent {}", numbers.join(",")));
+        lefts.push(format!("{base} · {}", unsent.join(" · ")));
     }
     lefts.push(base);
     // A narrow header keeps the position and the agent before the name of the view.
@@ -596,6 +611,9 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         Side::Rail(_) | Side::Nothing => doc_area.width,
     };
     draw_doc(frame, app, doc_area, fill_width);
+    if app.shown_id().is_none() && app.has_root() {
+        draw_no_document(frame, app, doc_area);
+    }
     let (margin, gutter) = margin_and_gutter(&app.doc, doc_area);
     let text_area = Rect::new(
         doc_area.x + margin + gutter,
@@ -674,6 +692,20 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
 }
 
 /// Draw the document in `area`. The focus background fills `fill_width` columns from the left of `area`.
+/// The empty state of the files view while no document is on the screen.
+fn draw_no_document(frame: &mut Frame, app: &App, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    let keys = &app.config.keys;
+    let text =
+        format!("Open a file from the tree ({}), or find one ({}).", "enter", keys.label(Action::FindFile));
+    let row = Rect::new(area.x, area.y + area.height / 2, area.width, 1);
+    let style = Style::new().add_modifier(Modifier::DIM);
+    frame
+        .render_widget(Paragraph::new(fit(&text, area.width)).style(style).alignment(Alignment::Center), row);
+}
+
 fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
     if area.width == 0 || area.height == 0 {
         return;

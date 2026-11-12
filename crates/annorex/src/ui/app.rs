@@ -1122,7 +1122,10 @@ impl App {
         self.replies
             .iter()
             .enumerate()
-            .filter(|(_, reply)| self.reviews.get(&reply.id).is_some_and(Review::has_unsent))
+            .filter(|(_, reply)| {
+                !self.files.contains_key(&reply.id)
+                    && self.reviews.get(&reply.id).is_some_and(Review::has_unsent)
+            })
             .map(|(index, _)| index + 1)
             .collect()
     }
@@ -1671,6 +1674,29 @@ impl App {
         } else {
             Effect::Quit
         }
+    }
+
+    /// The number of open files (not replies) with notes that no send took.
+    pub fn unsent_open_files(&self) -> usize {
+        self.replies
+            .iter()
+            .filter(|reply| {
+                self.files.contains_key(&reply.id)
+                    && self.reviews.get(&reply.id).is_some_and(Review::has_unsent)
+            })
+            .count()
+    }
+
+    /// Show no document: the files view starts so when no file is open. A reply opens from the list.
+    pub fn show_no_document(&mut self) {
+        self.shown_id = None;
+        self.doc = Doc::parse("");
+        self.cache.clear();
+        self.top = 0;
+        self.cursor = 0;
+        self.mode = Mode::Browse;
+        self.selection = None;
+        self.annotation_index = 0;
     }
 
     /// The number of open files with notes that no send took.

@@ -1,8 +1,9 @@
 ---
 source: crates/annorex/tests/files_review.rs
+assertion_line: 221
 expression: "render(&mut app, 80, 24)"
 ---
-Annorex · files · claude (idle) · file 2/2 · unsent 2      [ Send 1 → claude ▸ ]
+Annorex · files · claude (idle) · file 2/2                 [ Send 1 → claude ▸ ]
 ▍Title                                                                         ●
 
  alpha text
@@ -25,4 +26,4 @@ Annorex · files · claude (idle) · file 2/2 · unsent 2      [ Send 1 → clau
 
 
 
-block 1/2 · 1 note                    j/k move · enter open · esc close · ? help
+1 note                                j/k move · enter open · esc close · ? help

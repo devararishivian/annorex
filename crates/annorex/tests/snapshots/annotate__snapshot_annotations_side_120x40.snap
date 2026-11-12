@@ -1,8 +1,9 @@
 ---
 source: crates/annorex/tests/annotate.rs
+assertion_line: 397
 expression: "render(&mut app, 120, 40)"
 ---
-Annorex · last reply · claude (idle) · reply 1/1 · unsent 1                                        [ Send 2 → claude ▸ ]
+Annorex · last reply · claude (idle) · reply 1/1 · unsent in reply 1                               [ Send 2 → claude ▸ ]
  alpha beta gamma                                                                      ┌ 💬 comment ───────────────────┐
                                                                                        │ Which page?                   │
  - one                                                                                 └───────────────────────────────┘
@@ -41,4 +42,4 @@ Annorex · last reply · claude (idle) · reply 1/1 · unsent 1                 
 
 
 
-line 4/4 · 2 notes                                           j/k note · enter go · e edit · x remove · esc back · ? help
+2 notes                                                      j/k note · enter go · e edit · x remove · esc back · ? help
