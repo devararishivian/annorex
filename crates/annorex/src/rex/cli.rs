@@ -155,12 +155,24 @@ pub(crate) fn find_binary_with(
     parent: impl FnOnce() -> Option<PathBuf>,
 ) -> Result<PathBuf, RexError> {
     let mut tried = Vec::new();
-    let bin_dir = env("REX_BIN_DIR").filter(|dir| !dir.is_empty()).map(|dir| PathBuf::from(dir).join("rex"));
-    let parent = parent().filter(|exe| exe.file_name().is_some_and(|name| name == "rex"));
+    if let Some(dir) = env("REX_BIN_DIR").filter(|dir| !dir.is_empty()) {
+        let candidate = PathBuf::from(dir).join("rex");
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        tried.push(candidate);
+    }
+    // Ask for the parent only now: it starts a process, and a Rex terminal does not need it.
+    if let Some(candidate) = parent().filter(|exe| exe.file_name().is_some_and(|name| name == "rex")) {
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        tried.push(candidate);
+    }
     let path_dirs =
         env("PATH").map(|path| std::env::split_paths(&path).collect::<Vec<_>>()).unwrap_or_default();
-    let in_path = path_dirs.into_iter().filter(|dir| !dir.as_os_str().is_empty()).map(|dir| dir.join("rex"));
-    for candidate in bin_dir.into_iter().chain(parent).chain(in_path) {
+    for dir in path_dirs.into_iter().filter(|dir| !dir.as_os_str().is_empty()) {
+        let candidate = dir.join("rex");
         if candidate.is_file() {
             return Ok(candidate);
         }
@@ -169,20 +181,30 @@ pub(crate) fn find_binary_with(
     Err(RexError::BinaryNotFound { tried })
 }
 
-/// The path of the executable of process `pid`, from `ps -o comm=`. On macOS `comm` is the full path.
+/// The path of the executable of process `pid`. `lsof` gives the text file of the process, which is
+/// the real executable. `ps -o comm=` is the fallback: it gives `argv[0]`, which is a full path only
+/// when the process was started by its full path.
 fn executable_of(pid: u32) -> Option<PathBuf> {
-    let output = Command::new("/bin/ps")
-        .args(["-o", "comm=", "-p", &pid.to_string()])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    let pid = pid.to_string();
+    let run = |program: &str, args: &[&str]| -> Option<String> {
+        let output =
+            Command::new(program).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+        output.status.success().then(|| String::from_utf8(output.stdout).ok()).flatten()
+    };
+    if let Some(path) =
+        run("/usr/sbin/lsof", &["-a", "-p", &pid, "-d", "txt", "-Fn"]).as_deref().and_then(lsof_text_path)
+    {
+        return Some(path);
     }
-    let text = String::from_utf8(output.stdout).ok()?;
+    let text = run("/bin/ps", &["-o", "comm=", "-p", &pid])?;
     let path = text.trim_end_matches(['\n', '\r']);
     path.starts_with('/').then(|| PathBuf::from(path))
+}
+
+/// The first `n` (name) line of `lsof -Fn` output, when it is an absolute path.
+fn lsof_text_path(output: &str) -> Option<PathBuf> {
+    let name = output.lines().find_map(|line| line.strip_prefix('n'))?;
+    name.starts_with('/').then(|| PathBuf::from(name))
 }
 
 impl Rex<SystemRunner> {
@@ -746,6 +768,23 @@ mod tests {
             Err(RexError::BinaryNotFound { tried }) => assert_eq!(tried, std::slice::from_ref(&gone)),
             other => panic!("expected BinaryNotFound, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lsof_text_path_is_the_first_name_line() {
+        let output = "p2416\nftxt\nn/Apps/Rex Server.app/Contents/MacOS/rex\nftxt\nn/usr/lib/dyld\n";
+        assert_eq!(lsof_text_path(output), Some(PathBuf::from("/Apps/Rex Server.app/Contents/MacOS/rex")));
+        assert_eq!(lsof_text_path("p1\nftxt\n"), None);
+        assert_eq!(lsof_text_path("p1\nftxt\nnrelative\n"), None);
+    }
+
+    #[test]
+    fn find_binary_asks_for_the_parent_only_after_rex_bin_dir() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("rex"), "").expect("file");
+        let env = |name: &str| (name == "REX_BIN_DIR").then(|| dir.path().as_os_str().to_owned());
+        let found = find_binary_with(env, || panic!("the parent is not needed")).expect("binary");
+        assert_eq!(found, dir.path().join("rex"));
     }
 
     #[test]
