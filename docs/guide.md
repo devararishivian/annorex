@@ -85,8 +85,9 @@ If the open Annorex is for another agent, the action shows a message that names 
 Press `q` there to close it.
 
 The replies of the agent and the files of its work directory are in the same Annorex. `annorex_last` and
-`annorex_files` open the same viewer. They differ only in the first document: the newest reply, or the files that you
-name (the file tree when you name none). One send gives the notes on all replies and files to the agent.
+`annorex_files` open the same viewer. They differ in the first document: the newest reply, or the files that you
+name (the file tree when you name none). The file viewer shows the tree on the left and the file keys in the footer.
+The last-reply viewer hides the tree until you press `T`. Its footer shows the reply keys. All keys work in both viewers. One send gives the notes on all replies and files to the agent.
 
 ## Review the last reply
 
@@ -172,15 +173,16 @@ The note `looks good` needs no text, so it saves at once without the editor. The
 
 The layout changes with the size of the window:
 
-- 120 columns or more: the file tree on the left (when the view has files), the document, and the card rail on the
+- 120 columns or more: the file tree on the left (when it shows), the document, and the card rail on the
   right. The tree is 28 columns wide. The rail is 34 columns wide. Each note has a card in the rail.
-- 100 to 119 columns: the file tree on the left and the document. There is no rail. A dot in the color of the note
+- 100 to 119 columns: the file tree on the left (when it shows) and the document. There is no rail. A dot in the color of the note
   marks the note in the right margin of the block.
 - Less than 100 columns, or less than 16 rows: one column. The tree and the list of notes open over the document.
   The dots also show in the right margin when the document is 21 columns or more wide.
 - Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
 
-`T` hides the tree on the left and shows it again. Over a narrow window, `T` opens and closes the tree.
+The file viewer starts with the tree. The last-reply viewer starts without the tree. `T` shows the tree with the focus.
+A second `T` hides it. Over a narrow window, `T` opens and closes the tree.
 The list of replies (`p`), the file finder (`ctrl+p`), and the session picker open in a box in the center, at all widths.
 
 The header shows the view, the agent and its state, and the position. On the right, it has the send button

@@ -156,6 +156,17 @@ pub(crate) struct Docked {
     pub(crate) cards: bool,
 }
 
+/// The view that the viewer starts as. It decides whether the tree shows at the start and which keys the
+/// footer shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StartView {
+    /// `open last`: a reply. The tree shows only after the tree key.
+    Last,
+    /// `open files`: the files. The tree shows on the left.
+    #[default]
+    Files,
+}
+
 /// The text that the user marked with `v` or `V`. The anchor is where the marking started.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Selection {
@@ -189,8 +200,10 @@ pub struct App {
     pub(crate) width: u16,
     /// The index of the first visual row on the screen in the last frame.
     pub(crate) top_row: usize,
-    /// False after the user hid the tree.
+    /// False after the user hid the tree, and at the start of the last-reply view.
     pub(crate) tree_open: bool,
+    /// The view that the viewer started as.
+    start_view: StartView,
     /// The annotation list is open where the window has no card rail.
     pub(crate) list_open: bool,
     /// The centered box, when one is open.
@@ -296,6 +309,7 @@ impl App {
             width: 0,
             top_row: 0,
             tree_open: true,
+            start_view: StartView::default(),
             list_open: false,
             boxed: None,
             docked: Docked::default(),
@@ -360,6 +374,19 @@ impl App {
     pub fn with_root(mut self, root: PathBuf) -> Self {
         self.root = Some(root);
         self
+    }
+
+    /// Start the viewer as `view`. The last-reply view starts with the tree hidden.
+    #[must_use]
+    pub fn with_start_view(mut self, view: StartView) -> Self {
+        self.start_view = view;
+        self.tree_open = view == StartView::Files;
+        self
+    }
+
+    /// The view that the viewer started as.
+    pub(crate) fn start_view(&self) -> StartView {
+        self.start_view
     }
 
     /// True when the viewer has a work directory, so it has files.
@@ -1268,6 +1295,10 @@ impl App {
             }
         } else if self.focus == Focus::Tree {
             self.focus = Focus::Doc;
+            // In the last-reply view, a closed tree stays closed in a wider window too.
+            if self.start_view == StartView::Last {
+                self.tree_open = false;
+            }
         } else {
             self.open_tree();
         }

@@ -25,7 +25,7 @@ use crate::replies::{
 use crate::rex::{Rex, RexError, Runner, SystemRunner};
 use crate::safety::{Safety, check};
 use crate::send::{apply_result, send_review};
-use crate::ui::{AgentState, App, Effect, ReplySource, Screen, draw};
+use crate::ui::{AgentState, App, Effect, ReplySource, Screen, StartView, draw};
 
 /// The longest wait for an event before the loop draws again.
 pub const WAIT: Duration = Duration::from_millis(250);
@@ -280,8 +280,9 @@ impl<R: Runner> Viewer<'_, R> {
             }
         };
         let root = source.cwd.clone();
-        let mut app =
-            App::new(self.state.clone(), Screen::Viewer, Vec::new(), &self.config).with_root(root.clone());
+        let mut app = App::new(self.state.clone(), Screen::Viewer, Vec::new(), &self.config)
+            .with_root(root.clone())
+            .with_start_view(start_view(start));
         app.start_scan();
         app.start_watch();
         let turns = self.config.changes_turns;
@@ -544,6 +545,14 @@ impl<R: Runner> Viewer<'_, R> {
             }
         }
         app.set_state(self.state.clone());
+    }
+}
+
+/// The view of the viewer for `start`: `last` shows a reply, and `files` shows the files.
+fn start_view(start: &Start) -> StartView {
+    match start {
+        Start::Last => StartView::Last,
+        Start::Files(_) => StartView::Files,
     }
 }
 
@@ -883,5 +892,13 @@ mod tests {
             &Config::default(),
         );
         assert!(super::opens_tree(&super::Start::Last, &empty), "no document at all: the tree");
+    }
+
+    #[test]
+    fn last_starts_the_last_reply_view_and_files_the_files_view() {
+        use crate::ui::StartView;
+        assert_eq!(super::start_view(&super::Start::Last), StartView::Last);
+        assert_eq!(super::start_view(&super::Start::Files(Vec::new())), StartView::Files);
+        assert_eq!(super::start_view(&super::Start::Files(vec!["a.md".into()])), StartView::Files);
     }
 }

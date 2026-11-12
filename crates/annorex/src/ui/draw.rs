@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, BoxView, Confirm, Docked, Focus, ReplySource, Screen, match_ranges};
+use super::app::{App, BoxView, Confirm, Docked, Focus, ReplySource, Screen, StartView, match_ranges};
 use super::bar::{draw_action_bar, shown_rows};
 use super::cards::{Side, draw_pick, draw_side, range_style, rank, split_markers};
 use super::focus::{Mode, View};
@@ -83,14 +83,19 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
     if app.pick.is_some() {
         return vec![plain("1-9 choose"), plain("esc close")];
     }
-    let files = app.has_root();
+    // The keys of the view: the last-reply view puts the reply list first, the files view the file keys.
+    let view = app.has_root().then(|| app.start_view());
     let lists = |out: &mut Vec<Hint>| {
         out.push(hint(Action::Send, format!("{} send", k(Action::Send))));
         out.push(hint(Action::Annotations, format!("{} notes", k(Action::Annotations))));
-        out.push(hint(Action::Replies, format!("{} list", k(Action::Replies))));
-        if files {
-            out.push(hint(Action::Tree, format!("{} tree", k(Action::Tree))));
-            out.push(hint(Action::FindFile, format!("{} find", k(Action::FindFile))));
+        let list = hint(Action::Replies, format!("{} list", k(Action::Replies)));
+        let tree = hint(Action::Tree, format!("{} tree", k(Action::Tree)));
+        match view {
+            None => out.push(list),
+            Some(StartView::Last) => out.extend([list, tree]),
+            Some(StartView::Files) => {
+                out.extend([tree, hint(Action::FindFile, format!("{} find", k(Action::FindFile))), list]);
+            }
         }
     };
     let mut out = match app.focus {

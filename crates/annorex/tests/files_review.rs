@@ -7,8 +7,9 @@ use std::path::PathBuf;
 use annorex::agent::Agent;
 use annorex::config::Config;
 use annorex::files::{LoadedFile, Stamp};
+use annorex::replies::Reply;
 use annorex::safety::Safety;
-use annorex::ui::{AgentState, App, Effect, Screen, draw};
+use annorex::ui::{AgentState, App, Effect, Screen, StartView, draw};
 use annorex::watch::{Change, ChangeKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -231,6 +232,90 @@ fn tree_app(config: &Config) -> (tempfile::TempDir, App) {
     app.set_time_zone(jiff::tz::TimeZone::UTC);
     app.set_scan(annorex::files::scan(dir.path()));
     (dir, app)
+}
+
+/// The last-reply view: a reply on the screen, and the files of the work directory behind `T`.
+fn last_app() -> (tempfile::TempDir, App) {
+    let (dir, app) = tree_app(&Config::default());
+    let mut app = app.with_start_view(StartView::Last);
+    app.set_replies(vec![Reply {
+        id: "r1".to_owned(),
+        text: "# Reply\n\nThe reply text.\n".to_owned(),
+        at: None,
+    }]);
+    (dir, app)
+}
+
+/// The last row of a render: the footer.
+fn footer(screen: &str) -> &str {
+    screen.lines().last().unwrap_or_default()
+}
+
+#[test]
+fn the_last_reply_view_starts_without_the_tree_and_shows_the_reply_keys() {
+    let (_dir, mut app) = last_app();
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("The reply text.") && !screen.contains("Tree"), "no tree at the start: {screen}");
+    let footer = footer(&screen);
+    assert!(footer.contains("S send · a notes · p list · T tree · ? help"), "{footer}");
+    assert!(!footer.contains("find"), "the find key is a file key: {footer}");
+}
+
+#[test]
+fn the_files_view_starts_on_the_tree_and_shows_the_file_keys() {
+    // `files` with no path: the tree is on the left and has the focus.
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.open_tree();
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Tree") && footer(&screen).contains("T hide"), "{screen}");
+    // `files` with a path: the file has the focus, and the tree stays on the left.
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.open_file(loaded("a.md", "# Title\n\nalpha text\n"));
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Tree") && screen.contains("alpha text"), "{screen}");
+    let footer = footer(&screen);
+    assert!(footer.contains("S send · a notes · T tree · ctrl+p find · p list · ? help"), "{footer}");
+}
+
+#[test]
+fn the_tree_key_shows_and_hides_the_tree_in_the_last_reply_view() {
+    let (_dir, mut app) = last_app();
+    assert!(!render(&mut app, 120, 20).contains("Tree"));
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Tree") && screen.contains("README.md"), "T docks the tree: {screen}");
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(!screen.contains("Tree") && screen.contains("The reply text."), "T hides it again: {screen}");
+    // Below 100 columns the tree opens over the document, and T closes it.
+    press(&mut app, "T");
+    assert!(render(&mut app, 80, 20).contains("README.md"), "the tree over the document");
+    press(&mut app, "T");
+    assert!(!render(&mut app, 80, 20).contains("README.md"));
+    assert!(!render(&mut app, 120, 20).contains("Tree"), "a closed tree stays closed at 120 columns");
+}
+
+#[test]
+fn the_banner_in_the_last_reply_view_sends_the_user_to_the_tree() {
+    let (_dir, mut app) = last_app();
+    render(&mut app, 120, 20);
+    app.changed_list(vec!["src/main.rs".into()]);
+    app.changed_list(vec!["src/lib.rs".into(), "README.md".into(), "src/main.rs".into()]);
+    let screen = render(&mut app, 120, 20);
+    assert!(
+        screen.contains("The agent changed 2 more files. They are at the top of the tree (T)."),
+        "{screen}"
+    );
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("Tree") && !screen.contains("The agent changed"), "{screen}");
+    assert!(footer(&screen).contains("T hide"), "the tree has the focus: {screen}");
+}
+
+#[test]
+fn snapshot_last_reply_view_120x40() {
+    let (_dir, mut app) = last_app();
+    insta::assert_snapshot!(render(&mut app, 120, 40));
 }
 
 fn ctrl(app: &mut App, c: char) {

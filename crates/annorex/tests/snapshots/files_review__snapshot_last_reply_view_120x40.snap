@@ -1,0 +1,44 @@
+---
+source: crates/annorex/tests/files_review.rs
+expression: "render(&mut app, 120, 40)"
+---
+Annorex · last reply · claude (idle) · reply 1/1                                                              [ Send ▸ ]
+▍Reply
+ [o looks good] [c comment] [d remove] [s replace]
+ The reply text.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+block 1/2                     j/k block · v text · o c d s note · e/x edit · S send · a notes · p list · T tree · ? help

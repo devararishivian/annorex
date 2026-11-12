@@ -79,12 +79,14 @@ Press `e` to edit and `x` to delete the note at the focus.
 
 The layout follows the size of the window.
 
-- 120 columns or more: the file tree (when there are files) on the left, the document, and the card rail on the right.
-- 100 to 119 columns: the file tree on the left and the document. There is no card rail.
+- 120 columns or more: the file tree on the left (when it shows), the document, and the card rail on the right.
+- 100 to 119 columns: the file tree on the left (when it shows) and the document. There is no card rail.
 - Less than 100 columns, or less than 16 rows: one column. The tree and the lists open over the document.
 - Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
 
-The header shows the agent and the send button `[ Send N → agent ▸ ]`. The footer shows the keys of the current mode.
+The file viewer starts with the tree. The last-reply viewer starts without it. `T` shows and hides the tree in both viewers.
+
+The header shows the agent and the send button `[ Send N → agent ▸ ]`. The footer shows the keys of the current view and mode.
 The list of replies (`p`), the file finder (`ctrl+p`), and the session picker open in a box in the center.
 
 ## Key cheatsheet

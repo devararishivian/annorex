@@ -10,7 +10,7 @@ mod hits;
 mod mouse;
 mod tree;
 
-pub use app::{AgentState, App, Effect, ReplySource, Screen, file_id};
+pub use app::{AgentState, App, Effect, ReplySource, Screen, StartView, file_id};
 pub use draw::draw;
 pub use editor::{Editor, EditorResult};
 pub use focus::Mode;
