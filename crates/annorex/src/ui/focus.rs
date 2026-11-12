@@ -338,9 +338,15 @@ impl App {
             KeyCode::Home => Move::First,
             KeyCode::End => Move::Last,
             KeyCode::Enter => {
-                // `enter` on a focused block opens the action strip at the start of the block.
-                let focused = matches!(self.mode, Mode::Block(_));
-                self.bar_open = self.enter_text() && focused;
+                // `enter` opens the action strip for the whole focused block. Block mode stays.
+                // Without a focus, it first focuses the first block on the screen.
+                if self.mode == Mode::Browse
+                    && let Some(index) = self.block_on_screen(false)
+                {
+                    self.mode = Mode::Block(index);
+                    self.block_move(Move::Show);
+                }
+                self.bar_open = matches!(self.mode, Mode::Block(_));
                 return true;
             }
             KeyCode::Esc => {

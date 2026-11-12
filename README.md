@@ -63,7 +63,7 @@ In the viewer, press `?` to see all keys.
 The block with the focus has a bar in the left margin. The action bar shows after you finish a selection: when a drag
 ends, after a double click, after `enter` on the focused block, and after the `v` or `V` that ends a selection. It shows
 on the row above the selection. When there is no row above, it shows on the row below. It moves left to stay in the
-document. It has four items: `o ✓ looks good`, `c 💬 comment`, `d ✕ remove`, and `s ⇄ replace`. Each item has the
+document. After `enter`, an item acts on the whole block. It has four items: `o ✓ looks good`, `c 💬 comment`, `d ✕ remove`, and `s ⇄ replace`. Each item has the
 icon and the color of its note card. A click on an item does the same as its key.
 
 The keys `o`, `c`, `d`, and `s` also work without the action bar. They act on the focused block or on the selection. A

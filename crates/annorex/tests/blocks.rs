@@ -197,16 +197,33 @@ fn ctrl_d_focuses_the_first_block_that_starts_in_the_view() {
 }
 
 #[test]
-fn enter_goes_to_text_mode_at_the_block_start() {
+fn enter_keeps_block_mode_and_the_strip_covers_the_block() {
     let mut app = open(DOC);
     press(&mut app, "j\n");
-    assert_eq!(app.mode(), Mode::Text);
-    assert_eq!(app.cursor(), app.doc().blocks[1].range.start);
-    assert_eq!(app.focused_block(), Some(1), "text mode reports the block of the cursor");
-    // No selection: a note after a move covers the line of the cursor, not a few characters.
-    press(&mut app, "lllc");
-    let line = &app.doc().lines[app.cursor_line()];
-    assert_eq!(editor_range(&app), line.source);
+    assert_eq!(app.mode(), Mode::Block(1), "enter keeps block mode");
+    assert_eq!(app.focused_block(), Some(1));
+    assert!(strip_at(&render(&mut app, 120, 30)).is_some(), "enter opens the strip");
+    // Block 1 has two source lines: a note from the strip covers the whole block.
+    press(&mut app, "c");
+    assert_eq!(editor_range(&app), app.doc().blocks[1].range);
+}
+
+#[test]
+fn enter_without_a_focus_focuses_the_first_block_and_opens_the_strip() {
+    let mut app = open_raw(DOC);
+    press(&mut app, "\n");
+    assert_eq!(app.mode(), Mode::Block(0));
+    assert!(strip_at(&render(&mut app, 120, 30)).is_some());
+}
+
+#[test]
+fn the_footer_and_the_help_name_enter() {
+    let mut app = open(DOC);
+    let footer = render(&mut app, 160, 30).lines().last().expect("footer").to_owned();
+    assert!(footer.contains("enter actions"), "{footer}");
+    press(&mut app, "?");
+    let screen = render(&mut app, 120, 40);
+    assert!(screen.contains("enter  show the action bar"), "{screen}");
 }
 
 #[test]
@@ -273,7 +290,7 @@ fn esc_clears_then_returns_to_block_mode() {
 
     // Without a selection, one esc goes back to block mode.
     let mut app = open(DOC);
-    press(&mut app, "jj\nj\u{1b}");
+    press(&mut app, "jj0j\u{1b}");
     assert_eq!(app.mode(), Mode::Block(3), "j in text mode moves by line");
 }
 
@@ -432,7 +449,7 @@ fn the_focused_block_has_a_bar() {
 fn text_mode_has_no_bar_and_the_text_does_not_shift() {
     let mut app = open(DOC);
     let before = render(&mut app, 80, 24);
-    press(&mut app, "\n");
+    press(&mut app, "0");
     assert_eq!(bar_rows(&mut app, 80, 24), Vec::<u16>::new());
     let after = render(&mut app, 80, 24);
     let col = |screen: &str| {
@@ -453,7 +470,7 @@ fn block_mode_draws_no_cursor_cell_but_text_mode_does() {
     };
     press(&mut app, "j");
     assert_eq!(reversed(&mut app), 0);
-    press(&mut app, "\n");
+    press(&mut app, "0");
     assert_eq!(reversed(&mut app), 1);
 }
 
@@ -517,7 +534,7 @@ fn the_focus_background_fills_every_row_of_the_block_to_the_last_column() {
     assert_ne!(bg(79, after), Color::DarkGray);
     assert_ne!(bg(79, rows_with(&mut app, "intro", 80, 24)[0]), Color::DarkGray);
     // Text mode has no focus background.
-    press(&mut app, "\n");
+    press(&mut app, "0");
     let buffer = buffer_of(&mut app, 80, 24);
     assert_ne!(buffer.cell((79, top)).expect("cell").bg, Color::DarkGray);
 }
@@ -525,7 +542,7 @@ fn the_focus_background_fills_every_row_of_the_block_to_the_last_column() {
 #[test]
 fn a_note_key_on_an_empty_range_in_text_mode_says_nothing_to_annotate() {
     let mut app = open("alpha\n");
-    press(&mut app, "\n");
+    press(&mut app, "0");
     assert_eq!(app.mode(), Mode::Text);
     // The same reply with no text keeps text mode, so the cursor line is gone.
     app.set_replies(vec![reply("r1", "")]);

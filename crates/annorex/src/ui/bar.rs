@@ -105,8 +105,8 @@ fn hidden(app: &App) -> bool {
         || app.doc.blocks.is_empty()
 }
 
-/// Draw the action strip beside the range of a note after a finished selection: the selection, or
-/// the cursor line after `enter` on a block. `area` is the text area of the document: it starts at
+/// Draw the action strip beside the range of a note after a finished selection: the selection in
+/// text mode, or the whole focused block after `enter` in block mode. `area` is the text area of the document: it starts at
 /// the text column. The items that do not fit are left out from the end.
 pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, app: &mut App) {
     if hidden(app) || area.width == 0 || area.height == 0 {

@@ -1,12 +1,12 @@
 ---
 source: crates/annorex/tests/annotate.rs
-assertion_line: 1028
+assertion_line: 1032
 expression: "render(&mut app, 120, 40)"
 ---
 Annorex · last reply · claude (idle) · reply 1/1                                                              [ Send ▸ ]
  Plan
  ▐ o ✓ looks good  c 💬 comment  d ✕ remove  s ⇄ replace ▌
- We change the login page. The old page stays for a week.
+▍We change the login page. The old page stays for a week.
 
  - one
  - two
@@ -42,4 +42,4 @@ Annorex · last reply · claude (idle) · reply 1/1                             
 
 
 
-line 3/9                         h/j/k/l move · v select · o c d s note · esc block · S send · a notes · p list · ? help
+block 2/5              j/k block · v text · o c d s note · e/x edit · S send · a notes · p list · enter actions · ? help

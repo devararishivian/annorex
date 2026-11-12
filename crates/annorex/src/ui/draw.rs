@@ -147,6 +147,8 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
                     hint(Action::Edit, format!("{}/{} edit", k(Action::Edit), k(Action::Remove))),
                 ];
                 lists(&mut out);
+                // The least important hint: a narrow footer leaves it out first.
+                out.push(plain("enter actions"));
                 out
             }
             Mode::Text if app.selection.is_some() => vec![
@@ -300,7 +302,13 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &mut App) {
         right.push(("Files", HELP_FILES));
     }
     right.push(("Other", HELP_OTHER));
-    let left = help_column(app, &[("Move", HELP_MOVE), ("Select and annotate", HELP_NOTE)]);
+    let mut left = help_column(app, &[("Move", HELP_MOVE), ("Select and annotate", HELP_NOTE)]);
+    // `enter` is not a key of the config, so it has a fixed line: the first one of its group, after the
+    // title and the blank line that end the group before it.
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let enter =
+        Line::from(vec![Span::styled(format!("{:>7}  ", "enter"), bold), Span::raw("show the action bar")]);
+    left.insert((HELP_MOVE.len() + 3).min(left.len()), enter);
     let right = help_column(app, &right);
     let two = area.width >= 78;
     let rows = if two { left.len().max(right.len()) } else { left.len() + 1 + right.len() };
@@ -1646,7 +1654,7 @@ mod tests {
         let screen = terminal.backend().buffer().clone();
         let (x, y) = find(&screen, "\u{2590}");
         let (end, _) = find(&screen, "\u{258c}");
-        assert_eq!(y, find(&screen, "one").1 + 1, "below the first line");
+        assert_eq!(y, find(&screen, "three").1 + 1, "below the block: it starts on the first row");
         assert_eq!(x, find(&screen, "one").0, "at the text column");
         assert_eq!(app.hits.at(x, y), Some(&Hit::Bar), "the left cap");
         assert_eq!(app.hits.at(end, y), Some(&Hit::Bar), "the right cap");

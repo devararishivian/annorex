@@ -249,8 +249,8 @@ pub struct App {
     /// The time of the last send of each reply that has one. A change removes the entry.
     pub(crate) sent: HashMap<String, String>,
     pub(crate) selection: Option<Selection>,
-    /// The action strip shows: a selection is finished. A drag that ends, a double click, `enter` on
-    /// a focused block, and the `v` or `V` that ends a selection open it. Each other key in the
+    /// The action strip shows: a selection is finished. A drag that ends, a double click, `enter` in
+    /// block mode, and the `v` or `V` that ends a selection open it. Each other key in the
     /// document, a press of the mouse, and another document close it.
     pub(crate) bar_open: bool,
     pub(crate) editor: Option<Editor>,

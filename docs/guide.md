@@ -98,7 +98,7 @@ open in the session, the action focuses it.
 The header shows the agent and its state, for example `claude (idle)` or `opencode (waiting for permission)`. Annorex
 reads the state again every 2 seconds.
 
-Annorex has two modes in the document. Block mode is the default. Text mode is for notes on a part of a block.
+Annorex has two modes in the document. Block mode is the default. Text mode is for notes on a part of a block. To enter text mode, press `v`, `V`, or a move key such as `h` or `l`, or drag the mouse over text.
 
 ### Block mode
 
@@ -121,7 +121,7 @@ above it.
 | `o`                     | Note on the block: looks good (no text, no editor)               |
 | `c` / `d` / `s`         | Note on the block: comment, remove, or replace (opens the editor) |
 | `e` / `x`               | Edit or delete the note of the block                             |
-| `enter`                 | Enter text mode at the start of the block and show the action bar |
+| `enter`                 | Show the action bar for the whole block. Block mode stays. Without a focus, focus the first block on the screen first |
 | `v`                     | Enter text mode and start a selection at the start of the block  |
 | `V`                     | Enter text mode with the lines of the block selected             |
 | `h` `l` `w` `b` `0` `$` | Enter text mode at the start of the block, then do the move      |
@@ -156,7 +156,7 @@ The action bar shows after you finish a selection:
 - after `enter` on the focused block,
 - after the `v` or `V` that ends a selection.
 
-It shows on the row above the selection. When there is no row above, it shows on the row below. It starts at the first
+After `enter`, the selection is the whole focused block. It shows on the row above the selection. When there is no row above, it shows on the row below. It starts at the first
 column of the selection. Near the right edge, it moves left to stay in the document. It has four items:
 `o ✓ looks good`, `c 💬 comment`, `d ✕ remove`, and `s ⇄ replace`. Each item has the icon and the color of its note
 card. A click on an item does the same as its key.
