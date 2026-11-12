@@ -821,6 +821,34 @@ fn a_note_with_other_text_on_the_same_range_is_added() {
 }
 
 #[test]
+fn an_edit_into_a_copy_of_another_note_is_refused() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllcWhich page?\n");
+    press(&mut app, "hhhhvllllcWhich book?\n");
+    press(&mut app, "hhhh");
+    press(&mut app, "L");
+    assert_eq!(app.editor().expect("editor").text, "Which page?");
+    for _ in 0.."Which page?".len() {
+        press_key(&mut app, KeyCode::Backspace, KeyModifiers::NONE);
+    }
+    press(&mut app, "Which book?\n");
+    let notes: Vec<&str> =
+        app.review().expect("review").annotations.iter().map(|a| a.note.as_str()).collect();
+    assert_eq!(notes, ["Which page?", "Which book?"], "the edited note keeps its old text");
+    assert!(app.editor().is_none());
+    assert!(render(&mut app, 60, 12).contains("Already saved."));
+}
+
+#[test]
+fn an_edit_that_keeps_its_own_text_is_saved() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllcWhich page?\n");
+    press(&mut app, "hhhhL\n");
+    assert_eq!(app.review().expect("review").annotations.len(), 1);
+    assert!(!render(&mut app, 60, 12).contains("Already saved."));
+}
+
+#[test]
 fn a_sent_note_can_be_added_again() {
     let mut app = app("alpha beta gamma\n");
     press(&mut app, "vllllcWhich page?\n");
