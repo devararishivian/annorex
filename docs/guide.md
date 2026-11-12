@@ -23,7 +23,7 @@ the [README](../README.md). For the design, read [ARCHITECTURE.md](ARCHITECTURE.
   agent. Annorex shows the newest reply of the agent as formatted Markdown. You can select one of the 25 newest replies.
   The layout follows the size of the window. A second Rex action starts the same viewer on the files of the work
   directory of the agent. A tree and a fuzzy find help you to open files. You can open many files and annotate each one.
-- **Annotations.** Select text in a reply or in a file. Add a comment, mark the text for removal, or give a replacement.
+- **Notes.** Select text in a reply or in a file. Add a comment, mark the text for removal, or give a replacement.
 - **Send, paste, and copy.** Annorex exports your notes as Markdown. It sends them to the agent, pastes them without
   Enter, or copies them. A send gives only the notes that Annorex did not send before. The notes of all replies and
   open files go in one message.
@@ -144,7 +144,7 @@ Text mode has a free cursor and a character selection.
 
 | Key                     | Function                                                         |
 |-------------------------|------------------------------------------------------------------|
-| `L`                     | Edit the label of the note at the cursor                         |
+| `L`                     | Edit the note at the cursor, or add a comment                   |
 | `a`                     | Move the focus to the list of notes                              |
 | `S`                     | Send the notes to the agent                                      |
 | `M`                     | Write a general note, then send                                  |
@@ -183,9 +183,9 @@ The layout changes with the size of the window:
 The list of replies (`p`), the file finder (`ctrl+p`), and the session picker open in a box in the center, at all widths.
 
 The header shows the view, the agent and its state, and the position. On the right, it has the send button
-`[ Send N → agent ▸ ]`. With no notes, the button is dim: `[ Send ▸ ]`. While the agent works, the button adds
+`[ Send N → agent ▸ ]`. With no notes, the button is dim: `[ Send ▸ ]`. It is dim while the agent shows a dialog too. While the agent works, the button adds
 `queued` for Claude Code or `steers` for Pi and OpenCode. After a send, it shows `[ Sent HH:MM ]`. The footer shows the
-keys of the current mode. Hints that do not fit are left out from the end. `? help` stays while it fits.
+keys of the current mode. Annorex leaves out the hints that do not fit, from the end. `? help` stays while it fits.
 
 The note colors are the 16 ANSI colors. Looks good has a green background. A comment is underlined in yellow. Remove is
 red and crossed out. Replace is magenta and crossed out.
@@ -211,7 +211,7 @@ Each mouse action has a key. The help screen does not list the mouse actions.
 | Help screen                | Click or wheel | Close the help screen                                                 |
 
 A question in the footer (`y/n`) and the find input take no mouse event. There is no right click and no hover action.
-If a drag does not select text for the Rex copy, use `v` to select and `Y` to copy the notes.
+Annorex has no key that copies the selected text. `Y` copies the notes with their quoted text.
 
 Pi and OpenCode can have more than one session in the same directory. If Annorex cannot find the session of the agent
 with certainty, the list shows the sessions, newest first. Select one with `enter`. If Annorex finds no replies (for
@@ -232,7 +232,7 @@ Press any key to close it. The config action name is `help`. The footer shows `?
    notes. After a send, it shows `[ Sent HH:MM ]`.
 
 The export is Markdown. It starts with `# Annotations on last reply`. For an older reply, the name is
-`earlier reply (HH:MM)` in your local time. Each annotation has a number, the line numbers, the quoted source text, and
+`earlier reply (HH:MM)` in your local time. Each note has a number, the line numbers, the quoted source text, and
 your note as a quote. The text before the quote names the type: `Comment on:`, `Remove this:`, or `Looks good:`.
 
 Annorex does not add a second identical note. The note must match in kind, range, label, and text. The footer says
@@ -265,7 +265,7 @@ The viewer starts with the file tree. Open a file with `enter`. Annorex shows a 
 Markdown, without line numbers. It shows all other files as plain text with line numbers. It shows the text of a file with control characters
 removed.
 
-You can open up to 50 files. Each file has its own annotations and its own draft. The keys for replies work in a file
+You can open up to 50 files. Each file has its own notes and its own draft. The keys for replies work in a file
 too. These keys are for files:
 
 | Key        | Function                                                                         |
@@ -298,7 +298,7 @@ that the agent wrote and deleted, or that is outside the work directory. Your ow
 holds only what the agent changes next (raise `changes_turns` to look back further). Annorex follows the newest session of
 the agent in the work directory. With two Pi or OpenCode panes in one directory, the list can belong to the other pane.
 
-One send gives the general notes and the annotations of all documents in one message. It has one section for each
+One send gives the general notes and the notes of all documents in one message. It has one section for each
 document: `# Annotations on last reply` (or `earlier reply (HH:MM)`) for a reply, and `# Annotations on PATH` for a
 file. The replies come first. The files follow in the order in which you opened them. If you press `q` with unsent
 notes, the question counts the documents.

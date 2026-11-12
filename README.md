@@ -132,7 +132,7 @@ Each mouse action has a key. The help screen does not list the mouse actions.
 | Card                     | Click        | Focus the note and its block. The card shows `edit` and `remove`         |
 | Header `Send` button     | Click        | The same as `S`                                                          |
 | Tree row                 | Click        | Open the file, or open or close the directory                            |
-| Row of a list or picker  | Click        | Open that reply or session                                               |
+| Row of a list or picker  | Click        | Open that reply, session, or file                                            |
 | Footer hint              | Click        | Do that action                                                           |
 | Editor                   | Click `save` or `cancel` | Save or cancel. A click outside the editor does nothing      |
 | Help screen              | Click        | Close the help screen                                                    |
@@ -160,8 +160,8 @@ read the theme.
 - **The pane zoom ends when Annorex opens.** This is Rex behavior. Rex does not restore the zoom when you close the
   viewer.
 - **A sideways swipe hides the Rex sidebar.** Turn off the Rex setting "Use a gesture to toggle the sidebar".
-- **Drag does not select text for Rex copy.** Annorex uses the mouse, so a drag selects text in Annorex. To copy text,
-  select it with `v` and copy the notes with `Y`.
+- **Drag does not select text for Rex copy.** Annorex uses the mouse, so a drag selects text in Annorex. Annorex has no
+  key that copies the selected text. `Y` copies the notes. Each note contains its quoted text.
 - **"pane too small".** Make the window larger than 40 columns and 10 rows.
 
 ## How Annorex differs from plannotator-tui
