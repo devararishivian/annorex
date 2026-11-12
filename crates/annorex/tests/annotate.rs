@@ -1116,8 +1116,7 @@ fn cards_show_at_120_columns_and_markers_below() {
     assert_eq!(markers.len(), 1, "{narrow}");
     let (x, y, style) = markers[0];
     assert_eq!((y, style.fg), (row, Some(Color::Yellow)), "a yellow marker at the row of the note");
-    // The document is 100 columns wide at most, so the margin ends there.
-    assert!((90..100).contains(&x), "the marker is in the right margin of the capped document: {x}");
+    assert!(x > 100, "the marker is in the right margin: {x}");
 }
 
 #[test]
@@ -1219,4 +1218,15 @@ fn snapshot_wide_200x40() {
     let mut app = app(bar_text());
     press(&mut app, "jcWhich page? The old one or the new one.\n");
     insta::assert_snapshot!(render(&mut app, 200, 40));
+}
+
+#[test]
+fn the_open_list_keeps_the_text_width_at_119_columns() {
+    let mut app = app(bar_text());
+    press(&mut app, "a");
+    let screen = render(&mut app, 119, 40);
+    // No rail and no cards: the list takes 34 columns at the right edge, the document keeps 85.
+    let line = screen.lines().nth(2).expect("row");
+    let border = line.chars().take_while(|&c| c != '│').count();
+    assert_eq!(border, 85, "{screen}");
 }

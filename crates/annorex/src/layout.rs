@@ -16,8 +16,9 @@ pub const RAIL_FROM_WIDTH: u16 = 120;
 pub const TREE_WIDTH: u16 = 28;
 /// The width of the card rail on the right.
 pub const RAIL_WIDTH: u16 = 34;
-/// The largest width of the document area, with its margin and gutter. A wider space stays empty on
-/// the right, so the card rail sits beside the text.
+/// The largest width of the document area, with its margin and gutter, where the card rail shows. A
+/// wider space stays empty on the right, so the rail sits beside the text. Without a rail, the
+/// document takes all the width.
 pub const DOC_MAX_WIDTH: u16 = 100;
 
 /// The areas of the viewer.
@@ -69,7 +70,7 @@ pub fn compute(area: Rect, has_tree: bool, tree_open: bool) -> Layout {
     let has_rail = area.width >= RAIL_FROM_WIDTH;
     let left = tree.map_or(body.x, Rect::right);
     let room = body.right() - left - if has_rail { RAIL_WIDTH } else { 0 };
-    let doc = Rect::new(left, body.y, room.min(DOC_MAX_WIDTH), body.height);
+    let doc = Rect::new(left, body.y, if has_rail { room.min(DOC_MAX_WIDTH) } else { room }, body.height);
     let rail = has_rail.then(|| Rect::new(doc.right(), body.y, RAIL_WIDTH, body.height));
     Layout::Wide { header, tree, doc, rail, footer }
 }
@@ -122,11 +123,11 @@ mod tests {
     }
 
     #[test]
-    fn the_cap_applies_without_a_rail() {
+    fn there_is_no_cap_without_a_rail() {
         match compute(area(119, 40), false, true) {
             Layout::Wide { doc, rail, .. } => {
                 assert_eq!(rail, None);
-                assert_eq!(doc, Rect::new(0, 1, DOC_MAX_WIDTH, 38));
+                assert_eq!(doc, Rect::new(0, 1, 119, 38));
             }
             other => panic!("expected Wide, got {other:?}"),
         }
