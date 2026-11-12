@@ -49,20 +49,25 @@ require("annorex").setup{ bin = "/path/to/annorex" }
 1. Focus the pane of Claude Code, Pi, or OpenCode.
 2. Press `cmd+shift+a` to review the last reply. Press `cmd+shift+f` to review the files.
 3. At the start, no block has the focus. Press `j` or `k` to choose a block, or click one. A block is a paragraph, a
-   list item, a heading, a code block, or a table. The action bar shows below the block.
+   list item, a heading, a code block, or a table. Press `enter` to show the action bar above the block.
 4. Press `o` to mark the block as good, `c` to comment, `d` to mark it for removal, or `s` to replace it. `o` needs no
    text. The other keys open an editor. Type the note. Press `enter`.
-5. To annotate a part of a block, press `v` and move to select text. This is text mode. Press `esc` twice to go back
-   to block mode.
+5. To annotate a part of a block, press `v` and move to select text. This is text mode. Press `v` again to end the
+   selection and show the action bar. Press `esc` twice to go back to block mode.
 6. Press `S` to send all notes to the agent.
 
 In the viewer, press `?` to see all keys.
 
 ## The action bar and notes
 
-The block with the focus has a bar in the left margin. Below it, the action bar shows four buttons:
-`o looks good`, `c comment`, `d remove`, and `s replace`. Each button is a gray chip. Its key is bold and has the color
-of the note. A click on a button does the same as its key.
+The block with the focus has a bar in the left margin. The action bar shows after you finish a selection: when a drag
+ends, after a double click, after `enter` on the focused block, and after the `v` or `V` that ends a selection. It shows
+on the row above the selection. When there is no row above, it shows on the row below. It moves left to stay in the
+document. It has four items: `o ✓ looks good`, `c 💬 comment`, `d ✕ remove`, and `s ⇄ replace`. Each item has the
+icon and the color of its note card. A click on an item does the same as its key.
+
+The keys `o`, `c`, `d`, and `s` also work without the action bar. They act on the focused block or on the selection. A
+focus move with `j` or `k` does not show the action bar. Any other key and a click close it.
 
 The export of `o looks good` has the text `Looks good:` and the quote. The note needs no text. Press `e` later to add
 text.
@@ -130,9 +135,9 @@ Each mouse action has a key. The help screen does not list the mouse actions.
 |--------------------------|--------------|--------------------------------------------------------------------------|
 | List, document, tree, rail | Wheel      | Scroll the part under the pointer by 3 lines                             |
 | Block                    | Click        | Focus the block                                                          |
-| Document text            | Drag         | Select characters (text mode)                                            |
-| Document text            | Double click | Select the word                                                          |
-| Action bar button        | Click        | Add that note. Looks good saves at once. The others open the editor      |
+| Document text            | Drag         | Select characters (text mode). The action bar shows at the release       |
+| Document text            | Double click | Select the word and show the action bar                                  |
+| Action bar item          | Click        | Add that note. Looks good saves at once. The others open the editor      |
 | Card                     | Click        | Focus the note and its block. The card shows `edit` and `remove`         |
 | Header `Send` button     | Click        | The same as `S`                                                          |
 | Tree row                 | Click        | Open the file, or open or close the directory                            |

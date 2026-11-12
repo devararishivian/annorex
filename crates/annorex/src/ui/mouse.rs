@@ -75,7 +75,10 @@ impl App {
                 Effect::None
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                self.drag = None;
+                // A drag that selected text is finished: the action strip opens.
+                if self.drag.take().is_some() && self.selection.is_some() {
+                    self.bar_open = true;
+                }
                 Effect::None
             }
             MouseEventKind::ScrollDown => {
@@ -104,6 +107,11 @@ impl App {
             .is_some_and(|(time, x, y)| (x, y) == (column, row) && time.elapsed() <= DOUBLE_CLICK);
         self.drag = None;
         self.status = None;
+        // A press closes the action strip, except on the strip itself. A press on an item acts on
+        // the selection first.
+        if !matches!(hit, Some(Hit::Bar | Hit::Action(_))) {
+            self.bar_open = false;
+        }
         if self.editor.is_some() {
             return match hit {
                 Some(Hit::EditorSave) => self.editor_done(super::editor::EditorResult::Save),
@@ -165,6 +173,7 @@ impl App {
                 self.last_click = Some((Instant::now(), column, row));
             }
             Hit::Action(kind) if self.focus == Focus::Doc => {
+                self.bar_open = false;
                 return if kind == Kind::LooksGood { self.add_looks_good() } else { self.begin_new(kind) };
             }
             Hit::Card(id) => self.focus_note(id),
@@ -323,6 +332,7 @@ impl App {
         self.mode = Mode::Text;
         self.selection = Some(Selection::Chars { anchor: first });
         self.cursor = last;
+        self.bar_open = true;
         true
     }
 
@@ -351,6 +361,7 @@ impl App {
         self.last_click = None;
         self.focus = Focus::Doc;
         self.scroll.doc = false;
+        self.bar_open = false;
         self.mode = Mode::Text;
         self.selection = Some(Selection::Chars { anchor });
         self.cursor = offset;

@@ -696,36 +696,146 @@ fn the_footer_without_a_focus_names_the_choice() {
     assert!(footer.contains("block 1/6") && !footer.contains("choose a block"), "{footer}");
 }
 
+/// The action strip with the default keys.
+const STRIP: &str =
+    "\u{2590} o \u{2713} looks good  c \u{1f4ac} comment  d \u{2715} remove  s \u{21c4} replace \u{258c}";
+
+/// The row and the screen column of the action strip, or `None` when no strip shows.
+fn strip_at(screen: &str) -> Option<(usize, usize)> {
+    screen.lines().enumerate().find_map(|(row, line)| {
+        let index = line.find('\u{2590}').filter(|&index| line[index..].starts_with(STRIP))?;
+        Some((row, line[..index].width()))
+    })
+}
+
+/// The screen column of the first character of `needle` on its row.
+fn column_of(screen: &str, needle: &str) -> usize {
+    let line =
+        screen.lines().find(|line| line.contains(needle)).unwrap_or_else(|| panic!("{needle}\n{screen}"));
+    line[..line.find(needle).expect("needle")].width()
+}
+
 #[test]
-fn the_action_bar_buttons_are_chips() {
-    let mut app = open_raw(DOC);
+fn j_focus_shows_no_strip() {
+    let mut app = open(DOC);
     press(&mut app, "j");
-    let buffer = cells(&mut app, 100, 30);
-    let row = (0..30u16)
-        .find(|&y| {
-            (0..100u16)
-                .map(|x| buffer.cell((x, y)).map_or(" ", |c| c.symbol()))
-                .collect::<String>()
-                .contains("looks good")
-        })
-        .expect("the bar row");
-    let text: Vec<&str> = (0..100u16).map(|x| buffer.cell((x, row)).map_or(" ", |c| c.symbol())).collect();
-    let joined = text.concat();
-    let o = joined.find(" o looks good ").expect("first chip") + 1;
-    let style = |x: usize| buffer.cell((u16::try_from(x).expect("column"), row)).expect("cell").style();
-    // The padding, the key, and the word of the first chip.
-    for x in (o - 1)..(o + "o looks good ".len()) {
-        assert_eq!(style(x).bg, Some(Color::DarkGray), "chip cell {x}");
+    assert_eq!(app.mode(), Mode::Block(1));
+    let screen = render(&mut app, 120, 30);
+    assert_eq!(strip_at(&screen), None, "{screen}");
+    assert!(!screen.contains("looks good"), "{screen}");
+    // The note keys still act on the focus without the strip.
+    press(&mut app, "c");
+    assert_eq!(editor_range(&app), app.doc().blocks[1].range);
+}
+
+#[test]
+fn enter_on_block_shows_strip() {
+    let mut app = open(DOC);
+    press(&mut app, "j\n");
+    let screen = render(&mut app, 120, 30);
+    let first = rows_with(&mut app, "First paragraph", 120, 30)[0];
+    let (row, column) = strip_at(&screen).unwrap_or_else(|| panic!("no strip:\n{screen}"));
+    assert_eq!(row, usize::from(first) - 1, "the row above the block:\n{screen}");
+    assert_eq!(column, column_of(&screen, "First paragraph"), "the first column of the block:\n{screen}");
+    // A move closes the strip.
+    press(&mut app, "l");
+    assert_eq!(strip_at(&render(&mut app, 120, 30)), None);
+}
+
+#[test]
+fn strip_goes_below_at_top() {
+    let mut app = open(DOC);
+    // Block 0 is on the first document row: no row above it.
+    press(&mut app, "\n");
+    let screen = render(&mut app, 120, 30);
+    let title = rows_with(&mut app, "Title", 120, 30)[0];
+    let (row, column) = strip_at(&screen).unwrap_or_else(|| panic!("no strip:\n{screen}"));
+    assert_eq!(row, usize::from(title) + 1, "the row below the block:\n{screen}");
+    assert_eq!(column, column_of(&screen, "Title"));
+}
+
+#[test]
+fn v_end_shows_strip() {
+    let mut app = open(DOC);
+    press(&mut app, "jvlll");
+    assert_eq!(app.mode(), Mode::Text);
+    let screen = render(&mut app, 120, 30);
+    assert_eq!(strip_at(&screen), None, "no strip while the selection grows:\n{screen}");
+    press(&mut app, "v");
+    let screen = render(&mut app, 120, 30);
+    let first = rows_with(&mut app, "First paragraph", 120, 30)[0];
+    let (row, _) = strip_at(&screen).unwrap_or_else(|| panic!("no strip:\n{screen}"));
+    assert_eq!(row, usize::from(first) - 1, "{screen}");
+    // The second `v` keeps the selection: a note covers it.
+    let start = app.doc().blocks[1].range.start;
+    press(&mut app, "c");
+    assert_eq!(editor_range(&app), start..start + 4);
+}
+
+#[test]
+fn esc_closes_the_strip() {
+    let mut app = open(DOC);
+    press(&mut app, "j\n");
+    assert!(strip_at(&render(&mut app, 120, 30)).is_some());
+    press(&mut app, "\u{1b}");
+    assert_eq!(strip_at(&render(&mut app, 120, 30)), None);
+}
+
+#[test]
+fn the_strip_items_use_the_card_icons_and_colors() {
+    let mut app = open(DOC);
+    press(&mut app, "j\n");
+    let buffer = cells(&mut app, 120, 30);
+    let screen = render(&mut app, 120, 30);
+    let (row, column) = strip_at(&screen).unwrap_or_else(|| panic!("no strip:\n{screen}"));
+    let y = u16::try_from(row).expect("row");
+    let x = u16::try_from(column).expect("column");
+    let style = |x: u16| buffer.cell((x, y)).expect("cell").style();
+    let strip = Color::Indexed(238);
+    // The caps: the strip color on the default background.
+    assert_eq!((style(x).fg, style(x).bg), (Some(strip), Some(Color::Reset)), "left cap");
+    let width = u16::try_from(STRIP.width()).expect("width");
+    let right = x + width - 1;
+    assert_eq!((style(right).fg, style(right).bg), (Some(strip), Some(Color::Reset)), "right cap");
+    // Each item: the key, the icon, and the word, bold, in the note color, on the strip color.
+    for (word, color) in [
+        ("o \u{2713} looks good", Color::Green),
+        ("c \u{1f4ac} comment", Color::Yellow),
+        ("d \u{2715} remove", Color::Red),
+        ("s \u{21c4} replace", Color::Magenta),
+    ] {
+        let line = screen.lines().nth(row).expect("row");
+        let at = u16::try_from(line[..line.find(word).expect("item")].width()).expect("column");
+        // The first cell of each character. The cell after a wide character is reset: the terminal
+        // draws the character over it with the style of the first cell.
+        let starts = word.chars().scan(at, |x, c| {
+            let start = *x;
+            *x += u16::try_from(c.to_string().width()).expect("width");
+            Some(start)
+        });
+        for cell in starts {
+            let style = style(cell);
+            assert_eq!(style.bg, Some(strip), "{word} cell {cell}");
+            assert_eq!(style.fg, Some(color), "{word} cell {cell}");
+            assert!(style.add_modifier.contains(Modifier::BOLD), "{word} cell {cell}");
+        }
     }
-    assert!(style(o).add_modifier.contains(Modifier::BOLD) && style(o).fg == Some(Color::Green));
-    assert_ne!(style(o + 2).fg, Some(Color::Green), "the word has the default color");
-    assert!(!style(o + 2).add_modifier.contains(Modifier::BOLD));
-    // The gap between two chips and the rest of the row have no background.
-    let gap = o + "o looks good ".len();
-    assert_ne!(style(gap).bg, Some(Color::DarkGray), "the gap has no background");
-    let second = joined.find(" c comment ").expect("second chip") + 1;
-    assert_eq!(style(second).fg, Some(Color::Yellow));
-    assert_eq!(style(second - 1).bg, Some(Color::DarkGray));
-    assert_ne!(style(second - 2).bg, Some(Color::DarkGray));
-    assert_ne!(style(99).bg, Some(Color::DarkGray), "the end of the row");
+    // The space between two items and the space inside the caps have the strip color.
+    assert_eq!(style(x + 1).bg, Some(strip));
+    assert_eq!(style(right - 1).bg, Some(strip));
+    // The rest of the row keeps its own cells.
+    assert_ne!(style(right + 1).bg, Some(strip));
+}
+
+#[test]
+fn the_strip_leaves_out_the_items_that_do_not_fit() {
+    let mut app = open(DOC);
+    press(&mut app, "j\n");
+    let screen = render(&mut app, 50, 20);
+    let row = screen
+        .lines()
+        .find(|line| line.contains('\u{2590}'))
+        .unwrap_or_else(|| panic!("no strip:\n{screen}"));
+    assert!(row.contains("d \u{2715} remove \u{258c}"), "the last item that fits ends the strip: {row:?}");
+    assert!(!row.contains("replace"), "{row:?}");
 }

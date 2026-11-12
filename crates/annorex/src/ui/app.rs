@@ -249,6 +249,10 @@ pub struct App {
     /// The time of the last send of each reply that has one. A change removes the entry.
     pub(crate) sent: HashMap<String, String>,
     pub(crate) selection: Option<Selection>,
+    /// The action strip shows: a selection is finished. A drag that ends, a double click, `enter` on
+    /// a focused block, and the `v` or `V` that ends a selection open it. Each other key in the
+    /// document, a press of the mouse, and another document close it.
+    pub(crate) bar_open: bool,
     pub(crate) editor: Option<Editor>,
     /// The annotation that the editor changes. `None` for a new annotation.
     pub(crate) editing_id: Option<u64>,
@@ -339,6 +343,7 @@ impl App {
             reviews: HashMap::new(),
             sent: HashMap::new(),
             selection: None,
+            bar_open: false,
             editor: None,
             editing_id: None,
             parked: HashMap::new(),
@@ -996,6 +1001,7 @@ impl App {
             }
             self.editing_id = None;
             self.selection = None;
+            self.bar_open = false;
             self.mode = Mode::Browse;
             self.cursor = self.block_start(0).unwrap_or(self.cursor);
             self.confirm = None;
@@ -1222,6 +1228,12 @@ impl App {
 
     #[allow(clippy::too_many_lines, reason = "one match over the actions of the document")]
     fn doc_key(&mut self, key: KeyEvent) -> Effect {
+        // Each key closes the action strip: a move, `esc`, a note key, and a key that opens a part.
+        // The keys that end a selection open it again. The help screen only covers it.
+        let strip_was_open = std::mem::take(&mut self.bar_open);
+        if self.action_of(key) == Some(Action::Help) {
+            self.bar_open = strip_was_open;
+        }
         if self.in_block_mode() && self.block_key(key) {
             return Effect::None;
         }
@@ -1262,8 +1274,8 @@ impl App {
                 Some(Action::CloseFile) if self.shown_file().is_some() => self.begin_close(),
                 Some(Action::Tree) if self.root.is_some() => self.toggle_tree(),
                 Some(Action::FindFile) if self.root.is_some() => self.toggle_box(BoxView::Finder),
-                Some(Action::Select) => self.toggle_selection(false),
-                Some(Action::SelectLines) => self.toggle_selection(true),
+                Some(Action::Select) => self.toggle_selection(false, strip_was_open),
+                Some(Action::SelectLines) => self.toggle_selection(true, strip_was_open),
                 Some(Action::Comment) => return self.begin_new(Kind::Comment),
                 Some(Action::LooksGood) => return self.add_looks_good(),
                 Some(Action::Delete) => return self.begin_new(Kind::Delete),
@@ -1878,10 +1890,20 @@ impl App {
         self.exit
     }
 
-    /// `v` and `V`: start a selection, or end it when the same kind is on.
-    fn toggle_selection(&mut self, lines: bool) {
+    /// `v` and `V`: start a selection. When the same kind is on, the key ends it and opens the action
+    /// strip. When the strip was open already, the key removes the selection.
+    fn toggle_selection(&mut self, lines: bool, strip_was_open: bool) {
         let anchor = self.cursor;
         self.selection = match (self.selection, lines) {
+            // The key of the selection ends it: the selection stays, and the action strip opens. A
+            // press with the strip already open removes the selection.
+            (Some(selection @ Selection::Chars { .. }), false)
+            | (Some(selection @ Selection::Lines { .. }), true)
+                if !strip_was_open =>
+            {
+                self.bar_open = true;
+                Some(selection)
+            }
             (Some(Selection::Chars { .. }), false) | (Some(Selection::Lines { .. }), true) => None,
             (_, false) => Some(Selection::Chars { anchor }),
             (_, true) => Some(Selection::Lines { anchor }),

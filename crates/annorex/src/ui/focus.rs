@@ -338,7 +338,9 @@ impl App {
             KeyCode::Home => Move::First,
             KeyCode::End => Move::Last,
             KeyCode::Enter => {
-                self.enter_text();
+                // `enter` on a focused block opens the action strip at the start of the block.
+                let focused = matches!(self.mode, Mode::Block(_));
+                self.bar_open = self.enter_text() && focused;
                 return true;
             }
             KeyCode::Esc => {

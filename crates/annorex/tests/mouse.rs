@@ -145,6 +145,8 @@ fn click_on_a_block_focuses_it() {
 #[test]
 fn click_on_an_action_button_does_it() {
     let mut app = viewer(THREE);
+    // `enter` on the focused block opens the action strip.
+    press(&mut app, "\n");
     let screen = frame(&mut app, NARROW);
     assert_eq!(click(&mut app, find(&screen, "looks good")), Effect::SaveDraft);
     let review = app.review().expect("review");
@@ -152,12 +154,16 @@ fn click_on_an_action_button_does_it() {
     assert_eq!(review.annotations[0].kind, Kind::LooksGood);
     assert!(app.editor().is_none(), "looks good saves at once");
     let screen = frame(&mut app, NARROW);
+    assert!(!rows(&screen).iter().any(|row| row.contains("looks good")), "a saved note closes the strip");
+    let mut app = viewer(THREE);
+    press(&mut app, "\n");
+    let screen = frame(&mut app, NARROW);
     click(&mut app, find(&screen, "comment"));
     assert_eq!(app.editor().expect("editor").kind, Kind::Comment);
 }
 
 #[test]
-fn drag_selects_text_and_shows_the_bar() {
+fn drag_end_shows_strip() {
     let mut app = viewer("alpha beta gamma\n");
     let screen = frame(&mut app, NARROW);
     let (x, y) = find(&screen, "beta");
@@ -167,9 +173,38 @@ fn drag_selects_text_and_shows_the_bar() {
     app.handle_mouse(event(MouseEventKind::Up(MouseButton::Left), (x + 3, y)));
     assert_eq!(app.mode(), Mode::Text);
     let screen = frame(&mut app, NARROW);
-    assert!(rows(&screen).iter().any(|row| row.contains("looks good")), "the bar shows after the release");
+    let (strip_x, strip_y) = find(&screen, "\u{2590} o ");
+    assert_eq!((strip_x, strip_y), (x, y + 1), "below the selection at its first column: no row is above it");
     press(&mut app, "c");
     assert_eq!(app.editor().expect("editor").range, 6..10, "the drag selected `beta`");
+}
+
+#[test]
+fn drag_in_progress_shows_no_strip() {
+    let mut app = viewer("alpha beta gamma\n");
+    let screen = frame(&mut app, NARROW);
+    let (x, y) = find(&screen, "beta");
+    app.handle_mouse(event(MouseEventKind::Down(MouseButton::Left), (x, y)));
+    app.handle_mouse(event(MouseEventKind::Drag(MouseButton::Left), (x + 3, y)));
+    let screen = frame(&mut app, NARROW);
+    assert!(!rows(&screen).iter().any(|row| row.contains("looks good")), "no strip before the release");
+    // A click without a move is no selection: no strip after the release either.
+    let mut app = viewer("alpha beta gamma\n");
+    let screen = frame(&mut app, NARROW);
+    click(&mut app, find(&screen, "beta"));
+    let screen = frame(&mut app, NARROW);
+    assert!(!rows(&screen).iter().any(|row| row.contains("looks good")), "a click shows no strip");
+}
+
+#[test]
+fn double_click_shows_strip() {
+    let mut app = viewer("alpha beta gamma\n");
+    let screen = frame(&mut app, NARROW);
+    let (x, y) = find(&screen, "gamma");
+    click(&mut app, (x + 1, y));
+    click(&mut app, (x + 1, y));
+    let screen = frame(&mut app, NARROW);
+    assert_eq!(find(&screen, "\u{2590} o "), (x, y + 1), "{}", rows(&screen).join("\n"));
 }
 
 #[test]

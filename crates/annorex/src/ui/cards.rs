@@ -77,7 +77,7 @@ pub(super) fn rank(kind: Kind) -> u8 {
     }
 }
 
-fn icon(kind: Kind) -> &'static str {
+pub(super) fn icon(kind: Kind) -> &'static str {
     match kind {
         Kind::LooksGood => "✓",
         Kind::Comment => "💬",

@@ -109,7 +109,8 @@ After a reload, the same document keeps its focus, or keeps no focus.
 
 With a focus, one block has it. A block is a heading, a paragraph, a list item (a nested item is its own block), a whole code
 block, a whole table, a whole quote, or a rule. In a plain text or code file, a block is a group of lines between blank
-lines. The focused block has a bar in the left margin. The action bar shows below it.
+lines. The focused block has a bar in the left margin. The note keys act on it. Press `enter` to show the action bar
+above it.
 
 | Key                     | Function                                                         |
 |-------------------------|------------------------------------------------------------------|
@@ -120,7 +121,7 @@ lines. The focused block has a bar in the left margin. The action bar shows belo
 | `o`                     | Note on the block: looks good (no text, no editor)               |
 | `c` / `d` / `s`         | Note on the block: comment, remove, or replace (opens the editor) |
 | `e` / `x`               | Edit or delete the note of the block                             |
-| `enter`                 | Enter text mode at the start of the block                        |
+| `enter`                 | Enter text mode at the start of the block and show the action bar |
 | `v`                     | Enter text mode and start a selection at the start of the block  |
 | `V`                     | Enter text mode with the lines of the block selected             |
 | `h` `l` `w` `b` `0` `$` | Enter text mode at the start of the block, then do the move      |
@@ -141,10 +142,27 @@ Text mode has a free cursor and a character selection.
 | `ctrl+d` / `ctrl+u`     | Move down or up half a page                                      |
 | `PageDown` / `PageUp`   | Move down or up one page                                         |
 | `g` / `G`               | Go to the start or the end                                       |
-| `v` / `V`               | Start a selection of characters or of lines                      |
+| `v` / `V`               | Start a selection of characters or of lines. Press the key again to end the selection and show the action bar. A third press clears the selection |
 | `o` / `c` / `d` / `s`   | Note on the selection, or on the line of the cursor: looks good, comment, remove, or replace |
 | `esc`                   | Clear the selection. Without a selection, go back to block mode. In block mode, remove the focus |
 | `n` / `N`               | Go to the next or the previous match (in text mode)              |
+
+### The action bar
+
+The action bar shows after you finish a selection:
+
+- when a drag of the mouse ends,
+- after a double click on a word,
+- after `enter` on the focused block,
+- after the `v` or `V` that ends a selection.
+
+It shows on the row above the selection. When there is no row above, it shows on the row below. It starts at the first
+column of the selection. Near the right edge, it moves left to stay in the document. It has four items:
+`o ✓ looks good`, `c 💬 comment`, `d ✕ remove`, and `s ⇄ replace`. Each item has the icon and the color of its note
+card. A click on an item does the same as its key.
+
+The keys `o`, `c`, `d`, and `s` also work without the action bar. A focus move with `j` or `k` does not show the action
+bar. Any other key and a click close it. A saved note and an open editor close it too. The help screen only covers it.
 
 ### Keys in both modes
 
@@ -208,9 +226,9 @@ Each mouse action has a key. The help screen does not list the mouse actions.
 |----------------------------|--------------|-------------------------------------------------------------------------|
 | List, document, tree, rail | Wheel        | Scroll the part under the pointer by 3 lines. The focus does not change |
 | Block                      | Click        | Focus the block (block mode)                                            |
-| Document text              | Drag         | Select characters (text mode). At the top or the bottom row, the document scrolls |
-| Document text              | Double click | Select the word                                                         |
-| Action bar button          | Click        | Add that note. Looks good saves at once. The others open the editor     |
+| Document text              | Drag         | Select characters (text mode). At the top or the bottom row, the document scrolls. The action bar shows at the release |
+| Document text              | Double click | Select the word and show the action bar                                 |
+| Action bar item            | Click        | Add that note. Looks good saves at once. The others open the editor     |
 | Card                       | Click        | Focus the note and its block. The card shows `edit` and `remove` buttons |
 | Header send button         | Click        | The same as `S`, with the same dialog check and messages                |
 | Tree row                   | Click        | Open the file, or open or close the directory                           |

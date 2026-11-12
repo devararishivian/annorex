@@ -1,12 +1,13 @@
 ---
 source: crates/annorex/tests/annotate.rs
+assertion_line: 1230
 expression: "render(&mut app, 200, 40)"
 ---
 Annorex · last reply · claude (idle) · reply 1/1 · unsent in reply 1                                                                                                               [ Send 1 → claude ▸ ]
  Plan
 
 ▍We change the login page. The old page stays for a week.                                            ┌ 💬 comment ───────────────────┐
-  o looks good   c comment   d remove   s replace                                                    │ Which page? The old one or    │
+                                                                                                     │ Which page? The old one or    │
  - one                                                                                               │ the new one.                  │
  - two                                                                                               └─────────── e edit ─ x remove ─┘
 

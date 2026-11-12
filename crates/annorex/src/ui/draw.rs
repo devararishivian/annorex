@@ -627,7 +627,7 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         doc_area.width.saturating_sub(margin + gutter),
         doc_area.height,
     );
-    draw_action_bar(frame, text_area, doc_area.x, app);
+    draw_action_bar(frame, text_area, app);
     if let Side::Rail(rail) = side {
         // The empty space right of a capped layout belongs to the rail pane: a click there does nothing
         // and the wheel scrolls the document.
@@ -1507,21 +1507,25 @@ mod tests {
         }
         // The second row of the block with two lines.
         assert_eq!(app.hits.at(0, row_of("two")), Some(&Hit::Block(1)));
-        // The blank row between blocks is in no block. The row below the focused block is the action bar.
+        // The blank rows between blocks are in no block. A focus alone opens no action strip.
         assert_eq!(app.hits.at(0, row_of("three") - 1), None);
-        assert_eq!(app.hits.at(0, row_of("one") - 1), Some(&Hit::Bar));
+        assert_eq!(app.hits.at(0, row_of("one") - 1), None);
     }
 
-    /// The column and the row of the first cell where `text` starts on the screen.
+    /// The column and the row of the first cell where `text` starts on the screen. A wide character
+    /// fills two cells, and the second cell has an empty symbol, so each byte maps back to its cell.
     fn find(screen: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
         let area = screen.area;
         for y in 0..area.height {
-            let row: Vec<&str> =
-                (0..area.width).map(|x| screen.cell((x, y)).map_or(" ", |c| c.symbol())).collect();
-            let line = row.concat();
-            if let Some(at) = line.find(text) {
-                let x = line.get(..at).map_or(0, |head| head.chars().count());
-                return (u16::try_from(x).expect("x"), y);
+            let mut line = String::new();
+            let mut cells = Vec::new();
+            for x in 0..area.width {
+                let symbol = screen.cell((x, y)).map_or(" ", |c| c.symbol());
+                cells.extend(std::iter::repeat_n(x, symbol.len()));
+                line.push_str(symbol);
+            }
+            if let Some(&x) = line.find(text).and_then(|at| cells.get(at)) {
+                return (x, y);
             }
         }
         panic!("no {text:?} on the screen");
@@ -1534,7 +1538,8 @@ mod tests {
         // The view starts without a focus: `j` focuses the first block, then come the `keys`.
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         for c in keys.chars() {
-            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            let code = if c == '\n' { KeyCode::Enter } else { KeyCode::Char(c) };
+            app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
         }
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
@@ -1543,18 +1548,33 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_buttons_are_in_the_hit_map() {
-        let (app, screen) = drawn("# T\n\none\n\ntwo\n", "j");
-        for (text, kind) in [
-            ("o looks good", Kind::LooksGood),
-            ("c comment", Kind::Comment),
-            ("d remove", Kind::Delete),
-            ("s replace", Kind::Replace),
+    fn the_strip_items_are_in_the_hit_map() {
+        let (app, screen) = drawn("# T\n\none\n\ntwo\n", "j\n");
+        for (key, word, kind) in [
+            ("o ", "looks good", Kind::LooksGood),
+            ("c ", "comment", Kind::Comment),
+            ("d ", "remove", Kind::Delete),
+            ("s ", "replace", Kind::Replace),
         ] {
-            let (x, y) = find(&screen, text);
-            let last = x + u16::try_from(text.len()).expect("len") - 1;
-            assert_eq!(app.hits.at(x, y), Some(&Hit::Action(kind)), "{text}");
-            assert_eq!(app.hits.at(last, y), Some(&Hit::Action(kind)), "{text}");
+            let (end, y) = find(&screen, word);
+            let last = end + u16::try_from(word.len()).expect("len") - 1;
+            assert_eq!(app.hits.at(last, y), Some(&Hit::Action(kind)), "{word}");
+            // The key starts the item: the icon is between the key and the word.
+            let (x, _) = find(&screen, &format!("{key}{}", super::super::cards::icon(kind)));
+            assert_eq!(app.hits.at(x, y), Some(&Hit::Action(kind)), "{word}");
+            assert_ne!(app.hits.at(x - 1, y), Some(&Hit::Action(kind)), "{word}");
+        }
+    }
+
+    #[test]
+    fn a_focus_alone_puts_no_action_in_the_hit_map() {
+        let (app, screen) = drawn("# T\n\none\n\ntwo\n", "j");
+        let area = screen.area;
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let hit = app.hits.at(x, y);
+                assert!(!matches!(hit, Some(Hit::Action(_) | Hit::Bar)), "{x},{y}: {hit:?}");
+            }
         }
     }
 
@@ -1580,21 +1600,22 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_goes_above_the_last_block_at_the_bottom() {
+    fn the_strip_goes_above_the_last_block_at_the_bottom() {
         let text = (0..40).map(|i| format!("p{i}")).collect::<Vec<_>>().join("\n\n");
         let (mut app, _) = drawn(&text, "");
         app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
         let screen = terminal.backend().buffer().clone();
-        let (_, bar) = find(&screen, "c comment");
+        let (_, bar) = find(&screen, "comment");
         let (_, last) = find(&screen, "p39");
-        assert_eq!(bar + 1, last, "no row below the block, so the bar is above it");
+        assert_eq!(bar + 1, last, "the strip is on the row above the block");
     }
 
     #[test]
-    fn the_bar_hides_when_another_part_has_the_focus_or_the_find_input_is_open() {
-        for keys in ["a", "/", "p", "?"] {
+    fn the_strip_hides_when_another_part_has_the_focus_or_the_find_input_is_open() {
+        for keys in ["\na", "\n/", "\np", "\n?"] {
             let (_, screen) = drawn("# T\n\none\n", keys);
             let text: String = (0..24u16)
                 .map(|y| {
@@ -1603,12 +1624,12 @@ mod tests {
                 .collect();
             assert!(!text.contains("c comment"), "after {keys:?}");
         }
-        let (_, screen) = drawn("# T\n\none\n", "");
-        assert_eq!(find(&screen, "c comment").1, 2, "the bar shows in block mode");
+        let (_, screen) = drawn("# T\n\none\n", "\n");
+        assert_eq!(find(&screen, "comment").1, 2, "the strip shows after enter on the block");
     }
 
     #[test]
-    fn the_plain_bar_row_shows_no_line_number_and_belongs_to_the_bar() {
+    fn the_strip_alone_belongs_to_the_bar() {
         let reply = Reply { id: "r".to_owned(), text: "one\ntwo\nthree\n".to_owned(), at: None };
         let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
         let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default())
@@ -1619,14 +1640,18 @@ mod tests {
             stamp: crate::files::Stamp { size: 14, modified: None },
         });
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
         let screen = terminal.backend().buffer().clone();
-        let (x, y) = find(&screen, "o looks good");
-        let row: String = (0..x).map(|column| screen.cell((column, y)).map_or(" ", |c| c.symbol())).collect();
-        assert_eq!(row.trim(), "", "no gutter number on the bar row: {row:?}");
-        assert_eq!(app.hits.at(0, y), Some(&Hit::Bar), "the margin of the bar row");
-        assert_eq!(app.hits.at(70, y), Some(&Hit::Bar), "the empty end of the bar row");
+        let (x, y) = find(&screen, "\u{2590}");
+        let (end, _) = find(&screen, "\u{258c}");
+        assert_eq!(y, find(&screen, "one").1 + 1, "below the first line");
+        assert_eq!(x, find(&screen, "one").0, "at the text column");
+        assert_eq!(app.hits.at(x, y), Some(&Hit::Bar), "the left cap");
+        assert_eq!(app.hits.at(end, y), Some(&Hit::Bar), "the right cap");
+        assert_ne!(app.hits.at(0, y), Some(&Hit::Bar), "the margin of the row");
+        assert_ne!(app.hits.at(end + 1, y), Some(&Hit::Bar), "the row after the strip");
     }
 
     /// A file viewer at 80 x 24 (one column) with a scanned tree, `a.txt` open with one note, and

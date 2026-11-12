@@ -911,49 +911,63 @@ fn row_of(screen: &str, needle: &str) -> usize {
         .unwrap_or_else(|| panic!("no {needle:?} in\n{screen}"))
 }
 
-const BAR: &str = " o looks good   c comment   d remove   s replace";
+const BAR: &str =
+    "\u{2590} o \u{2713} looks good  c \u{1f4ac} comment  d \u{2715} remove  s \u{21c4} replace \u{258c}";
 
 #[test]
-fn the_bar_shows_under_the_focused_block_with_live_keys() {
+fn the_strip_shows_above_the_block_after_enter_with_live_keys() {
     let dir = tempfile::tempdir().expect("dir");
     let file = dir.path().join("config.toml");
     std::fs::write(&file, "[keys]\nlooks_good = \"y\"\n").expect("config");
     let config = Config::load(&file).expect("config");
     let mut app = app_with("# Title\n\nfirst para\n\nsecond para\n", &config);
-    press(&mut app, "j");
+    press(&mut app, "j\n");
     let screen = render(&mut app, 120, 40);
-    let bar = row_of(&screen, " y looks good   c comment   d remove   s replace");
-    assert_eq!(bar, row_of(&screen, "first para") + 1, "{screen}");
-    assert!(!screen.contains("o looks good"), "{screen}");
+    let bar = row_of(
+        &screen,
+        "\u{2590} y \u{2713} looks good  c \u{1f4ac} comment  d \u{2715} remove  s \u{21c4} replace \u{258c}",
+    );
+    assert_eq!(bar + 1, row_of(&screen, "first para"), "{screen}");
+    assert!(!screen.contains("o \u{2713} looks good"), "{screen}");
     let line = screen.lines().nth(bar).expect("bar row");
-    assert!(line.starts_with("  y looks good"), "the bar starts at the text column: {line:?}");
+    assert!(line.starts_with(" \u{2590} y"), "the strip starts at the text column: {line:?}");
 }
 
 #[test]
-fn the_bar_shows_under_a_selection_in_text_mode() {
+fn the_strip_shows_beside_a_finished_selection_in_text_mode() {
     let mut app = app(LIST);
-    // Text mode at the first item, then select the first two lines.
+    // Text mode at the first item, then select the first two lines. The second `V` ends the selection.
     press(&mut app, "\nVj");
+    assert!(!render(&mut app, 80, 24).contains(BAR), "no strip while the selection grows");
+    press(&mut app, "V");
     let screen = render(&mut app, 80, 24);
+    // The selection starts on the first row: the strip goes below it.
     assert_eq!(row_of(&screen, BAR), row_of(&screen, "two") + 1, "{screen}");
-    assert!(!screen.contains("three"), "the bar lies over the next row: {screen}");
-    let mut chars = self::app("alpha beta gamma\n\nnext line\n");
-    press(&mut chars, "vll");
+    assert!(!screen.contains("three"), "the strip lies over the next row: {screen}");
+    let mut chars = self::app("first line\n\nalpha beta gamma\n");
+    press(&mut chars, "jwvllv");
     let screen = render(&mut chars, 80, 24);
-    assert_eq!(row_of(&screen, BAR), row_of(&screen, "alpha") + 1, "{screen}");
+    assert_eq!(row_of(&screen, BAR) + 1, row_of(&screen, "alpha"), "{screen}");
+    let line = screen.lines().find(|line| line.contains("alpha")).expect("alpha");
+    let strip = screen.lines().nth(row_of(&screen, BAR)).expect("strip");
+    assert_eq!(strip.find('\u{2590}'), line.find("beta"), "the strip starts at the selection:\n{screen}");
 }
 
 #[test]
 fn no_bar_while_the_editor_is_open() {
     let mut app = app("alpha beta\n\nsecond\n");
+    press(&mut app, "\n");
     assert!(render(&mut app, 80, 24).contains(BAR));
     press(&mut app, "c");
-    assert!(!render(&mut app, 80, 24).contains("c comment"));
+    assert!(!render(&mut app, 80, 24).contains("comment  d"), "no strip with the editor");
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-    press(&mut app, "?");
-    assert!(!render(&mut app, 80, 24).contains("c comment"), "no bar under the help screen");
+    assert!(!render(&mut app, 80, 24).contains(BAR), "the editor closed the strip");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, "\n?");
+    assert!(!render(&mut app, 80, 24).contains(BAR), "no strip under the help screen");
     let mut empty = self::app("");
-    assert!(!render(&mut empty, 80, 24).contains("c comment"), "no bar for an empty document");
+    press(&mut empty, "\n");
+    assert!(!render(&mut empty, 80, 24).contains(BAR), "no strip for an empty document");
 }
 
 /// Thirty paragraphs: more than one screen of 80x24.
@@ -1014,7 +1028,7 @@ fn bar_text() -> &'static str {
 #[test]
 fn snapshot_action_bar_120x40() {
     let mut app = app(bar_text());
-    press(&mut app, "j");
+    press(&mut app, "j\n");
     insta::assert_snapshot!(render(&mut app, 120, 40));
 }
 
