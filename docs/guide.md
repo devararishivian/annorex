@@ -58,7 +58,17 @@ rex.bind("cmd+shift+a", "annorex_last")
 rex.bind("cmd+shift+f", "annorex_files")
 ```
 
-Run `rex config reload`. If Rex cannot find `annorex` on its `PATH`, give the path of the binary:
+Run `rex config reload`.
+
+Rex runs actions with a short `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), not the `PATH` of your shell. So the module
+looks for the binary itself. It uses the first file that exists:
+
+1. The binary that ran `annorex rex install`. The command prints this path after `Rex starts:`.
+2. `$CARGO_HOME/bin/annorex`, else `~/.cargo/bin/annorex`.
+3. `/opt/homebrew/bin/annorex`, then `/usr/local/bin/annorex`.
+4. `~/.local/bin/annorex`.
+
+If the binary is in a different place, give its path:
 
 ```lua
 require("annorex").setup{ bin = "/path/to/annorex" }

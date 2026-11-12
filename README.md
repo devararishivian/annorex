@@ -28,7 +28,17 @@ rex.bind("cmd+shift+a", "annorex_last")
 rex.bind("cmd+shift+f", "annorex_files")
 ```
 
-Run `rex config reload`. If Rex cannot find `annorex` on its `PATH`, give the path of the binary:
+Run `rex config reload`.
+
+Rex runs actions with a short `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), not the `PATH` of your shell. So the module
+looks for the binary itself. It uses the first file that exists:
+
+1. The binary that ran `annorex rex install`. The command prints this path after `Rex starts:`.
+2. `$CARGO_HOME/bin/annorex`, else `~/.cargo/bin/annorex`.
+3. `/opt/homebrew/bin/annorex`, then `/usr/local/bin/annorex`.
+4. `~/.local/bin/annorex`.
+
+If the binary is in a different place, give its path:
 
 ```lua
 require("annorex").setup{ bin = "/path/to/annorex" }
@@ -79,7 +89,11 @@ read the theme.
 
 - **The key does nothing.** Check that the setup lines are in `init.lua`. A shortcut that you set in the Rex app wins
   over `init.lua`. Remove it or use another key. Then run `rex config reload`.
-- **Rex cannot find `annorex`.** Set the path with `bin =` in the `setup` call, as shown in Install.
+- **"annorex was not found; tried: ...".** The binary is not in one of the places that Install lists. Run
+  `annorex rex install` again with the binary that you use. Or set the path with `bin =` in the `setup` call.
+- **"the annorex binary ... from setup{} does not exist".** Correct the path in `bin =`, or remove `bin =`.
+- **"the rex binary was not found".** Annorex looks for `rex` in `REX_BIN_DIR`, then in the Rex process that started
+  it, then in `PATH`. Update Annorex. Then run `annorex rex install` again.
 - **"Not sent: the agent has not reported its state yet".** The agent is starting, or it shows a prompt that it does
   not report, for example the Claude Code trust prompt. Wait until the agent is ready. Then press `S` again. Annorex
   keeps your notes.

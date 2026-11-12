@@ -21,7 +21,9 @@ Annorex has two parts:
 1. **Lua module** (`annorex.lua`, built). Rex does not have a plugin system. Rex has custom actions in its Lua
    configuration file. The module registers the actions `annorex_last` and `annorex_files`. An action runs
    `annorex rex open last` or `annorex rex open files` with `--target BLOCK --session SESSION` and a
-   timeout of 25 seconds. It reports the first line of an error. The module contains no other logic.
+   timeout of 25 seconds. It reports the first line of an error. Rex runs actions with a short `PATH`, so the
+   module finds the binary itself: the `bin` option, else the path that `annorex rex install` wrote into the module,
+   else the cargo, Homebrew, and `~/.local/bin` places. The module contains no other logic.
 2. **Rust binary** (`annorex`, built). The binary does all other work. It uses only the `rex`
    command-line tool to communicate with Rex. It sends the arguments as JSON on standard input. It never opens a
    network port.
@@ -30,7 +32,7 @@ Annorex has two parts:
 
 | Component          | State   | Function                                                                                                                                                                             |
 |--------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Rex adapter        | Built   | Runs `rex block call -s SESSION -b BLOCK METHOD -` and `rex api call -s SESSION METHOD -` with the arguments on standard input. Gives typed results for the process, program status, terminal modes, and size of a pane, and for the session view. Creates, minimizes, and closes layers, and focuses blocks. |
+| Rex adapter        | Built   | Runs `rex block call -s SESSION -b BLOCK METHOD -` and `rex api call -s SESSION METHOD -` with the arguments on standard input. Gives typed results for the process, program status, terminal modes, and size of a pane, and for the session view. Creates, minimizes, and closes layers, and focuses blocks. Finds `rex` in `REX_BIN_DIR`, then as the executable of the parent process (a Rex action), then in `PATH`. |
 | Agent detection    | Built   | Identifies Claude Code, Pi, or OpenCode from the `app` of the root program status record, when the foreground process confirms it. Otherwise uses `argv0` of the foreground process. |
 | Dialog check       | Built   | Refuses a send when the root program status is "blocked" (a permission, question, or authentication dialog). Also refuses when the agent process does not own the root status record ("the agent has not reported its state yet"). A busy agent can get a message.                                         |
 | Payload            | Built   | Removes escape characters and control characters. Keeps line feeds and tabs. Puts the text in one bracketed paste.                                                                   |
