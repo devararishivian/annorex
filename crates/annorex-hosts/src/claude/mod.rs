@@ -2,6 +2,7 @@
 //! Claude Code: `~/.claude/sessions/<pid>.json` names a running session, and
 //! `~/.claude/projects/<slug>/<session>.jsonl` is its transcript.
 
+pub mod changes;
 mod entries;
 mod ladder;
 mod messages;

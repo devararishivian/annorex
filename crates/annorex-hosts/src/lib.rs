@@ -6,9 +6,12 @@
 //! `projects_dir`, a process-table snapshot, and an env lookup. Only [`roots`] reads the
 //! process environment, and only through [`roots::Roots::from_env`].
 
+pub mod changes;
 pub mod claude;
 pub mod opencode;
+pub mod opencode_changes;
 pub mod pi;
+pub mod pi_changes;
 pub mod roots;
 pub(crate) mod sqlite;
 pub(crate) mod time;
