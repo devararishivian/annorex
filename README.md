@@ -42,7 +42,7 @@ require("annorex").setup{ bin = "/path/to/annorex" }
 4. Press `c` to comment, `d` to mark the text for removal, or `s` to replace it. Type the note. Press `enter`.
 5. Press `S` to send all notes to the agent.
 
-Press `?` at any time to see all keys.
+In the viewer, press `?` to see all keys.
 
 ## Key cheatsheet
 
@@ -61,7 +61,7 @@ Press `?` at any time to see all keys.
 | `p`                 | Open or close the list of replies and open files                 |
 | `T`                 | Open or close the file tree                                      |
 | `ctrl+p`            | Find a file by name                                              |
-| `[` / `]`           | Show the previous or the next document                           |
+| `[` / `]`           | Show the previous or the next open file                          |
 | `W`                 | Close the file on the screen                                     |
 | `/`                 | Find text                                                        |
 | `r`                 | Read the transcript and the files again                          |
