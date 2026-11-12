@@ -1,6 +1,9 @@
 //! The files that the agent changed in its last turns, as paths inside the work directory.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, SystemTime};
 
 use annorex_hosts::changes::Changed;
 use annorex_hosts::roots::Roots;
@@ -66,6 +69,74 @@ fn relative_inside(root: &Path, path: &Path) -> Option<PathBuf> {
     (!out.as_os_str().is_empty()).then_some(out)
 }
 
+/// How often the thread looks at the transcript.
+pub const EVERY: Duration = Duration::from_secs(2);
+
+/// Run `look` every `every` on a thread. `look` gives `Some(list)` when it has a list to report.
+/// The thread ends when the receiver is gone or the returned token is dropped.
+pub fn spawn_poll(
+    every: Duration,
+    mut look: impl FnMut() -> Option<Vec<PathBuf>> + Send + 'static,
+) -> (Receiver<Vec<PathBuf>>, Arc<()>) {
+    let (sender, receiver) = mpsc::channel();
+    let token = Arc::new(());
+    let held = Arc::clone(&token);
+    std::thread::spawn(move || {
+        loop {
+            // The viewer holds the other reference. When it is gone, the viewer ended.
+            if Arc::strong_count(&held) == 1 {
+                return;
+            }
+            if let Some(list) = look()
+                && sender.send(list).is_err()
+            {
+                return;
+            }
+            std::thread::sleep(every);
+        }
+    });
+    (receiver, token)
+}
+
+/// The look of the thread of a files viewer. It finds the session of `source` when it can, reads
+/// the transcript only when the file changed, and reports a list only when it differs from the
+/// last one. A failure gives `None`: the next look tries again.
+pub fn looker(
+    source: Source,
+    roots: Roots,
+    root: PathBuf,
+    turns: usize,
+) -> impl FnMut() -> Option<Vec<PathBuf>> + Send + 'static {
+    let mut session: Option<SessionRef> = None;
+    let mut stamp: Option<(u64, SystemTime)> = None;
+    let mut last: Option<Vec<PathBuf>> = None;
+    move || {
+        if session.is_none() {
+            let table = replies::process_table().unwrap_or_default();
+            session = resolve(&source, &roots, &table).ok();
+        }
+        let current = session.as_ref()?;
+        if let SessionRef::Claude(path) | SessionRef::Pi(path) = current {
+            let meta = std::fs::metadata(path).ok()?;
+            let now = (meta.len(), meta.modified().ok()?);
+            if stamp == Some(now) && last.is_some() {
+                return None;
+            }
+            stamp = Some(now);
+        }
+        let Ok(raw) = read(current, turns) else {
+            session = None;
+            return None;
+        };
+        let files = normalize(&root, &raw);
+        if last.as_ref() == Some(&files) {
+            return None;
+        }
+        last = Some(files.clone());
+        Some(files)
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "tests assert by panicking")]
 mod tests {
@@ -119,6 +190,22 @@ mod tests {
         let dir = root_with(&["a.rs"]);
         assert_eq!(normalize(dir.path(), &changed(&["../a.rs", "x/../../a.rs"])), Vec::<PathBuf>::new());
         assert_eq!(normalize(dir.path(), &changed(&["x/../a.rs"])), [PathBuf::from("a.rs")]);
+    }
+
+    #[test]
+    fn the_poll_thread_sends_what_look_returns_and_stops_with_the_token() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        let (rx, token) = spawn_poll(Duration::from_millis(5), move || {
+            let n = seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (n == 1).then(|| vec![PathBuf::from("a.rs")])
+        });
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).expect("a list"), [PathBuf::from("a.rs")]);
+        drop(token);
+        std::thread::sleep(Duration::from_millis(50));
+        let after = calls.load(std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), after, "the thread ended");
     }
 
     #[test]

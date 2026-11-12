@@ -188,7 +188,7 @@ pub fn run_files(
         candidates: Vec::new(),
         store,
         enter_delay: config.enter_delay,
-        files: Some(FilesView { config: config.clone(), paths, session: None }),
+        files: Some(FilesView { config: config.clone(), paths, session: None, source: None }),
     };
     let mut app = match viewer.start_files() {
         Ok(root) => viewer.files_app(&root),
@@ -272,6 +272,8 @@ struct FilesView {
     /// The key of the drafts: the work directory of the agent. Notes on files belong to the
     /// directory, not to one session of the agent.
     session: Option<String>,
+    /// The agent process, for the thread that looks for changed files.
+    source: Option<Source>,
 }
 
 impl<R: Runner> Viewer<'_, R> {
@@ -379,6 +381,7 @@ impl<R: Runner> Viewer<'_, R> {
             .ok_or_else(|| "Rex does not report the directory of the agent process".to_owned())?;
         if let Some(files) = &mut self.files {
             files.session = Some(format!("files:{}", source.cwd.display()));
+            files.source = Some(source.clone());
         }
         Ok(source.cwd)
     }
@@ -393,6 +396,10 @@ impl<R: Runner> Viewer<'_, R> {
         let mut app = App::new_files(self.state.clone(), root.to_path_buf(), &config);
         app.start_scan();
         app.start_watch();
+        if let Some(source) = self.files.as_ref().and_then(|files| files.source.clone()) {
+            let turns = self.files.as_ref().map_or(1, |files| files.config.changes_turns);
+            app.start_changes(crate::changes::looker(source, Roots::from_env(), root.to_path_buf(), turns));
+        }
         let mut problems: Vec<String> = Vec::new();
         for input in paths {
             match files::resolve(root, &input) {

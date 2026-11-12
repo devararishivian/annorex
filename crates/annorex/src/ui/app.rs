@@ -205,6 +205,14 @@ pub struct App {
     pub(crate) changes: HashMap<String, ChangeKind>,
     known: Option<Known>,
     watch_rx: Option<std::sync::mpsc::Receiver<Change>>,
+    /// The lists of files that the agent changed, from the thread of `changes::spawn_poll`.
+    changes_rx: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
+    /// Keeps the thread of `changes_rx` alive.
+    changes_token: Option<std::sync::Arc<()>>,
+    /// True after the first list: later lists can announce new files.
+    changes_seen: bool,
+    /// The files that are new in the changed list since the user looked at the tree.
+    new_changed: usize,
     scan_rx: Option<std::sync::mpsc::Receiver<Scan>>,
 }
 
@@ -253,6 +261,10 @@ impl App {
             changes: HashMap::new(),
             known: None,
             watch_rx: None,
+            changes_rx: None,
+            changes_token: None,
+            changes_seen: false,
+            new_changed: 0,
             scan_rx: None,
         };
         if !replies.is_empty() {
@@ -410,10 +422,33 @@ impl App {
         self.sync_watch();
     }
 
+    /// Start the thread that looks at the transcript of the agent. `look` is the look of
+    /// [`crate::changes::looker`].
+    pub fn start_changes(&mut self, look: impl FnMut() -> Option<Vec<PathBuf>> + Send + 'static) {
+        let (receiver, token) = crate::changes::spawn_poll(crate::changes::EVERY, look);
+        self.changes_rx = Some(receiver);
+        self.changes_token = Some(token);
+    }
+
+    /// Take a new list of changed files. A later list that holds files the tree did not have
+    /// raises the banner.
+    pub fn changed_list(&mut self, list: Vec<PathBuf>) {
+        let fresh = list.iter().filter(|path| !self.tree.is_changed(path)).count();
+        if self.changes_seen {
+            self.new_changed += fresh;
+        }
+        self.changes_seen = true;
+        self.set_changed(list);
+    }
+
     /// Take what the background threads found: the scan of the tree and the changes of files.
     /// True when something changed on the screen.
     pub fn poll_background(&mut self) -> bool {
         let mut changed = self.poll_scan();
+        while let Some(list) = self.changes_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.changed_list(list);
+            changed = true;
+        }
         while let Some(change) = self.watch_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.file_changed(&change);
             changed = true;
@@ -443,6 +478,19 @@ impl App {
 
     /// The banner for the file on the screen, when it changed on disk.
     pub(crate) fn banner(&self) -> Option<String> {
+        self.file_banner().or_else(|| self.agent_banner())
+    }
+
+    /// The banner for new files that the agent changed, until the user opens the tree.
+    fn agent_banner(&self) -> Option<String> {
+        let n = self.new_changed;
+        (n > 0).then(|| {
+            let files = if n == 1 { "file" } else { "files" };
+            format!("The agent changed {n} more {files}. They are at the top of the tree (T).")
+        })
+    }
+
+    fn file_banner(&self) -> Option<String> {
         let id = self.shown_id.as_deref()?;
         let path = self.files.get(id)?.relative.display();
         Some(match self.changes.get(id)? {
@@ -1004,7 +1052,10 @@ impl App {
         match view {
             PanelView::Replies => self.panel_index = self.selected,
             PanelView::Annotations => self.annotation_index = 0,
-            PanelView::Tree => self.tree.stop_filter(),
+            PanelView::Tree => {
+                self.tree.stop_filter();
+                self.new_changed = 0;
+            }
             PanelView::Finder => self.finder = Finder::new(self.tree.file_paths()),
         }
     }

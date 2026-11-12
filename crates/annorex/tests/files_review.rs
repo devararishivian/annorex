@@ -607,3 +607,29 @@ fn snapshot_tree_with_changed_files_80x24() {
     press(&mut app, "T");
     insta::assert_snapshot!(render(&mut app, 80, 24));
 }
+
+#[test]
+fn the_first_list_of_changed_files_raises_no_banner() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.changed_list(vec!["src/main.rs".into()]);
+    assert!(!render(&mut app, 120, 20).contains("The agent changed"));
+}
+
+#[test]
+fn banner_names_the_count_of_new_files_and_clears_when_the_tree_opens() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.changed_list(vec!["src/main.rs".into()]);
+    app.changed_list(vec!["src/lib.rs".into(), "README.md".into(), "src/main.rs".into()]);
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains("The agent changed 2 more files."), "{screen}");
+    press(&mut app, "T");
+    assert!(!render(&mut app, 120, 20).contains("The agent changed"));
+}
+
+#[test]
+fn the_same_list_again_raises_no_banner() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.changed_list(vec!["src/main.rs".into()]);
+    app.changed_list(vec!["src/main.rs".into()]);
+    assert!(!render(&mut app, 120, 20).contains("The agent changed"));
+}
