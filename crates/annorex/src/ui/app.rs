@@ -803,6 +803,8 @@ impl App {
             self.set_reply_source(ReplySource::Missing(message));
             return;
         }
+        // The help belongs to the viewer. The next key must act on the message.
+        self.help_open = false;
         self.screen = Screen::Error(message);
     }
 

@@ -849,6 +849,16 @@ fn an_edit_that_keeps_its_own_text_is_saved() {
 }
 
 #[test]
+fn a_change_to_error_closes_the_help_so_the_next_key_acts() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "?");
+    assert!(app.help_open);
+    app.set_error("the transcript is gone".to_owned());
+    assert!(!app.help_open);
+    assert_eq!(press_key(&mut app, KeyCode::Char('r'), KeyModifiers::NONE), Effect::Reload);
+}
+
+#[test]
 fn a_sent_note_can_be_added_again() {
     let mut app = app("alpha beta gamma\n");
     press(&mut app, "vllllcWhich page?\n");
