@@ -10,6 +10,8 @@ pub enum Kind {
     Comment,
     Delete,
     Replace,
+    /// Approval. It needs no note text.
+    LooksGood,
 }
 
 /// One note on a range of the source of a document.
@@ -37,7 +39,7 @@ impl Annotation {
     pub fn is_valid(&self) -> bool {
         match self.kind {
             Kind::Comment => !self.note.trim().is_empty() || self.label.is_some(),
-            Kind::Delete => true,
+            Kind::Delete | Kind::LooksGood => true,
             Kind::Replace => self.replacement.as_ref().is_some_and(|text| !text.trim().is_empty()),
         }
     }
@@ -204,6 +206,7 @@ fn block(number: usize, section: &Section<'_>, annotation: &Annotation) -> Strin
     match annotation.kind {
         Kind::Comment => lines.push(quoted("Comment on:", quote)),
         Kind::Delete => lines.push(quoted("Remove this:", quote)),
+        Kind::LooksGood => lines.push(quoted("Looks good:", quote)),
         Kind::Replace => {
             lines.push(quoted("Replace this:", quote));
             lines.push(quoted("With:", annotation.replacement.as_deref().unwrap_or_default()));
@@ -294,6 +297,32 @@ mod tests {
             ```\n\
             > Not needed.\n";
         assert_eq!(export_one("", &source, &review), expected);
+    }
+
+    #[test]
+    fn export_of_looks_good() {
+        let source = "alpha\n";
+        let mut review = Review::default();
+        let id = review.add(source, Kind::LooksGood, 0..5);
+        let text = export_one("", source, &review);
+        assert!(text.contains("## Annotation 1 (line 1)\nLooks good: \"alpha\"\n"), "{text}");
+        assert!(!text.contains("> "), "{text}");
+        review.update(id, |a| a.note = "fine".to_owned());
+        assert!(export_one("", source, &review).ends_with("Looks good: \"alpha\"\n> fine\n"));
+        let long = "alpha\nbeta\n";
+        let mut review = Review::default();
+        review.add(long, Kind::LooksGood, 0..10);
+        let text = export_one("", long, &review);
+        assert!(text.contains("(lines 1–2)\nLooks good:\n```\nalpha\nbeta\n```"), "{text}");
+    }
+
+    #[test]
+    fn old_draft_still_reads() {
+        let json = r#"{"id":1,"kind":"Comment","range":{"start":0,"end":5},"quote":"alpha","note":"n","replacement":null,"label":null,"detached":false}"#;
+        let a: Annotation = serde_json::from_str(json).expect("old annotation");
+        assert_eq!(a.kind, Kind::Comment);
+        let new = serde_json::to_string(&Kind::LooksGood).expect("json");
+        assert_eq!(new, "\"LooksGood\"");
     }
 
     #[test]

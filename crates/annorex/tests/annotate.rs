@@ -88,6 +88,32 @@ fn v_selection_makes_a_comment() {
 }
 
 #[test]
+fn o_adds_looks_good_without_an_editor() {
+    let mut app = app("alpha beta gamma\n");
+    let effect = press_key(&mut app, KeyCode::Char('v'), KeyModifiers::NONE);
+    assert!(matches!(effect, Effect::None | Effect::SaveDraft));
+    press(&mut app, "llll");
+    let effect = press_key(&mut app, KeyCode::Char('o'), KeyModifiers::NONE);
+    assert!(matches!(effect, Effect::SaveDraft));
+    assert!(app.editor().is_none());
+    let review = app.review().expect("review");
+    assert_eq!(review.annotations.len(), 1);
+    assert_eq!(
+        (review.annotations[0].kind, review.annotations[0].quote.as_str()),
+        (Kind::LooksGood, "alpha")
+    );
+}
+
+#[test]
+fn a_second_looks_good_on_the_same_range_is_refused() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllllo0");
+    press(&mut app, "vllllo");
+    assert_eq!(app.review().expect("review").annotations.len(), 1);
+    assert_eq!(app.status(), Some("Already saved."));
+}
+
+#[test]
 fn a_selection_ends_with_the_whole_last_character() {
     let mut app = app("a\u{e9}\u{301}z\n");
     press(&mut app, "vlc");

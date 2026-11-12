@@ -175,8 +175,15 @@ const HELP_MOVE: &[Action] = &[
     Action::Top,
     Action::Bottom,
 ];
-const HELP_NOTE: &[Action] =
-    &[Action::Select, Action::SelectLines, Action::Comment, Action::Delete, Action::Replace, Action::Label];
+const HELP_NOTE: &[Action] = &[
+    Action::Select,
+    Action::SelectLines,
+    Action::Comment,
+    Action::LooksGood,
+    Action::Delete,
+    Action::Replace,
+    Action::Label,
+];
 const HELP_SEND: &[Action] =
     &[Action::Send, Action::SendWithNote, Action::Paste, Action::Copy, Action::Discard];
 const HELP_LISTS: &[Action] =
@@ -838,6 +845,7 @@ fn kind_word(kind: Kind) -> &'static str {
     match kind {
         Kind::Comment => "comment",
         Kind::Delete => "delete",
+        Kind::LooksGood => "looks good",
         Kind::Replace => "replace",
     }
 }
@@ -898,6 +906,7 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
     let word = match editor.kind {
         Kind::Comment => "Comment on",
         Kind::Delete => "Remove",
+        Kind::LooksGood => "Looks good",
         Kind::Replace => "Replace",
     };
     let label = editor.label.as_deref().unwrap_or("none");

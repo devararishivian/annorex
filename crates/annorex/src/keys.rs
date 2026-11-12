@@ -25,6 +25,7 @@ pub enum Action {
     Select,
     SelectLines,
     Comment,
+    LooksGood,
     Delete,
     Replace,
     Label,
@@ -52,7 +53,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in the order of the documentation.
-    pub const ALL: [Action; 38] = [
+    pub const ALL: [Action; 39] = [
         Action::Left,
         Action::Right,
         Action::Down,
@@ -68,6 +69,7 @@ impl Action {
         Action::Select,
         Action::SelectLines,
         Action::Comment,
+        Action::LooksGood,
         Action::Delete,
         Action::Replace,
         Action::Label,
@@ -111,6 +113,7 @@ impl Action {
             Action::Select => "select",
             Action::SelectLines => "select_lines",
             Action::Comment => "comment",
+            Action::LooksGood => "looks_good",
             Action::Delete => "delete",
             Action::Replace => "replace",
             Action::Label => "label",
@@ -155,6 +158,7 @@ impl Action {
             Action::Select => "v",
             Action::SelectLines => "V",
             Action::Comment => "c",
+            Action::LooksGood => "o",
             Action::Delete => "d",
             Action::Replace => "s",
             Action::Label => "L",
@@ -199,6 +203,7 @@ impl Action {
             Action::Select => "select characters",
             Action::SelectLines => "select lines",
             Action::Comment => "comment",
+            Action::LooksGood => "looks good",
             Action::Delete => "mark for removal",
             Action::Replace => "replace",
             Action::Label => "edit the note at the cursor",

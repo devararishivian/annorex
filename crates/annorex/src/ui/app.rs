@@ -1111,6 +1111,7 @@ impl App {
                 Some(Action::Select) => self.toggle_selection(false),
                 Some(Action::SelectLines) => self.toggle_selection(true),
                 Some(Action::Comment) => return self.begin_new(Kind::Comment),
+                Some(Action::LooksGood) => return self.add_looks_good(),
                 Some(Action::Delete) => return self.begin_new(Kind::Delete),
                 Some(Action::Replace) => return self.begin_new(Kind::Replace),
                 Some(Action::Label) => return self.begin_label(),
@@ -1630,6 +1631,30 @@ impl App {
         };
         self.editor = Some(Editor::new(kind, range));
         self.editing_id = None;
+        Effect::SaveDraft
+    }
+
+    /// `o`: a "looks good" note on the current range. No editor opens.
+    pub fn add_looks_good(&mut self) -> Effect {
+        let Some(reply) = self.shown_id.clone() else { return Effect::None };
+        let Some(range) = self.action_range().filter(|range| !range.is_empty()) else {
+            self.status = Some("there is no text here to annotate".to_owned());
+            return Effect::None;
+        };
+        let review = self.reviews.entry(reply.clone()).or_default();
+        if review.annotations.iter().any(|a| {
+            a.sent_at.is_none()
+                && a.kind == Kind::LooksGood
+                && a.range == range
+                && a.label.is_none()
+                && a.note.is_empty()
+        }) {
+            self.status = Some("Already saved.".to_owned());
+        } else {
+            review.add(&self.doc.source, Kind::LooksGood, range);
+            self.sent.remove(&reply);
+        }
+        self.selection = None;
         Effect::SaveDraft
     }
 
