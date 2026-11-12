@@ -93,7 +93,7 @@ read the theme.
   `annorex rex install` again with the binary that you use. Or set the path with `bin =` in the `setup` call.
 - **"the annorex binary ... from setup{} does not exist".** Correct the path in `bin =`, or remove `bin =`.
 - **"the rex binary was not found".** Annorex looks for `rex` in `REX_BIN_DIR`, then in the Rex process that started
-  it, then in `PATH`. Update Annorex. Then run `annorex rex install` again.
+  it, then in `PATH`. Update Annorex.
 - **"Not sent: the agent has not reported its state yet".** The agent is starting, or it shows a prompt that it does
   not report, for example the Claude Code trust prompt. Wait until the agent is ready. Then press `S` again. Annorex
   keeps your notes.
