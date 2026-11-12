@@ -213,3 +213,29 @@ fn new_replies_make_the_source_ready() {
     app.set_replies(vec![reply("r1", "hello\n")]);
     assert_eq!(app.reply_source(), &ReplySource::Ready);
 }
+
+#[test]
+fn the_header_names_the_position_among_replies_or_among_files() {
+    let mut app = noted();
+    let header = render(&mut app, 80, 24).lines().next().expect("header").to_owned();
+    assert!(header.contains("file 1/1"), "{header}");
+    press(&mut app, "[");
+    press(&mut app, "[");
+    let header = render(&mut app, 80, 24).lines().next().expect("header").to_owned();
+    assert!(header.contains("reply 1/2"), "{header}");
+}
+
+#[test]
+fn the_questions_name_the_document_on_the_screen() {
+    let mut app = noted();
+    press(&mut app, "X");
+    assert!(render(&mut app, 100, 24).contains("Discard the notes of this file? y/n"));
+    press(&mut app, "n");
+    press(&mut app, "[");
+    press(&mut app, "[");
+    press(&mut app, "X");
+    assert!(render(&mut app, 100, 24).contains("Discard the notes of this reply? y/n"));
+    press(&mut app, "n");
+    press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE);
+    assert!(render(&mut app, 120, 24).contains("Unsent notes in 2 documents."));
+}

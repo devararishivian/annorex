@@ -235,8 +235,13 @@ fn draw_footer(frame: &mut Frame, area: Rect, keys: &str, message: Option<String
     frame.render_widget(Paragraph::new(fit(&text, area.width)).style(style), area);
 }
 
+/// The title follows the document on the screen.
 fn title_of(app: &App) -> &'static str {
-    if app.has_root() { "files" } else { "last reply" }
+    if app.shown_file().is_some() || (app.shown_reply_id().is_none() && app.has_root()) {
+        "files"
+    } else {
+        "last reply"
+    }
 }
 
 /// The question in the footer for a pending confirmation.
@@ -249,7 +254,7 @@ fn prompt_text(app: &App, what: Confirm) -> String {
         Confirm::Discard if app.review().is_none_or(Review::is_empty) => {
             "Remove the draft file that Annorex cannot read? y/n".to_owned()
         }
-        Confirm::Discard if app.has_root() => "Discard the notes of this file? y/n".to_owned(),
+        Confirm::Discard if app.shown_file().is_some() => "Discard the notes of this file? y/n".to_owned(),
         Confirm::Discard => "Discard the notes of this reply? y/n".to_owned(),
         Confirm::CloseFile => {
             let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
@@ -257,7 +262,7 @@ fn prompt_text(app: &App, what: Confirm) -> String {
         }
         Confirm::Quit if app.has_root() => {
             let count = app.unsent_file_count();
-            let files = if count == 1 { "file" } else { "files" };
+            let files = if count == 1 { "document" } else { "documents" };
             match &app.save_error {
                 Some(error) => format!(
                     "Unsent notes in {count} {files}. The drafts cannot be saved: {error}. s send · d discard · esc back"
@@ -276,14 +281,25 @@ fn prompt_text(app: &App, what: Confirm) -> String {
     }
 }
 
-fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
+/// Where the document on the screen is: `reply 2/5`, or `file 1/3` among the open files.
+fn position_text(app: &App) -> String {
     let (selected, count) = app.reply_position();
+    if count == 0 {
+        return if app.has_root() { "no file open" } else { "reply 1/0" }.to_owned();
+    }
+    let open_files = app.files.len();
+    if app.shown_file().is_some() {
+        let before =
+            app.replies.iter().take(selected).filter(|reply| app.files.contains_key(&reply.id)).count();
+        format!("file {}/{open_files}", before + 1)
+    } else {
+        format!("reply {}/{}", selected + 1, count - open_files)
+    }
+}
+
+fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, footer: Rect) {
     let files = app.has_root();
-    let position = match (files, count) {
-        (true, 0) => "no file open".to_owned(),
-        (true, _) => format!("file {}/{count}", selected + 1),
-        (false, _) => format!("reply {}/{count}", selected + 1),
-    };
+    let position = position_text(app);
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let unsent = app.unsent_replies();
     let button = send_button(app);

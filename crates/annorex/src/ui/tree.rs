@@ -150,8 +150,9 @@ impl Tree {
                 })
                 .collect();
         }
-        let top =
-            self.changed_entries().into_iter().map(|entry| Row { entry, depth: 0, changed_section: true });
+        // While the user types a filter, also before the first letter, the changed section is not shown.
+        let changed = if self.filter.is_some() { Vec::new() } else { self.changed_entries() };
+        let top = changed.into_iter().map(|entry| Row { entry, depth: 0, changed_section: true });
         let all = self.entries.iter().filter(|entry| self.is_shown(&entry.path)).map(|entry| Row {
             entry,
             depth: entry.path.components().count().saturating_sub(1),
@@ -314,6 +315,16 @@ mod tests {
         tree.set_changed(vec!["a.rs".into(), "b.rs".into()]);
         assert_eq!(selected(&tree), PathBuf::from("b.rs"));
         assert!(tree.visible()[tree.index].changed_section);
+    }
+
+    #[test]
+    fn an_empty_filter_result_has_no_changed_section() {
+        let mut tree = tree(&["a.rs", "b.rs"]);
+        tree.set_changed(vec!["b.rs".into()]);
+        assert!(tree.visible().iter().any(|row| row.changed_section));
+        tree.start_filter();
+        assert!(!tree.visible().iter().any(|row| row.changed_section), "no section while the filter is on");
+        assert_eq!(tree.visible().len(), 2, "the normal tree stays complete");
     }
 
     #[test]

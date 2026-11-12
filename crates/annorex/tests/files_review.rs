@@ -195,7 +195,7 @@ fn quit_question_counts_files() {
     press(&mut app, "q");
     let screen = render(&mut app, 120, 12);
     assert!(
-        screen.contains("Unsent notes in 2 files. s send · k keep the drafts · d discard · esc back"),
+        screen.contains("Unsent notes in 2 documents. s send · k keep the drafts · d discard · esc back"),
         "{screen}"
     );
     assert_eq!(press_key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE), Effect::Discard);
