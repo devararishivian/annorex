@@ -67,8 +67,9 @@ The export of `o looks good` has the text `Looks good:` and the quote. The note 
 text.
 
 Notes show in place. Looks good has a green background. A comment is underlined in yellow. Remove is red and crossed
-out. Replace is magenta and crossed out. At 120 columns or more, each note has a card in a rail on the right. At 100 to
-119 columns, a dot in the note color marks the note in the right margin.
+out. Replace is magenta and crossed out. At 120 columns or more, each note has a card in a rail on the right. Where
+there is no rail, a dot in the note color marks the note in the right margin. This holds also in one column, when
+the document is 21 columns or more wide.
 
 The editor opens as a floating box near the block. It has the buttons `save` and `cancel`.
 

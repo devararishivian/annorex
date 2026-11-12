@@ -177,6 +177,7 @@ The layout changes with the size of the window:
 - 100 to 119 columns: the file tree on the left and the document. There is no rail. A dot in the color of the note
   marks the note in the right margin of the block.
 - Less than 100 columns, or less than 16 rows: one column. The tree and the list of notes open over the document.
+  The dots also show in the right margin when the document is 21 columns or more wide.
 - Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
 
 `T` hides the tree on the left and shows it again. Over a narrow window, `T` opens and closes the tree.
