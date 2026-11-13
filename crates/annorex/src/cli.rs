@@ -206,7 +206,7 @@ impl From<DeliverError> for Failure {
 }
 
 fn io_failure(error: &std::io::Error) -> Failure {
-    Failure { code: EXIT_USAGE, message: format!("cannot write the output: {error}") }
+    Failure { code: EXIT_FAILURE, message: format!("cannot write the output: {error}") }
 }
 
 fn probe(
@@ -474,6 +474,14 @@ mod tests {
         assert_eq!(report_sent(&mut Closed, &mut err, "sent"), EXIT_OK);
         let text = String::from_utf8(err).expect("utf8");
         assert!(text.contains("sent, but cannot write the output"), "{text}");
+    }
+
+    #[test]
+    fn a_failed_output_write_exits_1() {
+        let error = std::io::Error::from(std::io::ErrorKind::BrokenPipe);
+        let failure = io_failure(&error);
+        assert_eq!(failure.code, EXIT_FAILURE);
+        assert!(failure.message.starts_with("cannot write the output"), "{}", failure.message);
     }
 
     #[test]
