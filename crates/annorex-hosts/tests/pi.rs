@@ -236,3 +236,12 @@ fn pi_sessions_for_cwd_stops_at_the_limit() {
     assert_eq!(names[19], "s05.jsonl", "the 20 newest sessions with a reply");
     std::fs::remove_dir_all(&root).expect("cleanup");
 }
+
+#[test]
+fn newer_record_types_leave_the_replies_unchanged() {
+    // A system-role message, a custom entry, textSignature and durationMs are not replies.
+    let plain = parse_messages(&fixture("pi.jsonl"), 25);
+    let newer = parse_messages(&fixture("pi-new-records.jsonl"), 25);
+    assert_eq!(newer, plain);
+    assert!(!newer.iter().any(|m| m.text.contains("system text")), "{newer:?}");
+}

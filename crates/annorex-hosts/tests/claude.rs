@@ -98,3 +98,15 @@ fn a_dangling_parent_makes_the_chain_untrusted_and_file_order_applies() {
 fn garbage_input_yields_no_messages_rather_than_an_error() {
     assert_eq!(parse_messages("not json\n{\"type\":\"progress\"}\n", 3), [] as [annorex_hosts::Message; 0]);
 }
+
+const NEW_RECORDS: &str = include_str!("fixtures/claude-code-new-records.jsonl");
+
+#[test]
+fn newer_record_types_leave_the_replies_unchanged() {
+    // api-request, api-request-blob, api-request-shape, atis-latch, permission-mode,
+    // session-owner and system turn records sit in the transcript. None is a reply.
+    let plain = parse_messages(TRANSCRIPT, 25);
+    let newer = parse_messages(NEW_RECORDS, 25);
+    assert_eq!(newer, plain);
+    assert!(!newer.iter().any(|m| m.text.contains("blob text")), "{newer:?}");
+}

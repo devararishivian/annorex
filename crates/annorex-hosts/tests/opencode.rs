@@ -138,6 +138,38 @@ fn an_opencode2_session_in_the_same_database_wins_when_it_is_newer() {
 }
 
 #[test]
+fn newer_session_message_types_take_no_slot_and_leave_the_replies_unchanged() {
+    let dir = temp_dir("v2-new-types");
+    let db = dir.join("opencode.db");
+    let writer = populate_v2(&db);
+    let before = opencode::messages_for_session(&db, "ses2_new", Schema::V2, 25).expect("before");
+    let kinds = ["system", "compaction", "model-switched", "agent-switched", "location-switched"];
+    for (offset, kind) in (6_i64..).zip(kinds) {
+        message_v2(
+            &writer,
+            &format!("msg2_{offset}"),
+            "ses2_new",
+            offset,
+            kind,
+            r#"{"text":"not a reply","agent":"plan","time":{"created":50010}}"#,
+        );
+    }
+    message_v2(
+        &writer,
+        "msg2_20",
+        "ses2_new",
+        20,
+        "synthetic",
+        r#"{"text":"not a reply","time":{"created":50011}}"#,
+    );
+    let after = opencode::messages_for_session(&db, "ses2_new", Schema::V2, 25).expect("after");
+    assert_eq!(after, before);
+    assert!(after.iter().all(|m| !m.text.contains("not a reply")));
+    drop(writer);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
 fn a_database_without_the_v2_tables_still_reads_v1() {
     let dir = temp_dir("v1only");
     let db = dir.join("opencode.db");
