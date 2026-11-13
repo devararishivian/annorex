@@ -12,7 +12,7 @@ use crate::review::Kind;
 pub(crate) enum Hit {
     Block(usize),
     DocCell {
-        row: u16,
+        row: usize,
         col: u16,
     },
     Action(Kind),

@@ -161,7 +161,7 @@ impl App {
         match hit {
             Hit::Block(index) if index < self.doc.blocks.len() => self.focus_block(index),
             Hit::DocCell { row: visual, col: text_x } => {
-                let Some(offset) = self.offset_at(usize::from(visual), column.saturating_sub(text_x)) else {
+                let Some(offset) = self.offset_at(visual, column.saturating_sub(text_x)) else {
                     return Effect::None;
                 };
                 if double && self.select_word(offset) {

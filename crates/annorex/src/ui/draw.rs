@@ -921,7 +921,7 @@ fn push_doc_hits(app: &mut App, area: Rect, top_row: usize, left: u16) {
         return;
     }
     for offset in 0..shown {
-        let Ok(row) = u16::try_from(top_row + offset) else { break };
+        let row = top_row + offset;
         let y = area.y + u16::try_from(offset).unwrap_or(0);
         app.hits.push(Rect::new(text_x, y, text_width, 1), Hit::DocCell { row, col: text_x });
     }
@@ -1540,6 +1540,18 @@ mod tests {
     use crate::replies::Reply;
     use crate::review::Kind;
     use crate::safety::Safety;
+
+    #[test]
+    fn doc_cells_exist_past_visual_row_65535() {
+        let text = (0..70_000).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n\n");
+        let reply = Reply { id: "r".to_owned(), text, at: None };
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        assert!(matches!(app.hits.at(2, 1), Some(Hit::DocCell { .. })));
+    }
 
     #[test]
     fn each_visible_block_is_in_the_hit_map() {

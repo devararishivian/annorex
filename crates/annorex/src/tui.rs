@@ -83,8 +83,17 @@ pub fn run_loop(
         let Ok(mut pending) = events.next(WAIT) else { return Ok(()) };
         // A timeout draws, so the clock and the background work show. A batch of pointer moves alone does not.
         let mut redraw = pending.is_none();
+        // True when an earlier event of this batch changed the state, so the hit map is old.
+        let mut stale = false;
         while let Some(event) = pending {
+            if stale
+                && matches!(&event, Event::Mouse(mouse) if matches!(mouse.kind, event::MouseEventKind::Down(_)))
+            {
+                canvas.draw(app)?;
+                stale = false;
+            }
             redraw |= needs_draw(&event);
+            stale |= needs_draw(&event);
             let effect = match event {
                 Event::Key(key) => Some(app.handle_key(key)),
                 Event::Paste(text) => Some(app.handle_paste(&text)),
@@ -735,6 +744,49 @@ mod tests {
             row: 0,
             modifiers: KeyModifiers::NONE
         })));
+    }
+
+    #[test]
+    fn a_click_after_a_key_in_one_batch_acts_on_the_drawn_row() {
+        use crate::ui::Mode;
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let text = (0..200).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n\n");
+        let reply = Reply { id: "r1".into(), text, at: None };
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        let mut canvas = Counting::new();
+        let (_tx, rx) = mpsc::channel();
+        let stop = AtomicBool::new(false);
+        // The first draw shows the top of the document. Block 1 is on the row of "line 1".
+        let mut first = script(vec![Ok(None)]);
+        run_loop(&mut app, &mut first, &mut canvas, &stop, &rx, &mut no_effects()).expect("loop");
+        let buffer = canvas.terminal.backend().buffer().clone();
+        let row = (0..24u16)
+            .find(|&y| {
+                (0..80u16)
+                    .map(|x| buffer.cell((x, y)).map_or(" ", |c| c.symbol()))
+                    .collect::<String>()
+                    .contains("line 1 ")
+            })
+            .expect("row of block 1");
+        // Blocks have a blank row between them, so the same row may be blank in the new frame.
+        // Click on this row and on the next one: one of them is a block in the new frame.
+        let click = |row| {
+            Ok(Some(Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 0,
+                row,
+                modifiers: KeyModifiers::NONE,
+            })))
+        };
+        let mut batch = script(vec![key('G'), click(row), click(row + 1), Ok(None)]);
+        run_loop(&mut app, &mut batch, &mut canvas, &stop, &rx, &mut no_effects()).expect("loop");
+        match app.mode {
+            Mode::Block(index) => {
+                assert!(index > 100, "the click hit the stale row of block 1: block {index}");
+            }
+            other => panic!("unexpected mode {other:?}"),
+        }
     }
 
     #[test]
