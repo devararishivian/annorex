@@ -39,8 +39,17 @@ pub struct AgentState {
 impl AgentState {
     /// For example `Claude Code (idle)`, `Pi (working…)`, `OpenCode (waiting for permission)`.
     pub fn header_text(&self) -> String {
+        self.text_with(|agent| agent.host().display_name())
+    }
+
+    /// The same as `header_text` with the short label, for a header too narrow for the full name.
+    pub fn header_text_short(&self) -> String {
+        self.text_with(|agent| agent.host().label())
+    }
+
+    fn text_with(&self, name: impl Fn(Agent) -> &'static str) -> String {
         let Some(agent) = self.agent else { return "no agent".to_owned() };
-        let name = agent.host().display_name();
+        let name = name(agent);
         let state = match &self.safety {
             Safety::Blocked { kind: Some(kind), .. } => format!("waiting for {kind}"),
             Safety::Blocked { kind: None, .. } => "blocked".to_owned(),

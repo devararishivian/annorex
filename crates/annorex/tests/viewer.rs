@@ -124,6 +124,14 @@ fn snapshot_39x9_is_too_small() {
 }
 
 #[test]
+fn the_40_column_header_keeps_the_agent_state() {
+    let screen = render(&mut viewer(), 40, 12);
+    let header = screen.lines().next().expect("header");
+    assert!(header.contains("claude ("), "{header}");
+    assert!(header.contains("reply 1/3"), "{header}");
+}
+
+#[test]
 fn header_names_view_agent_state_and_reply() {
     let screen = render(&mut viewer(), 120, 40);
     let header = screen.lines().next().expect("header");

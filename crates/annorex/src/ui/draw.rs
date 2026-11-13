@@ -600,13 +600,16 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
             .iter()
             .map(|part| part.replace("unsent in reply ", "").replace("unsent in ", ""))
             .collect();
-        lefts.push(format!("{base} · unsent {}", compact.join(" · ")));
+        let compact = compact.join(" · ");
+        lefts.push(format!("{base} · unsent {compact}"));
         // Then without the name of the view, so the unsent notice outlasts the longer agent name.
-        lefts.push(format!("{state} · {position} · unsent {}", compact.join(" · ")));
+        lefts.push(format!("{state} · {position} · unsent {compact}"));
     }
     lefts.push(base);
     // A narrow header keeps the position and the agent before the name of the view.
     lefts.push(format!("{state} · {position}"));
+    // The short agent name, so a very narrow header still shows the state.
+    lefts.push(format!("{} · {position}", app.state.header_text_short()));
     lefts.push(position);
     draw_header(frame, app, header, &lefts, Some(send_button(app)));
     let (body, tree, rail) = match layout {
