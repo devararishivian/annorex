@@ -966,6 +966,7 @@ type RowMatches = Option<(usize, Vec<Vec<std::ops::Range<usize>>>)>;
 #[cfg(test)]
 thread_local! {
     /// The number of searches over a joined `DocLine` on this thread. A test counts them.
+    static MATCH_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static MATCH_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
@@ -999,16 +1000,21 @@ fn group_matches(
     #[cfg(test)]
     MATCH_RUNS.with(|runs| runs.set(runs.get() + 1));
     let matches = match_ranges(&joined, query);
+    // The matches are sorted and do not overlap: one index walks them for all rows.
+    let mut next = 0;
     let per_row = spans
         .into_iter()
         .map(|(from, to)| {
-            matches
-                .iter()
-                .filter_map(|range| {
-                    let (low, high) = (range.start.max(from), range.end.min(to));
-                    (low < high).then(|| low - from..high - from)
-                })
-                .collect()
+            while matches.get(next).is_some_and(|range| range.end <= from) {
+                next += 1;
+            }
+            let mut row = Vec::new();
+            for range in matches.iter().skip(next).take_while(|range| range.start < to) {
+                #[cfg(test)]
+                MATCH_VISITS.with(|visits| visits.set(visits.get() + 1));
+                row.push(range.start.max(from) - from..range.end.min(to) - from);
+            }
+            row
         })
         .collect();
     (start, per_row)
@@ -1595,6 +1601,21 @@ mod tests {
         terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
         let runs = super::MATCH_RUNS.with(std::cell::Cell::get);
         assert_eq!(runs, 1, "the line was joined and searched {runs} times in one frame");
+    }
+
+    #[test]
+    fn a_dense_search_visits_each_match_about_once_for_each_frame() {
+        let reply = Reply { id: "r".to_owned(), text: "ab ".repeat(30_000), at: None };
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        app.query = Some("a".to_owned());
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("terminal");
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        super::MATCH_VISITS.with(|visits| visits.set(0));
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        let visits = super::MATCH_VISITS.with(std::cell::Cell::get);
+        let rows = app.cache.get(&app.doc, 120).len();
+        assert!(visits <= 30_000 + rows, "{visits} match visits for 30000 matches and {rows} rows");
     }
 
     #[test]
