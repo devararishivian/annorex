@@ -550,3 +550,25 @@ fn the_session_picker_is_a_centered_box() {
     assert!((y - 1).abs_diff(23 - bottom - 1) <= 1, "{screen}");
     assert!(screen.contains("▸ updated just now · a"), "{screen}");
 }
+
+#[test]
+fn error_screen_hint_click_quits_with_a_rebound_quit_key() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let dir = tempfile::tempdir().expect("dir");
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[keys]\nquit = \"Z\"\n").expect("config");
+    let config = Config::load(&file).expect("config");
+    let mut app = App::new(state(Agent::Pi, "idle"), Screen::Error("no reply".into()), Vec::new(), &config);
+    let screen = render(&mut app, 80, 12);
+    let row = screen.lines().last().expect("footer");
+    let byte = row.find("Z quit").expect("the quit hint is in the footer");
+    let column = u16::try_from(row[..byte].width()).expect("column");
+    let at = (column, 11);
+    let down = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: at.0,
+        row: at.1,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert_eq!(app.handle_mouse(down), Effect::Quit);
+}

@@ -1144,3 +1144,32 @@ fn unsent_reply_numbers_match_the_reply_list_with_files_open() {
     assert_eq!(app.reply_position(), (1, 3));
     assert_eq!(app.unsent_replies(), vec![2]);
 }
+
+#[test]
+fn esc_on_the_rail_closes_the_list_for_a_later_resize() {
+    for first in [(120, 40), (80, 24)] {
+        let (_dir, mut app) = last_app();
+        render(&mut app, first.0, first.1);
+        press(&mut app, "a");
+        render(&mut app, first.0, first.1);
+        press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+        let screen = render(&mut app, 110, 40);
+        assert!(!screen.contains("Annotations"), "{first:?}: {screen}");
+    }
+}
+
+#[test]
+fn a_new_reply_keeps_the_highlight_of_the_open_start_list() {
+    let (_dir, mut app) = last_app_with(3);
+    render(&mut app, 120, 20);
+    press(&mut app, "j");
+    let mut replies = vec![Reply { id: "new".to_owned(), text: "# New\n".to_owned(), at: None }];
+    replies.extend((0..3).map(|n| Reply {
+        id: format!("r{n}"),
+        text: format!("# Reply {n}\n\nText of reply {n}.\n"),
+        at: None,
+    }));
+    app.set_replies(replies);
+    press(&mut app, "\n");
+    assert!(render(&mut app, 120, 20).contains("Text of reply 1."));
+}

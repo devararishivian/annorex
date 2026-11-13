@@ -845,6 +845,10 @@ impl App {
         // Keep an older reply that the user chose. On the newest reply, go to a new newest reply, but
         // keep the position when no new reply came.
         let current = self.replies.get(self.selected).map(|reply| reply.id.clone());
+        // An open reply list keeps its highlight on the same reply.
+        let highlighted = (self.focus == Focus::Box && self.boxed == Some(BoxView::Replies))
+            .then(|| self.replies.get(self.panel_index).map(|reply| reply.id.clone()))
+            .flatten();
         let (top, cursor, focus) = (self.top, self.cursor, self.focus_range());
         // The open files stay after the replies.
         let mut replies = replies;
@@ -867,6 +871,9 @@ impl App {
                 self.follow_focus(focus, &changed);
             }
             None => self.show_reply(0),
+        }
+        if let Some(index) = highlighted.and_then(|id| self.replies.iter().position(|reply| reply.id == id)) {
+            self.panel_index = index;
         }
         self.place_again(&changed);
     }
@@ -1197,15 +1204,27 @@ impl App {
             self.help_open = false;
             return Effect::None;
         }
+        // The footer shows the bound keys, so the two screens accept them next to the fixed keys.
+        let action = self.action_of(key);
         match &self.screen {
             Screen::Error(_) => match key.code {
                 KeyCode::Char('r') => Effect::Reload,
                 KeyCode::Char('q') => Effect::Quit,
-                _ => Effect::None,
+                _ => match action {
+                    Some(Action::Reload) => Effect::Reload,
+                    Some(Action::Quit) => Effect::Quit,
+                    _ => Effect::None,
+                },
             },
             Screen::Picker(candidates) => {
                 let count = candidates.len();
-                match key.code {
+                let code = match action {
+                    Some(Action::Down) => KeyCode::Char('j'),
+                    Some(Action::Up) => KeyCode::Char('k'),
+                    Some(Action::Quit) => KeyCode::Char('q'),
+                    _ => key.code,
+                };
+                match code {
                     KeyCode::Char('j') | KeyCode::Down => {
                         self.picker_index = (self.picker_index + 1).min(count.saturating_sub(1));
                         Effect::None
@@ -1509,7 +1528,13 @@ impl App {
     fn rail_key(&mut self, key: KeyEvent) -> Effect {
         match key.code {
             KeyCode::Enter => self.rail_enter(),
-            KeyCode::Esc => self.focus = Focus::Doc,
+            KeyCode::Esc => {
+                // The list stays open only where it stands beside the document.
+                if !self.docked.rail || self.docked.cards {
+                    self.list_open = false;
+                }
+                self.focus = Focus::Doc;
+            }
             KeyCode::Tab => self.cycle_focus(),
             _ => {
                 let action = self.action_of(key);
@@ -2031,7 +2056,9 @@ impl App {
         if self.needs_a_block() {
             return Effect::None;
         }
-        let id = self.review().and_then(|review| review.at(self.cursor).first().map(|a| a.id));
+        let id = self.review().and_then(|review| {
+            review.at(self.cursor).into_iter().map(|a| a.id).find(|id| self.takes_text(*id))
+        });
         match id {
             Some(id) => self.begin_edit(id),
             None => self.begin_new(Kind::Comment),

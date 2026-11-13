@@ -1530,3 +1530,19 @@ fn failed_send_stays_open() {
     assert!(!app.should_exit());
     assert!(render(&mut app, 120, 12).contains("Not sent: the agent shows a dialog."));
 }
+
+#[test]
+fn l_on_a_looks_good_note_adds_a_comment() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "o");
+    press(&mut app, "L");
+    assert_eq!(app.editor().map(|editor| editor.kind), Some(Kind::Comment));
+}
+
+#[test]
+fn the_80_column_footer_keeps_esc_unselect_and_s_send() {
+    let mut app = app("alpha beta\n");
+    let screen = render(&mut app, 80, 12);
+    let footer = screen.lines().last().expect("footer");
+    assert!(footer.contains("esc unselect") && footer.contains("S send"), "{footer}");
+}
