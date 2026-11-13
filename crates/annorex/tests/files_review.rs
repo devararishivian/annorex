@@ -90,7 +90,7 @@ fn export_joins_files_in_open_order() {
     press(&mut with_note, "Please fix all.");
     assert_eq!(press_key(&mut with_note, KeyCode::Enter, KeyModifiers::NONE), Effect::SendWithNote);
     assert!(
-        with_note.export().starts_with("Please fix all.\n\n# Annotations on a.md"),
+        with_note.export().starts_with("# Note\n\n> Please fix all.\n\n# Annotations on a.md"),
         "{}",
         with_note.export()
     );

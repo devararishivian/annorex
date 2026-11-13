@@ -550,7 +550,7 @@ fn send_with_note_puts_the_note_first() {
     press(&mut app, "Please fix all.");
     assert_eq!(press_key(&mut app, KeyCode::Enter, KeyModifiers::NONE), Effect::SendWithNote);
     let export = app.export();
-    assert!(export.starts_with("Please fix all.\n\n# Annotations on last reply\n"), "{export}");
+    assert!(export.starts_with("# Note\n\n> Please fix all.\n\n# Annotations on last reply\n"), "{export}");
     assert!(export.contains("## Annotation 1 (line 1)"), "{export}");
 }
 

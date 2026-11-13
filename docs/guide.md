@@ -290,7 +290,8 @@ Press any key to close it. The config action name is `help`. The footer shows `?
    and the footer shows the reason.
 
 The export is Markdown. It starts with `# Annotations on last reply`. For an older reply, the name is
-`earlier reply (HH:MM)` in your local time. Each note has a number, the line numbers, the quoted source text, and
+`earlier reply (HH:MM)` in your local time. If you wrote a general note with `M`, the export starts with the heading
+`# Note` and the note as a quote. Then the annotation sections follow. Each note has a number, the line numbers, the quoted source text, and
 your note as a quote. The text before the quote names the type: `Comment on:`, `Remove this:`, or `Looks good:`.
 
 Annorex does not add a second identical note. The note must match in kind, range, label, and text. The footer says

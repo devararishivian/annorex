@@ -227,14 +227,21 @@ fn block(number: usize, section: &Section<'_>, annotation: &Annotation) -> Strin
     lines.join("\n")
 }
 
-/// The Markdown that goes to the agent: the general note, then one section for each file.
+/// The Markdown that goes to the agent: the general note under a `# Note` heading, as a quote,
+/// then one section for each file.
 ///
 /// A section lists its annotations in document order, numbered from 1. A section without
 /// annotations is left out. The text ends with one line feed. Nothing to export gives `""`.
 pub fn export(note: &str, sections: &[Section<'_>]) -> String {
     let mut parts: Vec<String> = Vec::new();
     if !note.trim().is_empty() {
-        parts.push(note.trim().to_owned());
+        let quote: Vec<String> = note
+            .trim()
+            .lines()
+            .map(|line| if line.is_empty() { ">".to_owned() } else { format!("> {line}") })
+            .collect();
+        parts.push("# Note".to_owned());
+        parts.push(quote.join("\n"));
     }
     for section in sections.iter().filter(|section| !section.annotations.is_empty()) {
         parts.push(format!("# Annotations on {}", section.name));
@@ -357,7 +364,23 @@ mod tests {
         let id = review.add(source, Kind::Comment, 0..5);
         review.update(id, |a| a.note = "ok".to_owned());
         let text = export_one("Please fix all.", source, &review);
-        assert!(text.starts_with("Please fix all.\n\n# Annotations on last reply\n"), "{text}");
+        assert!(text.starts_with("# Note\n\n> Please fix all.\n\n# Annotations on last reply\n"), "{text}");
+    }
+
+    #[test]
+    fn a_general_note_that_starts_with_a_slash_or_bang_is_quoted_under_a_heading() {
+        let source = "alpha\n";
+        let mut review = Review::default();
+        let id = review.add(source, Kind::Comment, 0..5);
+        review.update(id, |a| a.note = "ok".to_owned());
+        let text = export_one("!run this\n/second", source, &review);
+        assert!(text.starts_with("# Note\n\n> !run this\n> /second\n\n# Annotations on"), "{text}");
+    }
+
+    #[test]
+    fn a_multi_line_general_note_keeps_its_blank_lines_as_quote_markers() {
+        let text = export("one\n\ntwo", &[]);
+        assert_eq!(text, "# Note\n\n> one\n>\n> two\n");
     }
 
     #[test]
