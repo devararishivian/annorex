@@ -1237,6 +1237,8 @@ fn restored_editor_drops_when_its_text_is_gone() {
     draft.editing = Some(editing(Some("GONE")));
     app.restore("file:a.txt", draft.clone());
     assert!(app.editor().is_none(), "the editor closes when the quote is gone");
+    assert!(render(&mut app, 100, 12).contains("gone after the new read"), "quote gone");
+    press(&mut app, "j");
     draft.editing = Some(editing(None));
     app.restore("file:a.txt", draft);
     assert!(app.editor().is_none(), "the editor closes when the draft has no quote");

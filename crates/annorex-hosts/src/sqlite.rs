@@ -27,9 +27,10 @@ pub(crate) fn open_read_only(db: &Path, what: &str) -> Result<Connection, HostEr
 /// stay part of the file name in a `file:` URI.
 fn uri_path(path: &Path) -> String {
     use std::fmt::Write as _;
-    let text = path.to_string_lossy();
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let bytes = path.as_os_str().as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    for &byte in bytes {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
             out.push(char::from(byte));
         } else {
@@ -47,4 +48,21 @@ fn probe(connection: &Connection) -> bool {
 
 pub(crate) fn sql_error(what: &str, err: &rusqlite::Error) -> HostError {
     HostError::NoTranscript(format!("reading the {what} database: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+
+    use super::uri_path;
+
+    #[test]
+    fn uri_path_encodes_the_raw_bytes_of_a_non_utf8_path() {
+        let path = Path::new(OsStr::from_bytes(b"/x/a\xFFb/opencode.db"));
+        let uri = uri_path(path);
+        assert!(uri.contains("%FF"), "{uri}");
+        assert!(!uri.contains("%EF%BF%BD"), "{uri}");
+    }
 }
