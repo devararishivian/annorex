@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::doc::{Doc, DocSpan, SpanSource, SpanStyle, joins};
+use crate::doc::{Doc, DocSpan, DocTable, SpanSource, SpanStyle, joins};
 
 /// One row of the document view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,20 +219,179 @@ fn trim_end(rows: &mut [Vec<Cluster>]) {
     }
 }
 
+/// The most columns that one long word takes in a table column before the columns share the rest.
+const WORD_CAP: usize = 20;
+/// The text between two table columns.
+const COLUMN_GAP: &str = " │ ";
+
 /// The rows of the whole document at `width` columns.
 pub fn wrap_doc(doc: &Doc, width: u16) -> Vec<VisualLine> {
     let width = usize::from(width.max(1));
     let mut out = Vec::new();
-    for (doc_line, line) in doc.lines.iter().enumerate() {
-        if line.is_blank() {
-            out.push(VisualLine { doc_line, spans: Vec::new(), first: true });
+    let mut doc_line = 0;
+    while let Some(line) = doc.lines.get(doc_line) {
+        if let Some(table) = doc.tables.iter().find(|table| table.lines.start == doc_line)
+            && let Some(rows) = wrap_table(doc, table, width)
+        {
+            out.extend(rows);
+            doc_line = table.lines.end;
             continue;
         }
-        for (part, spans) in wrap_spans(&line.spans, width).into_iter().enumerate() {
-            out.push(VisualLine { doc_line, spans, first: part == 0 });
+        if line.is_blank() {
+            out.push(VisualLine { doc_line, spans: Vec::new(), first: true });
+        } else {
+            for (part, spans) in wrap_spans(&line.spans, width).into_iter().enumerate() {
+                out.push(VisualLine { doc_line, spans, first: part == 0 });
+            }
         }
+        doc_line += 1;
     }
     out
+}
+
+fn spans_width(spans: &[DocSpan]) -> usize {
+    spans.iter().map(|span| span.text.width()).sum()
+}
+
+/// The width of the longest word of a cell.
+fn longest_word(cell: &[DocSpan]) -> usize {
+    let text: String = cell.iter().map(|span| span.text.as_str()).collect();
+    text.split_whitespace().map(UnicodeWidthStr::width).max().unwrap_or(0)
+}
+
+/// The widths of the columns for `available` columns. Each column keeps at least its longest word
+/// (at most `WORD_CAP`). The rest is shared by the natural width. `None` when even the minimum
+/// widths do not fit.
+fn fit_columns(natural: &[usize], minimum: &[usize], available: usize) -> Option<Vec<usize>> {
+    let base: usize = minimum.iter().sum();
+    if base > available {
+        return None;
+    }
+    let want: Vec<usize> = natural.iter().zip(minimum).map(|(n, m)| n.saturating_sub(*m)).collect();
+    let want_sum: usize = want.iter().sum();
+    let extra = available - base;
+    let mut give: Vec<usize> =
+        want.iter().map(|w| (extra * w).checked_div(want_sum).unwrap_or(0).min(*w)).collect();
+    let mut left = extra.saturating_sub(give.iter().sum());
+    while left > 0 {
+        let mut moved = false;
+        for (given, wanted) in give.iter_mut().zip(&want) {
+            if left > 0 && *given < *wanted {
+                *given += 1;
+                left -= 1;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    Some(minimum.iter().zip(&give).map(|(m, g)| m + g).collect())
+}
+
+/// `spans` cut to `width` columns.
+fn clip_spans(spans: &[DocSpan], width: usize) -> Vec<DocSpan> {
+    let mut row = Vec::new();
+    let mut used = 0;
+    for cluster in clusters(spans) {
+        if used + cluster.width > width {
+            break;
+        }
+        used += cluster.width;
+        row.push(cluster);
+    }
+    spans_of(&row)
+}
+
+/// The prefix of a row below the first: the same width, without the list marker.
+fn continuation(prefix: &[DocSpan]) -> Vec<DocSpan> {
+    prefix
+        .iter()
+        .map(|span| DocSpan {
+            text: span.text.chars().map(|c| if c == '│' { c } else { ' ' }).collect(),
+            ..span.clone()
+        })
+        .collect()
+}
+
+/// The rows of a table at `width` columns. `None` when the table fits: then the lines of the
+/// document show as they are. A table that is too wide gets narrower columns and its cells wrap.
+/// If even the narrowest columns do not fit, each line is clipped.
+// Adapted from plannotator-tui (MIT): the column widths and the clip fallback.
+fn wrap_table(doc: &Doc, table: &DocTable, width: usize) -> Option<Vec<VisualLine>> {
+    let columns = table.rows.iter().map(Vec::len).max().unwrap_or(0);
+    if columns == 0 || table.lines.is_empty() {
+        return None;
+    }
+    let mut natural = vec![0; columns];
+    let mut minimum = vec![1; columns];
+    for cells in &table.rows {
+        for (column, cell) in cells.iter().enumerate() {
+            if let (Some(n), Some(m)) = (natural.get_mut(column), minimum.get_mut(column)) {
+                *n = (*n).max(spans_width(cell));
+                *m = (*m).max(longest_word(cell).min(WORD_CAP));
+            }
+        }
+    }
+    let gaps = COLUMN_GAP.width() * (columns - 1);
+    let prefix_width = table.prefixes.iter().map(|prefix| spans_width(prefix)).max().unwrap_or(0);
+    let budget = width.saturating_sub(prefix_width);
+    if natural.iter().sum::<usize>() + gaps <= budget {
+        return None;
+    }
+    let widths = budget.checked_sub(gaps).and_then(|available| fit_columns(&natural, &minimum, available));
+    let Some(widths) = widths else {
+        let rows = table.lines.clone().filter_map(|index| doc.lines.get(index).map(|line| (index, line)));
+        return Some(
+            rows.map(|(doc_line, line)| VisualLine {
+                doc_line,
+                spans: clip_spans(&line.spans, width),
+                first: true,
+            })
+            .collect(),
+        );
+    };
+    let style = SpanStyle {
+        table: true,
+        quote: doc.lines.get(table.lines.start).is_some_and(|line| line.spans.iter().any(|s| s.style.quote)),
+        ..SpanStyle::default()
+    };
+    let added = |text: String| DocSpan { text, style, source: None };
+    let mut out = Vec::new();
+    for (row, cells) in table.rows.iter().enumerate() {
+        let doc_line = table.line_of_row(row);
+        let wrapped: Vec<Vec<Vec<DocSpan>>> = widths
+            .iter()
+            .enumerate()
+            .map(|(column, &w)| wrap_spans(cells.get(column).map_or(&[][..], Vec::as_slice), w))
+            .collect();
+        let height = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let prefix = table.prefixes.get(doc_line - table.lines.start).cloned().unwrap_or_default();
+        for part in 0..height {
+            let mut spans = if part == 0 { prefix.clone() } else { continuation(&prefix) };
+            for (column, &w) in widths.iter().enumerate() {
+                let piece =
+                    wrapped.get(column).and_then(|rows| rows.get(part)).map_or(&[][..], Vec::as_slice);
+                spans.extend(piece.iter().cloned());
+                if column + 1 < columns {
+                    spans.push(added(" ".repeat(w.saturating_sub(spans_width(piece)))));
+                    spans.push(added(COLUMN_GAP.into()));
+                }
+            }
+            out.push(VisualLine { doc_line, spans, first: part == 0 });
+        }
+        if row + 1 == table.head_rows {
+            let rule: Vec<String> = widths.iter().map(|w| "─".repeat(*w)).collect();
+            let mut spans = prefix.clone();
+            spans.push(DocSpan {
+                text: rule.join("─┼─"),
+                style,
+                source: Some(SpanSource { range: table.rule_source.clone(), exact: false }),
+            });
+            out.push(VisualLine { doc_line: doc_line + 1, spans, first: true });
+        }
+    }
+    Some(out)
 }
 
 /// The rows for each width that was drawn. A resize back to an earlier width costs nothing.
@@ -289,6 +448,8 @@ pub fn gutter_width(doc: &Doc) -> u16 {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::indexing_slicing, reason = "tests assert by panicking")]
 mod tests {
+    use std::fmt::Write as _;
+
     use unicode_width::UnicodeWidthStr;
 
     use super::*;
@@ -408,6 +569,118 @@ mod tests {
         assert_eq!(lines[0].cell_of(3), Some(3));
         assert_eq!(lines[1].cell_of(11), Some(0));
         assert_eq!(lines[1].cell_of(3), None);
+    }
+
+    /// A table of 3 columns and 12 rows with long prose in the middle column.
+    fn plan_table() -> String {
+        let mut text = String::from("| # | Task | Model |\n|---|------|-------|\n");
+        for row in 1..=12 {
+            let task = "Write the failing test for this step first and then change the code until the whole suite passes again, keeping every other behavior of the viewer exactly as it was";
+            let model = if row % 2 == 0 { "sonnet" } else { "opus-with-a-longer-name" };
+            let _ = writeln!(text, "| {row} | {task} {row} | {model} |");
+        }
+        text
+    }
+
+    /// The display column of each ` │ ` or ` ─┼─ ` separator in `line`.
+    fn separator_columns(line: &str, glyph: char) -> Vec<usize> {
+        let mut column = 0;
+        let mut out = Vec::new();
+        for c in line.chars() {
+            if c == glyph {
+                out.push(column);
+            }
+            column += UnicodeWidthChar::width(c).unwrap_or(0);
+        }
+        out
+    }
+
+    #[test]
+    fn a_table_that_fits_is_unchanged() {
+        let doc = Doc::parse("| a | bb | ccc |\n|---|----|-----|\n| 1 | 22 | 333 |\n");
+        let lines = wrap_doc(&doc, 120);
+        assert_eq!(texts(&lines), ["a │ bb │ ccc", "──┼────┼────", "1 │ 22 │ 333"]);
+        assert_eq!(lines.iter().map(|line| line.doc_line).collect::<Vec<_>>(), [0, 1, 2]);
+    }
+
+    #[test]
+    fn a_wide_table_wraps_each_cell_in_its_column() {
+        let doc = Doc::parse(&plan_table());
+        let lines = wrap_doc(&doc, 80);
+        assert!(lines.len() > 14, "the long cells wrap onto more rows");
+        for line in &lines {
+            assert!(line.plain().width() <= 80, "too wide: {:?}", line.plain());
+        }
+        for doc_line in 0..doc.lines.len() {
+            let rows: Vec<String> =
+                lines.iter().filter(|line| line.doc_line == doc_line).map(VisualLine::plain).collect();
+            let glyph = if doc_line == 1 { '┼' } else { '│' };
+            let columns: Vec<Vec<usize>> = rows.iter().map(|row| separator_columns(row, glyph)).collect();
+            assert!(columns.iter().all(|found| found.len() == 2), "line {doc_line}: {rows:?}");
+            assert!(columns.windows(2).all(|pair| pair[0] == pair[1]), "line {doc_line}: {rows:?}");
+        }
+        let rule = lines.iter().find(|line| line.doc_line == 1).expect("rule").plain();
+        assert!(rule.contains("─┼─"), "{rule}");
+        let rows_of_first: Vec<String> =
+            lines.iter().filter(|line| line.doc_line == 2).map(VisualLine::plain).collect();
+        assert!(rows_of_first.len() > 1);
+        let joined: String = rows_of_first
+            .iter()
+            .map(|row| row.split(" │ ").nth(1).unwrap_or("").trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(joined.starts_with("Write the failing test") && joined.ends_with("as it was 1"), "{joined}");
+    }
+
+    #[test]
+    fn a_long_word_takes_at_most_20_columns_before_it_shares() {
+        let word = "x".repeat(60);
+        let prose = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi";
+        let doc = Doc::parse(&format!("| W | T |\n|---|---|\n| {word} | {prose} |\n"));
+        // The minimum widths are 20 and 7. The space for the rest is 50 - 3 - 27 = 20. The first
+        // column wants 40 more and the second wants 76 more, so the first gets 7 of the 20.
+        let lines = wrap_doc(&doc, 50);
+        let first = lines.iter().find(|line| line.doc_line == 2).expect("row").plain();
+        let column = separator_columns(&first, '│')[0];
+        assert_eq!(column, 20 + 7 + 1, "the long word column has 20 columns and its share: {first:?}");
+        assert!(lines.iter().all(|line| line.plain().width() <= 50));
+    }
+
+    #[test]
+    fn a_table_that_cannot_fit_is_clipped() {
+        let doc = Doc::parse(
+            "| aaaaaaaaaaaaaaaaaaaa | bbbbbbbbbbbbbbbbbbbb | cccccccccccccccccccc |\n|--|--|--|\n| 1 | 2 | 3 |\n",
+        );
+        let lines = wrap_doc(&doc, 30);
+        assert_eq!(lines.len(), 3, "one row for each line, no wrap");
+        assert!(lines.iter().all(|line| line.plain().width() <= 30));
+    }
+
+    #[test]
+    fn table_cells_keep_their_source_ranges() {
+        let doc = Doc::parse(&plan_table());
+        for width in [80u16, 120] {
+            let lines = wrap_doc(&doc, width);
+            let mut found = false;
+            for line in lines.iter().filter(|line| line.doc_line == 4) {
+                let plain = line.plain();
+                if let Some(at) = plain.find("suite") {
+                    let column = plain[..at].chars().count();
+                    let offset = line.offsets()[column].expect("a cell character has a source");
+                    assert_eq!(&doc.source[offset..offset + 5], "suite", "width {width}");
+                    found = true;
+                }
+            }
+            assert!(found, "the word is on a row at width {width}");
+        }
+    }
+
+    #[test]
+    fn a_table_in_a_quote_keeps_its_prefix_and_width() {
+        let doc = Doc::parse(&plan_table().replace("\n|", "\n> |").replacen('|', "> |", 1));
+        let lines = wrap_doc(&doc, 60);
+        assert!(lines.len() > 14);
+        assert!(lines.iter().all(|line| line.plain().width() <= 60 && line.plain().starts_with("│ ")));
     }
 
     #[test]

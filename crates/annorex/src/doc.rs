@@ -123,6 +123,30 @@ pub struct Block {
     pub lines: Range<usize>,
 }
 
+/// The cells of one Markdown table. `wrap_doc` reflows the table from them when it is wider than the
+/// window. The text in a cell has no padding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocTable {
+    /// The `DocLine` indexes of the table: the header rows, the rule line, and the body rows.
+    pub lines: Range<usize>,
+    /// The number of header rows. The rule line follows them.
+    pub head_rows: usize,
+    /// The spans of each cell, for each row. A row can have fewer cells than the table has columns.
+    pub rows: Vec<Vec<Vec<DocSpan>>>,
+    /// The spans that the display adds before the cells (the quote and list prefix), for each line
+    /// in `lines`.
+    pub prefixes: Vec<Vec<DocSpan>>,
+    /// The source range of the rule line.
+    pub rule_source: Range<usize>,
+}
+
+impl DocTable {
+    /// The index of the `DocLine` of row `row`.
+    pub fn line_of_row(&self, row: usize) -> usize {
+        self.lines.start + row + usize::from(row >= self.head_rows)
+    }
+}
+
 /// A rendered document and its source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Doc {
@@ -131,6 +155,8 @@ pub struct Doc {
     pub lines: Vec<DocLine>,
     /// The blocks in document order. They do not overlap. A blank line is in no block.
     pub blocks: Vec<Block>,
+    /// The tables of a Markdown document, in document order.
+    pub tables: Vec<DocTable>,
     /// How the document shows. Plain text and code show a line number gutter.
     pub kind: DocKind,
     line_starts: Vec<usize>,
@@ -141,7 +167,7 @@ impl Doc {
     pub fn parse(source: &str) -> Self {
         let source = sanitize(source);
         let line_starts = line_starts(&source);
-        let (lines, blocks) = {
+        let (lines, blocks, tables) = {
             let mut builder = Builder::new(&source, &line_starts);
             let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
             for (event, range) in Parser::new_ext(&source, options).into_offset_iter() {
@@ -149,7 +175,7 @@ impl Doc {
             }
             builder.finish()
         };
-        Self { source, lines, blocks, kind: DocKind::Markdown, line_starts }
+        Self { source, lines, blocks, tables, kind: DocKind::Markdown, line_starts }
     }
 
     /// Show a text as it is: one `DocLine` for each source line, with the exact source of each
@@ -193,7 +219,7 @@ impl Doc {
             lines.push(DocLine { spans, source: range, line: index + 1 });
         }
         let blocks = plain_blocks(&lines);
-        Self { source, lines, blocks, kind: DocKind::Plain, line_starts }
+        Self { source, lines, blocks, tables: Vec::new(), kind: DocKind::Plain, line_starts }
     }
 
     /// Render a text as the kind says.
@@ -361,9 +387,9 @@ struct Pending {
 
 #[derive(Default)]
 struct Table {
-    rows: Vec<(Vec<String>, Range<usize>)>,
+    rows: Vec<(Vec<Vec<DocSpan>>, Range<usize>)>,
     head_rows: usize,
-    cells: Vec<String>,
+    cells: Vec<Vec<DocSpan>>,
     row_source: Range<usize>,
 }
 
@@ -379,6 +405,7 @@ struct Builder<'a> {
     quote_depth: usize,
     table: Option<Table>,
     blocks: Vec<Block>,
+    tables: Vec<DocTable>,
     open: Option<OpenBlock>,
     /// The number of open block-level containers.
     depth: usize,
@@ -401,6 +428,7 @@ impl<'a> Builder<'a> {
             quote_depth: 0,
             table: None,
             blocks: Vec::new(),
+            tables: Vec::new(),
             open: None,
             depth: 0,
             items: Vec::new(),
@@ -736,7 +764,16 @@ impl<'a> Builder<'a> {
 
     /// Collect a table. Returns true when the event belonged to the table.
     fn table_event(&mut self, event: &Event<'_>, range: &Range<usize>) -> bool {
+        let style = SpanStyle { table: true, quote: self.quote_depth > 0, ..SpanStyle::default() };
+        let source = self.source;
         let Some(table) = &mut self.table else { return false };
+        let piece = |text: &str, range: &Range<usize>, inner: Option<Range<usize>>| {
+            let text = text.replace('\t', TAB);
+            let exact_range = inner.unwrap_or_else(|| range.clone());
+            let exact = source.get(exact_range.clone()) == Some(text.as_str());
+            let range = if exact { exact_range } else { range.clone() };
+            DocSpan { text, style, source: Some(SpanSource { range, exact }) }
+        };
         match event {
             Event::Start(Tag::TableHead | Tag::TableRow) => {
                 table.cells.clear();
@@ -749,15 +786,29 @@ impl<'a> Builder<'a> {
                     table.head_rows = table.rows.len();
                 }
             }
-            Event::Start(Tag::TableCell) => table.cells.push(String::new()),
-            Event::Text(text) | Event::Code(text) | Event::InlineHtml(text) => {
+            Event::Start(Tag::TableCell) => table.cells.push(Vec::new()),
+            Event::Text(text) | Event::InlineHtml(text) if !text.is_empty() => {
                 if let Some(cell) = table.cells.last_mut() {
-                    cell.push_str(&text.replace('\t', TAB));
+                    cell.push(piece(text, range, None));
+                }
+            }
+            Event::Code(text) if !text.is_empty() => {
+                if let Some(cell) = table.cells.last_mut() {
+                    // The range of the event includes the backticks. The text is between them.
+                    let ticks = source
+                        .get(range.clone())
+                        .map_or(0, |raw| raw.chars().take_while(|&c| c == '`').count());
+                    let inner = range.start + ticks..range.end.saturating_sub(ticks);
+                    cell.push(piece(text, range, Some(inner)));
                 }
             }
             Event::SoftBreak | Event::HardBreak => {
                 if let Some(cell) = table.cells.last_mut() {
-                    cell.push(' ');
+                    cell.push(DocSpan {
+                        text: " ".into(),
+                        style,
+                        source: Some(SpanSource { range: range.clone(), exact: false }),
+                    });
                 }
             }
             Event::End(TagEnd::Table) => {
@@ -772,43 +823,79 @@ impl<'a> Builder<'a> {
         true
     }
 
+    /// Add a line that is made of ready spans. `range` is the source of the line.
+    fn push_spans(&mut self, spans: Vec<DocSpan>, range: &Range<usize>) {
+        self.begin(range.start);
+        if let Some(pending) = &mut self.pending {
+            pending.source.end = pending.source.end.max(range.end);
+            pending.spans.extend(spans);
+        }
+    }
+
+    /// The display of a table at its natural width. The window can be narrower: then `wrap_doc`
+    /// reflows the table from `Doc::tables`.
     fn emit_table(&mut self, table: &Table) {
         let columns = table.rows.iter().map(|(cells, _)| cells.len()).max().unwrap_or(0);
+        let width_of = |cell: &[DocSpan]| cell.iter().map(|span| span.text.width()).sum::<usize>();
         let mut widths = vec![0; columns];
         for (cells, _) in &table.rows {
             for (width, cell) in widths.iter_mut().zip(cells) {
-                *width = (*width).max(cell.width());
+                *width = (*width).max(width_of(cell));
             }
         }
         let style = SpanStyle { table: true, quote: self.quote_depth > 0, ..SpanStyle::default() };
+        let added = |text: String| DocSpan { text, style, source: None };
+        self.flush();
+        let first_line = self.lines.len();
+        let mut prefixes = Vec::new();
+        let mut rule_source = 0..0;
         for (index, (cells, source)) in table.rows.iter().enumerate() {
-            let text: Vec<String> = widths
-                .iter()
-                .enumerate()
-                .map(|(column, width)| {
-                    let cell = cells.get(column).map_or("", String::as_str);
-                    format!("{cell}{}", " ".repeat(width.saturating_sub(cell.width())))
-                })
-                .collect();
-            self.push(text.join(" │ ").trim_end(), style, source);
+            self.begin(source.start);
+            prefixes.push(self.pending.as_ref().map(|pending| pending.spans.clone()).unwrap_or_default());
+            let mut spans = Vec::new();
+            for (column, width) in widths.iter().enumerate() {
+                let cell = cells.get(column).map_or(&[][..], Vec::as_slice);
+                spans.extend(cell.iter().cloned());
+                spans.push(added(" ".repeat(width.saturating_sub(width_of(cell)))));
+                if column + 1 < columns {
+                    spans.push(added(" │ ".into()));
+                }
+            }
+            while spans.last().is_some_and(|span| span.source.is_none() && span.text.trim_end().is_empty()) {
+                spans.pop();
+            }
+            if let Some(last) = spans.last_mut().filter(|span| span.source.is_none()) {
+                last.text = last.text.trim_end().to_owned();
+            }
+            self.push_spans(spans, source);
             self.flush();
             if index + 1 == table.head_rows {
                 let rule: Vec<String> = widths.iter().map(|width| "─".repeat(*width)).collect();
                 let line = line_of(self.line_starts, source.start) + 1;
                 let start = self.line_starts.get(line - 1).copied().unwrap_or(source.end);
                 let end = self.line_starts.get(line).map_or(self.source.len(), |next| next - 1).max(start);
-                self.push(&rule.join("─┼─"), style, &(start..end));
+                rule_source = start..end;
+                self.begin(start);
+                prefixes.push(self.pending.as_ref().map(|pending| pending.spans.clone()).unwrap_or_default());
+                self.push(&rule.join("─┼─"), style, &rule_source);
                 self.flush();
             }
         }
+        self.tables.push(DocTable {
+            lines: first_line..self.lines.len(),
+            head_rows: table.head_rows,
+            rows: table.rows.iter().map(|(cells, _)| cells.clone()).collect(),
+            prefixes,
+            rule_source,
+        });
     }
 
-    fn finish(mut self) -> (Vec<DocLine>, Vec<Block>) {
+    fn finish(mut self) -> (Vec<DocLine>, Vec<Block>, Vec<DocTable>) {
         self.close_block();
         while self.lines.last().is_some_and(DocLine::is_blank) {
             self.lines.pop();
         }
-        (self.lines, self.blocks)
+        (self.lines, self.blocks, self.tables)
     }
 }
 
