@@ -675,6 +675,31 @@ fn editor_open_during_a_change_survives_the_reload() {
 }
 
 #[test]
+fn reload_moves_the_selection_with_its_text() {
+    let (dir, mut app) = real_app("a.txt", "a\nb\nTARGET\n");
+    press(&mut app, "0jjvlllll");
+    std::fs::write(dir.path().join("a.txt"), "x\nx\na\nb\nTARGET\n").expect("change");
+    app.file_changed(&change("a.txt", ChangeKind::Modified));
+    let loaded = annorex::files::load(dir.path(), std::path::Path::new("a.txt")).expect("load");
+    app.reload_file(&annorex::ui::file_id(std::path::Path::new("a.txt")), loaded);
+    press(&mut app, "cx\n");
+    assert_eq!(app.review().expect("review").annotations[0].quote, "TARGET");
+}
+
+#[test]
+fn reload_drops_a_selection_whose_text_is_gone() {
+    let (dir, mut app) = real_app("a.txt", "a\nb\nTARGET\n");
+    press(&mut app, "0jjvlllll");
+    std::fs::write(dir.path().join("a.txt"), "other\n").expect("change");
+    app.file_changed(&change("a.txt", ChangeKind::Modified));
+    let loaded = annorex::files::load(dir.path(), std::path::Path::new("a.txt")).expect("load");
+    app.reload_file(&annorex::ui::file_id(std::path::Path::new("a.txt")), loaded);
+    press(&mut app, "cx\n");
+    let note = &app.review().expect("review").annotations[0];
+    assert_eq!(note.quote, "other", "no note quotes the wrong text: the selection is gone");
+}
+
+#[test]
 fn banner_snapshot_80x24() {
     let (dir, mut app) = real_app("a.txt", "alpha beta\nsecond line\n");
     press(&mut app, "0vllllcnote\n");

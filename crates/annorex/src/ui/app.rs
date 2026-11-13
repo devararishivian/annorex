@@ -735,6 +735,7 @@ impl App {
         }
         self.changes.remove(id);
         let changed = if old == new { Vec::new() } else { vec![(id.to_owned(), old, new)] };
+        let selected = self.selection_range();
         if self.shown_id.as_deref() == Some(id) {
             let (line, top, focus) = (self.cursor_line(), self.top, self.focus_range());
             self.show_reply(position);
@@ -745,6 +746,7 @@ impl App {
             self.follow_focus(focus, &changed);
         }
         self.place_again(&changed);
+        self.follow_selection(selected, &changed);
         self.sync_watch();
     }
 
@@ -850,6 +852,7 @@ impl App {
             .then(|| self.replies.get(self.panel_index).map(|reply| reply.id.clone()))
             .flatten();
         let (top, cursor, focus) = (self.top, self.cursor, self.focus_range());
+        let selected = self.selection_range();
         // The open files stay after the replies.
         let mut replies = replies;
         replies.extend(self.replies.iter().filter(|reply| self.files.contains_key(&reply.id)).cloned());
@@ -876,6 +879,41 @@ impl App {
             self.panel_index = index;
         }
         self.place_again(&changed);
+        self.follow_selection(selected, &changed);
+    }
+
+    /// Move the selection of the shown reply to its text in the new source. `old` is the range of the
+    /// selection before the change. A selection whose text is gone ends, and the footer says so.
+    fn follow_selection(&mut self, old: Option<Range<usize>>, changed: &[(String, String, String)]) {
+        let (Some(range), Some(id)) = (old, self.shown_id.as_deref()) else { return };
+        let Some((_, old_source, new_source)) = changed.iter().find(|(changed_id, ..)| changed_id == id)
+        else {
+            return;
+        };
+        let Some(moved) = reanchor_range(old_source, new_source, &range) else {
+            self.selection = None;
+            self.bar_open = false;
+            self.status = Some(MOVED_TEXT.to_owned());
+            return;
+        };
+        let last = self.doc.source.get(..moved.end).and_then(|head| head.char_indices().next_back());
+        let end = last.map_or(moved.start, |(index, _)| index.max(moved.start));
+        self.selection = match self.selection {
+            Some(Selection::Chars { .. }) => {
+                Some(Selection::Chars { anchor: self.stop_at_or_before(moved.start) })
+            }
+            Some(Selection::Lines { .. }) => Some(Selection::Lines { anchor: moved.start }),
+            None => None,
+        };
+        self.cursor = end;
+        self.snap_cursor();
+    }
+
+    /// The nearest cursor stop at or before `offset`.
+    fn stop_at_or_before(&self, offset: usize) -> usize {
+        let line = self.doc.locate(offset).0;
+        let stops = self.doc.stops(line);
+        stops.iter().rev().find(|&&stop| stop <= offset).or(stops.first()).copied().unwrap_or(offset)
     }
 
     /// The replies that stay but have a new text: id, old source, new source.
