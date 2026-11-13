@@ -358,13 +358,21 @@ fn wrap_table(doc: &Doc, table: &DocTable, width: usize) -> Option<Vec<VisualLin
     };
     let added = |text: String| DocSpan { text, style, source: None };
     let mut out = Vec::new();
-    for (row, cells) in table.rows.iter().enumerate() {
+    let all: Vec<Vec<Vec<Vec<DocSpan>>>> = table
+        .rows
+        .iter()
+        .map(|cells| {
+            widths
+                .iter()
+                .enumerate()
+                .map(|(column, &w)| wrap_spans(cells.get(column).map_or(&[][..], Vec::as_slice), w))
+                .collect()
+        })
+        .collect();
+    // When a cell wraps, a rule between the body rows keeps them apart.
+    let any_wrap = all.iter().flatten().any(|rows| rows.len() > 1);
+    for (row, wrapped) in all.iter().enumerate() {
         let doc_line = table.line_of_row(row);
-        let wrapped: Vec<Vec<Vec<DocSpan>>> = widths
-            .iter()
-            .enumerate()
-            .map(|(column, &w)| wrap_spans(cells.get(column).map_or(&[][..], Vec::as_slice), w))
-            .collect();
         let height = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
         let prefix = table.prefixes.get(doc_line - table.lines.start).cloned().unwrap_or_default();
         for part in 0..height {
@@ -389,6 +397,11 @@ fn wrap_table(doc: &Doc, table: &DocTable, width: usize) -> Option<Vec<VisualLin
                 source: Some(SpanSource { range: table.rule_source.clone(), exact: false }),
             });
             out.push(VisualLine { doc_line: doc_line + 1, spans, first: true });
+        } else if any_wrap && row >= table.head_rows && row + 1 < table.rows.len() {
+            let rule: Vec<String> = widths.iter().map(|w| "─".repeat(*w)).collect();
+            let mut spans = continuation(&prefix);
+            spans.push(added(rule.join("─┼─")));
+            out.push(VisualLine { doc_line, spans, first: false });
         }
     }
     Some(out)
@@ -612,8 +625,12 @@ mod tests {
             assert!(line.plain().width() <= 80, "too wide: {:?}", line.plain());
         }
         for doc_line in 0..doc.lines.len() {
-            let rows: Vec<String> =
-                lines.iter().filter(|line| line.doc_line == doc_line).map(VisualLine::plain).collect();
+            let rows: Vec<String> = lines
+                .iter()
+                .filter(|line| line.doc_line == doc_line)
+                .map(VisualLine::plain)
+                .filter(|row| doc_line == 1 || !row.contains('┼'))
+                .collect();
             let glyph = if doc_line == 1 { '┼' } else { '│' };
             let columns: Vec<Vec<usize>> = rows.iter().map(|row| separator_columns(row, glyph)).collect();
             assert!(columns.iter().all(|found| found.len() == 2), "line {doc_line}: {rows:?}");
@@ -621,8 +638,11 @@ mod tests {
         }
         let rule = lines.iter().find(|line| line.doc_line == 1).expect("rule").plain();
         assert!(rule.contains("─┼─"), "{rule}");
-        let rows_of_first: Vec<String> =
-            lines.iter().filter(|line| line.doc_line == 2).map(VisualLine::plain).collect();
+        let rows_of_first: Vec<String> = lines
+            .iter()
+            .filter(|line| line.doc_line == 2 && !line.plain().contains('┼'))
+            .map(VisualLine::plain)
+            .collect();
         assert!(rows_of_first.len() > 1);
         let joined: String = rows_of_first
             .iter()
@@ -681,6 +701,31 @@ mod tests {
         let lines = wrap_doc(&doc, 60);
         assert!(lines.len() > 14);
         assert!(lines.iter().all(|line| line.plain().width() <= 60 && line.plain().starts_with("│ ")));
+    }
+
+    #[test]
+    fn wrapped_body_rows_have_a_rule_between_them() {
+        let doc = Doc::parse(&plan_table());
+        let lines = wrap_doc(&doc, 80);
+        let rules: Vec<&VisualLine> = lines.iter().filter(|line| line.plain().contains("─┼─")).collect();
+        assert_eq!(rules.len(), 12, "the header rule and 11 rules between 12 body rows");
+        let first_row = lines.iter().find(|line| line.doc_line == 2).expect("row").plain();
+        let bars = separator_columns(&first_row, '│');
+        for rule in &rules {
+            assert_eq!(separator_columns(&rule.plain(), '┼'), bars, "{:?}", rule.plain());
+        }
+        let between: Vec<&&VisualLine> = rules.iter().filter(|line| line.doc_line > 1).collect();
+        assert!(
+            between.iter().all(|line| !line.first && line.spans.iter().all(|span| span.source.is_none()))
+        );
+        assert!(lines.iter().all(|line| line.plain().width() <= 80));
+    }
+
+    #[test]
+    fn a_reflowed_table_without_wrapping_has_no_extra_rules() {
+        let doc = Doc::parse("| a | bb |\n|---|----|\n| 1 | 22 |\n| 3 | 44 |\n");
+        let rules = wrap_doc(&doc, 120).iter().filter(|line| line.plain().contains("─┼─")).count();
+        assert_eq!(rules, 1);
     }
 
     #[test]
