@@ -5,12 +5,13 @@
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, BoxView, Effect, Focus, ReplySource, Screen, Selection, is_word};
 use super::focus::{Mode, Move};
 use super::hits::Hit;
 use crate::deliver::DeliveryMode;
+use crate::doc::joins;
 use crate::keys::Action;
 use crate::review::Kind;
 
@@ -297,14 +298,24 @@ impl App {
         let width = if self.width == 0 { u16::MAX } else { self.width };
         let visual = self.cache.get(&self.doc, width).get(row)?.clone();
         let column = usize::from(column);
-        let mut x = 0;
-        let mut found = None;
+        // Measure by glyph, as the renderer does: a joined sequence is one glyph with one width.
+        let mut glyphs: Vec<(String, Option<usize>)> = Vec::new();
+        let mut previous = None;
         let mut last = None;
         for (c, offset) in visual.plain().chars().zip(visual.offsets()) {
-            let size = c.width().unwrap_or(0);
             last = offset.or(last);
+            match glyphs.last_mut() {
+                Some((text, _)) if joins(previous, c) => text.push(c),
+                _ => glyphs.push((c.to_string(), offset.or(last))),
+            }
+            previous = Some(c);
+        }
+        let mut x = 0;
+        let mut found = None;
+        for (text, offset) in &glyphs {
+            let size = text.width();
             if size > 0 && column < x + size {
-                found = offset.or(last);
+                found = *offset;
                 break;
             }
             x += size;

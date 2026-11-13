@@ -180,6 +180,18 @@ fn drag_end_shows_strip() {
 }
 
 #[test]
+fn drag_after_an_emoji_selects_the_cells_under_the_pointer() {
+    let mut app = viewer("\u{26a0}\u{fe0f} Note\n");
+    let screen = frame(&mut app, NARROW);
+    let (x, y) = find(&screen, "Note");
+    app.handle_mouse(event(MouseEventKind::Down(MouseButton::Left), (x, y)));
+    app.handle_mouse(event(MouseEventKind::Drag(MouseButton::Left), (x + 3, y)));
+    app.handle_mouse(event(MouseEventKind::Up(MouseButton::Left), (x + 3, y)));
+    press(&mut app, "cx\n");
+    assert_eq!(app.review().expect("review").annotations[0].quote, "Note");
+}
+
+#[test]
 fn drag_in_progress_shows_no_strip() {
     let mut app = viewer("alpha beta gamma\n");
     let screen = frame(&mut app, NARROW);

@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Clear;
-use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Focus};
 use super::cards::{icon, kind_color};
@@ -62,14 +62,14 @@ fn shown_place(app: &mut App, range: &Range<usize>) -> Option<(usize, usize, u16
 /// The cells before the first character of `range` on a row. 0 when no character with a source
 /// comes before it.
 fn start_column(plain: &str, offsets: &[Option<usize>], range: &Range<usize>) -> u16 {
-    let mut width = 0usize;
     let mut sourced = false;
-    for (c, offset) in plain.chars().zip(offsets) {
+    for ((index, _), offset) in plain.char_indices().zip(offsets) {
         if offset.is_some_and(|offset| range.contains(&offset)) {
+            // The width of the glyphs, not the sum of the chars: `⚠️` is 2 cells.
+            let width = plain.get(..index).map_or(0, UnicodeWidthStr::width);
             return if sourced { u16::try_from(width).unwrap_or(u16::MAX) } else { 0 };
         }
         sourced |= offset.is_some();
-        width += c.width().unwrap_or(0);
     }
     0
 }

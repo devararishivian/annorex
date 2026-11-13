@@ -263,11 +263,19 @@ impl Doc {
             match &span.source {
                 Some(SpanSource { range, exact: true }) => {
                     let mut previous = None;
+                    let mut glyph = String::new();
                     for (index, c) in span.text.char_indices() {
-                        if !joins(previous, c) {
+                        if joins(previous, c) {
+                            // The width of the glyph, not the sum of its chars: `⚠️` is 2 columns.
+                            let before = glyph.width();
+                            glyph.push(c);
+                            column = (column + glyph.width()).saturating_sub(before);
+                        } else {
                             out.push((range.start + index, column));
+                            glyph.clear();
+                            glyph.push(c);
+                            column += glyph.width();
                         }
-                        column += c.width().unwrap_or(0);
                         previous = Some(c);
                     }
                 }
