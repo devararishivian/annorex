@@ -809,14 +809,14 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
                 .find_map(|(index, row)| row.cell_of(app.cursor).map(|cell| (index, cell)))
         })
         .flatten();
+    let mut group: RowMatches = None;
     let lines: Vec<Line<'static>> = rows
         .iter()
         .skip(top_row)
         .take(height)
         .enumerate()
         .map(|(offset, row)| {
-            let matches =
-                query.as_deref().map(|query| row_matches(rows, top_row + offset, query)).unwrap_or_default();
+            let matches = row_matches(&mut group, rows, top_row + offset, query.as_deref());
             let number_style = if !block_mode && row.doc_line == cursor_line {
                 Style::new().add_modifier(Modifier::REVERSED)
             } else {
@@ -960,37 +960,75 @@ fn style_of(style: SpanStyle) -> Style {
     out
 }
 
-/// The matches of `query` in row `index`, as character ranges of the row. A match can go over a
-/// wrap: the rows of one `DocLine` are joined with the space that the wrap removed.
-fn row_matches(rows: &[VisualLine], index: usize, query: &str) -> Vec<std::ops::Range<usize>> {
-    let Some(row) = rows.get(index) else { return Vec::new() };
+/// The first row of a `DocLine` and the matches of each of its rows.
+type RowMatches = Option<(usize, Vec<Vec<std::ops::Range<usize>>>)>;
+
+#[cfg(test)]
+thread_local! {
+    /// The number of searches over a joined `DocLine` on this thread. A test counts them.
+    static MATCH_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The matches of `query` in each row of the `DocLine` that has row `index`, as character ranges of
+/// each row, with the index of the first row of the group. A match can go over a wrap: the rows of
+/// one `DocLine` are joined with the space that the wrap removed. The line is searched once.
+fn group_matches(
+    rows: &[VisualLine],
+    index: usize,
+    query: &str,
+) -> (usize, Vec<Vec<std::ops::Range<usize>>>) {
+    let Some(row) = rows.get(index) else { return (index, Vec::new()) };
     let start = rows.partition_point(|other| other.doc_line < row.doc_line);
     let group: Vec<&VisualLine> =
         rows.iter().skip(start).take_while(|other| other.doc_line == row.doc_line).collect();
-    let texts: Vec<String> = group.iter().map(|row| row.plain()).collect();
     // A wrap that dropped its space needs one here. A wrap that kept it does not.
     let mut joined = String::new();
+    let mut spans = Vec::with_capacity(group.len());
     let mut begin = 0;
-    let mut mine = (0, 0);
-    for (position, text) in texts.iter().enumerate() {
+    for row in &group {
+        let text = row.plain();
         let length = text.chars().count();
-        if start + position == index {
-            mine = (begin, begin + length);
-        }
-        joined.push_str(text);
+        spans.push((begin, begin + length));
+        joined.push_str(&text);
         begin += length;
         if !text.ends_with(' ') {
             joined.push(' ');
             begin += 1;
         }
     }
-    match_ranges(&joined, query)
+    #[cfg(test)]
+    MATCH_RUNS.with(|runs| runs.set(runs.get() + 1));
+    let matches = match_ranges(&joined, query);
+    let per_row = spans
         .into_iter()
-        .filter_map(|range| {
-            let (from, to) = (range.start.max(mine.0), range.end.min(mine.1));
-            (from < to).then(|| from - mine.0..to - mine.0)
+        .map(|(from, to)| {
+            matches
+                .iter()
+                .filter_map(|range| {
+                    let (low, high) = (range.start.max(from), range.end.min(to));
+                    (low < high).then(|| low - from..high - from)
+                })
+                .collect()
         })
-        .collect()
+        .collect();
+    (start, per_row)
+}
+
+/// The matches of row `index`. `group` holds the matches of the `DocLine` of the last row: the rows
+/// of one `DocLine` follow each other, so each line is searched once for a frame.
+fn row_matches(
+    group: &mut RowMatches,
+    rows: &[VisualLine],
+    index: usize,
+    query: Option<&str>,
+) -> Vec<std::ops::Range<usize>> {
+    let Some(query) = query else { return Vec::new() };
+    let stale =
+        group.as_ref().is_none_or(|(start, per_row)| index < *start || index >= start + per_row.len());
+    if stale {
+        *group = Some(group_matches(rows, index, query));
+    }
+    group.as_ref().and_then(|(start, per_row)| per_row.get(index - start)).cloned().unwrap_or_default()
 }
 
 /// For each character of a row: the type of the note over it. Where notes of two types overlap,
@@ -1544,6 +1582,20 @@ mod tests {
     use crate::replies::Reply;
     use crate::review::Kind;
     use crate::safety::Safety;
+
+    #[test]
+    fn a_search_on_a_long_line_scans_the_line_once_for_each_frame() {
+        let reply = Reply { id: "r".to_owned(), text: "abc ".repeat(25_000), at: None };
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        app.query = Some("abc".to_owned());
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("terminal");
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        super::MATCH_RUNS.with(|runs| runs.set(0));
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        let runs = super::MATCH_RUNS.with(std::cell::Cell::get);
+        assert_eq!(runs, 1, "the line was joined and searched {runs} times in one frame");
+    }
 
     #[test]
     fn doc_cells_exist_past_visual_row_65535() {
