@@ -23,7 +23,7 @@ use crate::files::{LoadedFile, Scan, Stamp};
 use crate::keys::Action;
 use crate::payload::sanitize;
 use crate::replies::{Candidate, Reply};
-use crate::review::{Annotation, Kind, Review, Section, reanchor_range};
+use crate::review::{Annotation, Kind, Review, Section, reanchor_quote, reanchor_range};
 use crate::safety::Safety;
 use crate::watch::{self, Change, ChangeKind, Known};
 use crate::wrap::WrapCache;
@@ -998,6 +998,7 @@ impl App {
         let id = reply.id.clone();
         self.selected = index;
         self.panel_index = index;
+        let outgoing = self.editor.as_ref().map(|editor| self.editing_of(editor));
         // The text can be new, so the ids of the numbered pick can be stale.
         self.pick = None;
         self.doc = match self.files.get(&id) {
@@ -1015,8 +1016,8 @@ impl App {
         self.cursor = first.and_then(|index| self.line_start(index)).unwrap_or(0);
         if self.shown_id.as_deref() != Some(id.as_str()) {
             // Another reply: its editor was parked, and a selection or a question do not carry over.
-            if let (Some(editor), Some(old)) = (self.editor.take(), self.shown_id.take()) {
-                let editing = Editing { annotation: self.editing_id, ..editor.to_editing() };
+            if let (Some(editing), Some(old)) = (outgoing, self.shown_id.take()) {
+                self.editor = None;
                 self.parked.insert(old, editing);
             }
             self.editing_id = None;
@@ -1086,7 +1087,7 @@ impl App {
         let mut draft = Draft::new(key, &name);
         draft.review = self.reviews.get(id).cloned().unwrap_or_default();
         draft.editing = if self.shown_id.as_deref() == Some(id) {
-            self.editor.as_ref().map(|editor| Editing { annotation: self.editing_id, ..editor.to_editing() })
+            self.editor.as_ref().map(|editor| self.editing_of(editor))
         } else {
             self.parked.get(id).cloned()
         };
@@ -1094,12 +1095,30 @@ impl App {
         Some(draft)
     }
 
+    /// The state of an editor for a draft, with the text under its range in the shown document.
+    fn editing_of(&self, editor: &Editor) -> Editing {
+        let quote = (!editor.general).then(|| self.doc.source.get(editor.range.clone()).map(str::to_owned));
+        Editing { annotation: self.editing_id, quote: quote.flatten(), ..editor.to_editing() }
+    }
+
     /// Put a saved draft back: the review (checked against the reply), the send time, and the
     /// editor that was open.
     pub fn restore(&mut self, reply_id: &str, draft: Draft) {
-        let Draft { mut review, editing, sent_at, .. } = draft;
+        let Draft { mut review, mut editing, sent_at, .. } = draft;
         if let Some(reply) = self.replies.iter().find(|reply| reply.id == reply_id) {
-            review.reanchor(&sanitize(&reply.text));
+            let source = sanitize(&reply.text);
+            review.reanchor(&source);
+            // The document can have changed since the save: follow the text under the editor.
+            if let Some(open) = editing.as_mut().filter(|open| !open.general) {
+                let moved =
+                    open.quote.as_deref().and_then(|quote| reanchor_quote(quote, &source, &open.range));
+                if let Some(range) = moved {
+                    open.range = range;
+                } else {
+                    editing = None;
+                    self.status = Some(MOVED_TEXT.to_owned());
+                }
+            }
         }
         // A draft of M2 keeps the send time only on the draft: all its notes were sent then.
         if let Some(at) = &sent_at {

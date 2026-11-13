@@ -135,13 +135,8 @@ impl Review {
     /// quote, move the range to the first match of the quote. With no match, set `detached`.
     pub fn reanchor(&mut self, source: &str) {
         for annotation in &mut self.annotations {
-            if source.get(annotation.range.clone()) == Some(annotation.quote.as_str()) {
-                annotation.detached = false;
-            } else if let Some(start) = Some(&annotation.quote)
-                .filter(|quote| !quote.is_empty())
-                .and_then(|quote| source.find(quote.as_str()))
-            {
-                annotation.range = start..start + annotation.quote.len();
+            if let Some(range) = reanchor_quote(&annotation.quote, source, &annotation.range) {
+                annotation.range = range;
                 annotation.detached = false;
             } else {
                 annotation.detached = true;
@@ -153,14 +148,19 @@ impl Review {
 /// The place of `range` of `old` in `new`: the same range when the text stands there, else the
 /// first match of the text, else `None`.
 pub fn reanchor_range(old: &str, new: &str, range: &Range<usize>) -> Option<Range<usize>> {
-    let quote = old.get(range.clone())?;
-    if new.get(range.clone()) == Some(quote) {
+    reanchor_quote(old.get(range.clone())?, new, range)
+}
+
+/// The place of `quote` in `source`: `range` when the quote stands there, else the first match of
+/// a non-empty quote, else `None`.
+pub fn reanchor_quote(quote: &str, source: &str, range: &Range<usize>) -> Option<Range<usize>> {
+    if source.get(range.clone()) == Some(quote) {
         return Some(range.clone());
     }
     if quote.is_empty() {
         return None;
     }
-    new.find(quote).map(|start| start..start + quote.len())
+    source.find(quote).map(|start| start..start + quote.len())
 }
 
 /// The annotations of one file, or of the last reply, for the export.

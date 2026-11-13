@@ -73,6 +73,7 @@ impl Editor {
             label: self.label.clone(),
             general: self.general,
             annotation: None,
+            quote: None,
         }
     }
 

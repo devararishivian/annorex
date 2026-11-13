@@ -52,6 +52,9 @@ pub struct Editing {
     /// The id of the annotation that the editor changes. `None` for a new annotation.
     #[serde(default)]
     pub annotation: Option<u64>,
+    /// The text under `range` when the draft was saved. A draft of an older release has none.
+    #[serde(default)]
+    pub quote: Option<String>,
 }
 
 /// The review of one document and its state.
@@ -312,6 +315,14 @@ mod tests {
     }
 
     #[test]
+    fn an_editing_without_a_quote_still_loads() {
+        let old = r#"{"kind":"Comment","range":{"start":1,"end":4},"text":"t","label":null}"#;
+        let editing: Editing = serde_json::from_str(old).expect("old editing");
+        assert_eq!(editing.quote, None);
+        assert_eq!(editing.range, 1..4);
+    }
+
+    #[test]
     fn old_file_name_still_loads() {
         let (_dir, store) = store();
         let draft = draft_with_comment("r1", "alpha beta gamma\n");
@@ -369,6 +380,7 @@ mod tests {
             label: Some("must fix".to_owned()),
             general: false,
             annotation: None,
+            quote: None,
         });
         store.save(&draft).expect("save");
         assert_eq!(store.load(&draft.key).expect("load"), Some(draft));

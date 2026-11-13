@@ -1188,3 +1188,57 @@ fn a_new_reply_keeps_the_highlight_of_the_open_start_list() {
     press(&mut app, "\n");
     assert!(render(&mut app, 120, 20).contains("Text of reply 1."));
 }
+
+#[test]
+fn restored_editor_follows_moved_text() {
+    use annorex::draft::{Draft, DraftKey, Editing};
+    use annorex::review::Kind;
+    let mut app = files_app();
+    app.open_file(loaded("a.txt", "x\nx\na\nb\nTARGET\n"));
+    let mut draft = Draft::new(
+        DraftKey { agent: Agent::ClaudeCode, session: "s".to_owned(), document: "file:a.txt".to_owned() },
+        "a.txt",
+    );
+    // The draft was saved when the file was "a\nb\nTARGET\n": TARGET stood at 4..10 with its newline.
+    draft.editing = Some(Editing {
+        kind: Kind::Comment,
+        range: 4..10,
+        text: "note".to_owned(),
+        label: None,
+        general: false,
+        annotation: None,
+        quote: Some("TARGET".to_owned()),
+    });
+    app.restore("file:a.txt", draft);
+    press(&mut app, "\n");
+    let note = &app.review().expect("review").annotations[0];
+    assert_eq!(note.quote, "TARGET");
+}
+
+#[test]
+fn restored_editor_drops_when_its_text_is_gone() {
+    use annorex::draft::{Draft, DraftKey, Editing};
+    use annorex::review::Kind;
+    let mut app = files_app();
+    app.open_file(loaded("a.txt", "x\nx\n"));
+    let mut draft = Draft::new(
+        DraftKey { agent: Agent::ClaudeCode, session: "s".to_owned(), document: "file:a.txt".to_owned() },
+        "a.txt",
+    );
+    let editing = |quote: Option<&str>| Editing {
+        kind: Kind::Comment,
+        range: 0..1,
+        text: "note".to_owned(),
+        label: None,
+        general: false,
+        annotation: None,
+        quote: quote.map(str::to_owned),
+    };
+    draft.editing = Some(editing(Some("GONE")));
+    app.restore("file:a.txt", draft.clone());
+    assert!(app.editor().is_none(), "the editor closes when the quote is gone");
+    draft.editing = Some(editing(None));
+    app.restore("file:a.txt", draft);
+    assert!(app.editor().is_none(), "the editor closes when the draft has no quote");
+    assert!(render(&mut app, 100, 12).contains("gone after the new read"));
+}
