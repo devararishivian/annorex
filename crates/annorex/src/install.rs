@@ -134,6 +134,13 @@ pub fn check_module(
     }
 }
 
+/// Create the scratch folder for the module check. The folder is private (mode 0700). The call
+/// fails if `path` exists, so a folder that Annorex did not create is never used or removed.
+pub fn make_scratch(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().recursive(false).mode(0o700).create(path)
+}
+
 /// Run `rex config check` on `init` with `REX_CONFIG` set to it, for this call only. `rex` is the binary
 /// that the other commands use.
 pub fn run_rex_config_check(rex: &Path, init: &Path) -> std::io::Result<Probe> {
@@ -162,6 +169,26 @@ mod tests {
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
         move |key| pairs.iter().find(|(k, _)| *k == key).map(|(_, v)| OsString::from(v))
+    }
+
+    #[test]
+    fn make_scratch_creates_a_private_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("check");
+        make_scratch(&path).expect("make scratch");
+        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
+    fn make_scratch_fails_if_the_path_exists() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("check");
+        std::fs::create_dir(&path).expect("folder");
+        std::fs::write(path.join("keep.txt"), "x").expect("file");
+        assert!(make_scratch(&path).is_err());
+        assert!(path.join("keep.txt").exists());
     }
 
     #[test]

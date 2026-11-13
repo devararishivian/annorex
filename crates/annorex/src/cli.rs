@@ -372,12 +372,16 @@ fn rex_install(
     lines.extend(install_note(exe.as_deref()));
     let scratch = std::env::temp_dir().join(format!("annorex-check-{}", std::process::id()));
     let checked = match crate::rex::find_binary(env) {
-        Ok(rex) => std::fs::create_dir_all(&scratch).map_or(Check::Skipped, |()| {
-            check_module(&scratch, exe.as_deref(), |init| run_rex_config_check(&rex, init))
-        }),
+        Ok(rex) => match crate::install::make_scratch(&scratch) {
+            Ok(()) => {
+                let result = check_module(&scratch, exe.as_deref(), |init| run_rex_config_check(&rex, init));
+                let _ = std::fs::remove_dir_all(&scratch);
+                result
+            }
+            Err(_) => Check::Skipped,
+        },
         Err(_) => Check::Skipped,
     };
-    let _ = std::fs::remove_dir_all(&scratch);
     lines.push(String::new());
     match &checked {
         Check::Passed => lines.push("Checked the module with rex config check: no errors.".to_owned()),
