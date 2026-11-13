@@ -1314,10 +1314,10 @@ fn a_card_starts_on_the_first_row_of_its_block_at_240_columns() {
     let block = row_of(&screen, "- two");
     let title = row_of(&screen, "💬 comment");
     assert_eq!(title, block, "the card top is the first row of its block:\n{screen}");
-    // The card sits beside the text, not 80 columns away.
+    // The card sits in the rail at the right edge of the window.
     let line = screen.lines().nth(title).expect("row");
     let card_x = line.find('┌').expect("card border");
-    assert!((100..110).contains(&card_x), "the card is right of the capped document: {card_x}");
+    assert!((200..210).contains(&card_x), "the card is in the rail at the right edge: {card_x}");
 }
 
 #[test]

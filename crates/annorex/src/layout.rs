@@ -16,11 +16,6 @@ pub const RAIL_FROM_WIDTH: u16 = 120;
 pub const TREE_WIDTH: u16 = 28;
 /// The width of the card rail on the right.
 pub const RAIL_WIDTH: u16 = 34;
-/// The largest width of the document area, with its margin and gutter, where the card rail shows. A
-/// wider space stays empty on the right, so the rail sits beside the text. Without a rail, the
-/// document takes all the width.
-pub const DOC_MAX_WIDTH: u16 = 100;
-
 /// The areas of the viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
@@ -70,7 +65,7 @@ pub fn compute(area: Rect, has_tree: bool, tree_open: bool) -> Layout {
     let has_rail = area.width >= RAIL_FROM_WIDTH;
     let left = tree.map_or(body.x, Rect::right);
     let room = body.right() - left - if has_rail { RAIL_WIDTH } else { 0 };
-    let doc = Rect::new(left, body.y, if has_rail { room.min(DOC_MAX_WIDTH) } else { room }, body.height);
+    let doc = Rect::new(left, body.y, room, body.height);
     let rail = has_rail.then(|| Rect::new(doc.right(), body.y, RAIL_WIDTH, body.height));
     Layout::Wide { header, tree, doc, rail, footer }
 }
@@ -101,24 +96,19 @@ mod tests {
     }
 
     #[test]
-    fn the_document_width_is_capped_at_240_columns() {
-        match compute(area(240, 40), true, true) {
-            Layout::Wide { header, tree, doc, rail, .. } => {
-                assert_eq!(header.width, 240);
-                assert_eq!(tree, Some(Rect::new(0, 1, 28, 38)));
-                assert_eq!(doc, Rect::new(28, 1, DOC_MAX_WIDTH, 38));
-                assert_eq!(rail, Some(Rect::new(doc.right(), 1, 34, 38)));
-                assert!(rail.is_some_and(|rail| rail.right() < 240));
+    fn the_document_fills_the_room_left_of_the_rail() {
+        for width in [120u16, 200, 240] {
+            for has_tree in [true, false] {
+                match compute(area(width, 40), has_tree, true) {
+                    Layout::Wide { tree, doc, rail, .. } => {
+                        let left = tree.map_or(0, Rect::right);
+                        assert_eq!(doc.width, width - left - RAIL_WIDTH);
+                        assert_eq!(rail.map(Rect::right), Some(width));
+                        assert_eq!(rail.map(|rail| rail.x), Some(doc.right()));
+                    }
+                    other => panic!("expected Wide, got {other:?}"),
+                }
             }
-            other => panic!("expected Wide, got {other:?}"),
-        }
-        match compute(area(240, 40), false, true) {
-            Layout::Wide { tree, doc, rail, .. } => {
-                assert_eq!(tree, None);
-                assert_eq!(doc, Rect::new(0, 1, DOC_MAX_WIDTH, 38));
-                assert_eq!(rail, Some(Rect::new(100, 1, 34, 38)));
-            }
-            other => panic!("expected Wide, got {other:?}"),
         }
     }
 
