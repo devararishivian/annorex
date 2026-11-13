@@ -407,6 +407,22 @@ fn click_on_a_footer_hint_does_the_action() {
 }
 
 #[test]
+fn click_on_a_side_list_row_at_110_columns_focuses_its_note() {
+    let mut app = two_notes();
+    press(&mut app, "a");
+    let buffer = frame(&mut app, (110, 40));
+    assert!(rows(&buffer).iter().any(|row| row.contains("Annotations")), "the list is beside the text");
+    // The rows of the list sit right of the text.
+    let first = find_from(&buffer, "first", 50).expect("row of note 1");
+    click(&mut app, first);
+    assert_eq!(app.focused_block(), Some(0), "note 1 is on block 0");
+    let buffer = frame(&mut app, (110, 40));
+    let third = find_from(&buffer, "third", 50).expect("row of note 2");
+    click(&mut app, third);
+    assert_eq!(app.focused_block(), Some(2), "note 2 is on block 2");
+}
+
+#[test]
 fn click_outside_the_editor_keeps_it_open_with_its_text() {
     let mut app = viewer(THREE);
     press(&mut app, "chi");

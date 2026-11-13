@@ -1335,6 +1335,34 @@ fn several_notes_show_a_numbered_pick() {
 }
 
 #[test]
+fn another_key_closes_the_pick_and_then_acts() {
+    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
+    press(&mut app, "jcone\n");
+    press(&mut app, "ctwo\n");
+    press(&mut app, "e");
+    assert!(render(&mut app, 80, 24).contains("2 \u{1f4ac} two"), "the pick is open");
+    let before = app.focused_block();
+    press(&mut app, "j");
+    let screen = render(&mut app, 80, 24);
+    assert!(!screen.contains("2 \u{1f4ac} two") && app.editor().is_none(), "the pick is closed:\n{screen}");
+    assert_ne!(app.focused_block(), before, "j moved the focus after it closed the pick");
+    assert_eq!(app.focused_block(), before.map(|block| block + 1));
+}
+
+#[test]
+fn a_third_v_removes_the_selection() {
+    let mut app = app("alpha beta gamma\n");
+    press(&mut app, "vllv");
+    assert!(render(&mut app, 80, 24).contains(BAR), "the second v opens the strip");
+    press(&mut app, "v");
+    assert!(!render(&mut app, 80, 24).contains(BAR), "the third v removes the strip");
+    // Without a selection, the first esc leaves text mode and the second removes the focus.
+    assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::None);
+    assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::None);
+    assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::Quit, "no selection is left");
+}
+
+#[test]
 fn snapshot_cards_120x40() {
     let mut app = app(bar_text());
     press(&mut app, "o");
@@ -1459,7 +1487,7 @@ fn esc_with_nothing_selected_quits() {
 fn esc_with_focus_clears_it() {
     let mut app = app("alpha beta gamma\n");
     assert_ne!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::Quit);
-    assert!(!render(&mut app, 80, 12).contains("esc unselect"));
+    assert!(!render(&mut app, 120, 12).contains("esc unselect"));
     // A text selection: the first esc clears it, the second leaves text mode, the third removes the focus.
     let mut text = self::app("alpha beta gamma\n");
     press(&mut text, "vll");
@@ -1473,13 +1501,13 @@ fn esc_with_focus_clears_it() {
 fn esc_with_unsent_notes_asks_first() {
     let mut app = app("alpha beta gamma\n");
     press(&mut app, "vllllo");
-    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-    let mut guard = 0;
-    while !render(&mut app, 120, 12).contains("Unsent notes") && guard < 5 {
-        assert_ne!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::Quit, "no quit at once");
-        guard += 1;
+    // The first esc clears the selection. The second one leaves text mode. The third one asks.
+    for press_number in 1..=2 {
+        assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::None, "esc {press_number}");
+        assert!(!render(&mut app, 120, 12).contains("Unsent notes"), "esc {press_number} does not ask yet");
     }
-    assert!(render(&mut app, 120, 12).contains("Unsent notes"));
+    assert_eq!(press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE), Effect::None, "no quit at once");
+    assert!(render(&mut app, 120, 12).contains("Unsent notes"), "the third esc asks");
     assert!(!app.should_exit());
 }
 

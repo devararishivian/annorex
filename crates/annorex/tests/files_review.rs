@@ -339,6 +339,21 @@ fn a_click_outside_the_start_box_does_nothing_and_a_click_on_a_row_opens_it() {
 }
 
 #[test]
+fn a_footer_hint_click_with_the_start_list_open_keeps_the_list() {
+    let (_dir, mut app) = last_app_with(3);
+    let screen = render(&mut app, 120, 20);
+    let row = screen.lines().position(|line| line.contains("j/k move")).expect("hint row");
+    let line = screen.lines().nth(row).expect("row");
+    let column = line[..line.find("j/k move").expect("hint")].chars().count();
+    let kind = MouseEventKind::Down(MouseButton::Left);
+    let at = (u16::try_from(column).expect("column"), u16::try_from(row).expect("row"));
+    let effect =
+        app.handle_mouse(MouseEvent { kind, column: at.0, row: at.1, modifiers: KeyModifiers::NONE });
+    assert_eq!(effect, Effect::None);
+    assert!(render(&mut app, 120, 20).contains("Documents"), "the list stays open");
+}
+
+#[test]
 fn new_reply_while_the_start_box_is_open_keeps_the_selection_valid() {
     let (_dir, mut app) = last_app_with(2);
     press(&mut app, "j");
