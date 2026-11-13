@@ -82,7 +82,7 @@ impl Editor {
             return None;
         }
         match self.kind {
-            Kind::Comment if self.text.trim().is_empty() => Some("write a comment"),
+            Kind::Comment if self.text.trim().is_empty() && self.label.is_none() => Some("write a comment"),
             Kind::Replace if self.text.trim().is_empty() => Some("write the new text"),
             _ => None,
         }
@@ -127,5 +127,18 @@ impl Editor {
         let top = self.scroll.unwrap_or(last).min(last);
         let top = if down { top.saturating_add(rows) } else { top.saturating_sub(rows) };
         self.scroll = if top >= last { None } else { Some(top) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_label_only_comment_saves_without_text() {
+        let mut editor = Editor::new(Kind::Comment, 0..1);
+        assert_eq!(editor.problem(), Some("write a comment"));
+        editor.label = Some("nit".to_owned());
+        assert_eq!(editor.problem(), None);
     }
 }

@@ -856,3 +856,18 @@ fn the_strip_leaves_out_the_items_that_do_not_fit() {
     assert!(row.contains("d \u{2715} remove \u{258c}"), "the last item that fits ends the strip: {row:?}");
     assert!(!row.contains("replace"), "{row:?}");
 }
+
+#[test]
+fn the_strip_in_a_plain_file_hides_the_line_number_of_its_row() {
+    let mut app = open("x");
+    app.open_file(annorex::files::LoadedFile {
+        relative: std::path::PathBuf::from("a.txt"),
+        text: "one\ntwo\nthree\n".to_owned(),
+        stamp: annorex::files::Stamp { size: 14, modified: None },
+    });
+    press(&mut app, "j\njjvlv");
+    let screen = render(&mut app, 80, 24);
+    let strip = screen.lines().find(|line| line.contains('\u{2590}')).expect("strip");
+    let before = &strip[..strip.find('\u{2590}').expect("cap")];
+    assert!(before.trim_matches(['\u{258d}', ' ']).is_empty(), "no line number left of the strip: {screen}");
+}

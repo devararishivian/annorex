@@ -77,12 +77,13 @@ fn start_column(plain: &str, offsets: &[Option<usize>], range: &Range<usize>) ->
 /// The place of a strip of `width` cells in `area`: one row above the row `first` at the column
 /// `col`, else one row below the row `last`. `first`, `last`, and `col` are offsets from the top and
 /// the left of `area`. The strip moves left to fit in `area`, and it is never wider than `area`.
-/// `None` when neither row is in `area`.
+/// When no row above or below is free, the strip goes on the top row of `area`. `None` when the row
+/// `first` is not in `area`.
 pub(super) fn strip_rect(area: Rect, width: u16, first: usize, last: usize, col: u16) -> Option<Rect> {
     let row = match first.checked_sub(1) {
         Some(above) => above,
         None if last + 1 < usize::from(area.height) => last + 1,
-        None => return None,
+        None => 0,
     };
     let row = u16::try_from(row).ok().filter(|&row| row < area.height)?;
     let width = width.min(area.width);
@@ -107,13 +108,13 @@ fn hidden(app: &App) -> bool {
 
 /// Draw the action strip beside the range of a note after a finished selection: the selection in
 /// text mode, or the whole focused block after `enter` in block mode. `area` is the text area of the document: it starts at
-/// the text column. The items that do not fit are left out from the end.
-pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, app: &mut App) {
+/// the text column. The items that do not fit are left out from the end. It returns the rect of the strip when it shows.
+pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Rect> {
     if hidden(app) || area.width == 0 || area.height == 0 {
-        return;
+        return None;
     }
-    let Some(range) = app.action_range().filter(|range| !range.is_empty()) else { return };
-    let Some((first, last, col)) = shown_place(app, &range) else { return };
+    let range = app.action_range().filter(|range| !range.is_empty())?;
+    let (first, last, col) = shown_place(app, &range)?;
     let item_style = |kind: Kind| Style::new().fg(kind_color(kind)).bg(STRIP).add_modifier(Modifier::BOLD);
     let items: Vec<(Kind, Line)> = ITEMS
         .into_iter()
@@ -135,10 +136,10 @@ pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, app: &mut App) {
         count -= 1;
     }
     if count == 0 {
-        return;
+        return None;
     }
-    let Ok(width) = u16::try_from(total(count)) else { return };
-    let Some(rect) = strip_rect(area, width, first, last, col) else { return };
+    let width = u16::try_from(total(count)).ok()?;
+    let rect = strip_rect(area, width, first, last, col)?;
     frame.render_widget(Clear, rect);
     let buffer = frame.buffer_mut();
     buffer.set_style(Rect { x: rect.x + 1, width: rect.width - 2, ..rect }, Style::new().bg(STRIP));
@@ -153,6 +154,7 @@ pub(super) fn draw_action_bar(frame: &mut Frame, area: Rect, app: &mut App) {
         app.hits.push(Rect::new(x, rect.y, width, 1), Hit::Action(*kind));
         x += width + GAP;
     }
+    Some(rect)
 }
 
 #[cfg(test)]
@@ -172,8 +174,12 @@ mod tests {
     fn strip_goes_below_the_last_row_at_the_top() {
         let area = Rect::new(4, 2, 60, 20);
         assert_eq!(strip_rect(area, 30, 0, 3, 3), Some(Rect::new(7, 6, 30, 1)));
-        // No row above and no row below: no strip.
-        assert_eq!(strip_rect(area, 30, 0, 19, 3), None);
+    }
+
+    #[test]
+    fn strip_shows_on_the_top_row_when_the_selection_fills_the_area() {
+        let area = Rect::new(4, 2, 60, 20);
+        assert_eq!(strip_rect(area, 30, 0, 19, 3), Some(Rect::new(7, 2, 30, 1)));
     }
 
     #[test]

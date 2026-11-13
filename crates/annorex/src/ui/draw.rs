@@ -661,7 +661,10 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         doc_area.width.saturating_sub(margin + gutter),
         doc_area.height,
     );
-    draw_action_bar(frame, text_area, app);
+    if let Some(strip) = draw_action_bar(frame, text_area, app) {
+        // The strip lies over the text of its row, so the line number of that row goes too.
+        frame.render_widget(Clear, Rect::new(text_area.x - gutter, strip.y, gutter, 1));
+    }
     if let Side::Rail(rail) = side {
         // The empty space right of a capped layout belongs to the rail pane: a click there does nothing
         // and the wheel scrolls the document.
