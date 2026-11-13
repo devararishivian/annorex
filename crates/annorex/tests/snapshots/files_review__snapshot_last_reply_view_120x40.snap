@@ -2,7 +2,7 @@
 source: crates/annorex/tests/files_review.rs
 expression: "render(&mut app, 120, 40)"
 ---
-Annorex · last reply · claude (idle) · reply 1/1                                                              [ Send ▸ ]
+Annorex · last reply · Claude Code (idle) · reply 1/1                                                         [ Send ▸ ]
  Reply
 
  The reply text.

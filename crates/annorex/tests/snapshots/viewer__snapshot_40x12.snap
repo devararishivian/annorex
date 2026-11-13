@@ -2,7 +2,7 @@
 source: crates/annorex/tests/viewer.rs
 expression: "render(&mut viewer(), 40, 12)"
 ---
-claude (idle) · reply 1/3     [ Send ▸ ]
+reply 1/3                     [ Send ▸ ]
 ▍Migration plan
 
  We change the login page and the

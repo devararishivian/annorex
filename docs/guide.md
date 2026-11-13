@@ -95,7 +95,7 @@ Focus the pane of Claude Code, Pi, or OpenCode. Press the key that you bound, or
 from the command palette. The action `annorex_last` opens the viewer over the full window. If an Annorex is already
 open in the session, the action focuses it.
 
-The header shows the agent and its state, for example `claude (idle)` or `opencode (waiting for permission)`. Annorex
+The header shows the agent and its state, for example `Claude Code (idle)` or `OpenCode (waiting for permission)`. Annorex
 reads the state again every 2 seconds.
 
 Annorex has two modes in the document. Block mode is the default. Text mode is for notes on a part of a block. To enter text mode, press `v`, `V`, or a move key such as `h` or `l`, or drag the mouse over text.

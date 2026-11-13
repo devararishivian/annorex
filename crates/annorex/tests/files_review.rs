@@ -1095,7 +1095,7 @@ fn the_files_view_with_no_path_shows_no_document() {
     let (_dir, mut app) = files_view_with_replies();
     let screen = render(&mut app, 120, 20);
     let header = screen.lines().next().expect("header");
-    assert!(header.contains("files · claude (idle)") && !header.contains("reply"), "{header}");
+    assert!(header.contains("files · Claude Code (idle)") && !header.contains("reply"), "{header}");
     assert!(!screen.contains("first reply text"), "{screen}");
     assert!(screen.contains("Open a file from the tree (enter), or find one (ctrl+p)."), "{screen}");
     // A reply stays reachable from the list.

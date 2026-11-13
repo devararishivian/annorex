@@ -558,7 +558,7 @@ fn send_with_note_puts_the_note_first() {
 fn send_marks_the_draft_sent_and_a_change_makes_it_unsent_again() {
     use annorex::send::{SendResult, apply_result};
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
-    assert!(header(&mut app).contains("[ Send 1 → claude ▸ ]"), "{}", header(&mut app));
+    assert!(header(&mut app).contains("[ Send 1 → Claude Code ▸ ]"), "{}", header(&mut app));
     assert!(apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z"));
     let draft = app.draft(Agent::ClaudeCode, "s").expect("draft");
     assert_eq!(draft.sent_at.as_deref(), Some("2026-11-09T14:30:00Z"));
@@ -568,7 +568,7 @@ fn send_marks_the_draft_sent_and_a_change_makes_it_unsent_again() {
     assert!(top.contains("[ Sent 14:30 ]") && !top.contains("unsent"), "{top}");
     press(&mut app, "cmore\n");
     assert!(app.draft(Agent::ClaudeCode, "s").expect("draft").sent_at.is_none());
-    assert!(header(&mut app).contains("[ Send 1 → claude ▸ ]"));
+    assert!(header(&mut app).contains("[ Send 1 → Claude Code ▸ ]"));
 }
 
 #[test]
@@ -595,7 +595,7 @@ fn sending_clears_the_general_note() {
 fn working_state_shows_queued_or_steers() {
     let working = || Safety::Clear { state: Some("working".to_owned()) };
     let mut claude = annotated(Agent::ClaudeCode, working());
-    assert!(header(&mut claude).contains("[ Send 1 · queued → claude ▸ ]"), "{}", header(&mut claude));
+    assert!(header(&mut claude).contains("[ Send 1 · queued → Claude Code ▸ ]"), "{}", header(&mut claude));
     for agent in [Agent::Pi, Agent::OpenCode] {
         let mut app = annotated(agent, working());
         assert!(header(&mut app).contains("[ Send 1 · steers → "), "{}", header(&mut app));

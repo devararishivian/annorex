@@ -37,10 +37,10 @@ pub struct AgentState {
 }
 
 impl AgentState {
-    /// For example `claude (idle)`, `pi (working…)`, `opencode (waiting for permission)`.
+    /// For example `Claude Code (idle)`, `Pi (working…)`, `OpenCode (waiting for permission)`.
     pub fn header_text(&self) -> String {
         let Some(agent) = self.agent else { return "no agent".to_owned() };
-        let name = agent.host().label();
+        let name = agent.host().display_name();
         let state = match &self.safety {
             Safety::Blocked { kind: Some(kind), .. } => format!("waiting for {kind}"),
             Safety::Blocked { kind: None, .. } => "blocked".to_owned(),

@@ -127,8 +127,8 @@ fn snapshot_39x9_is_too_small() {
 fn header_names_view_agent_state_and_reply() {
     let screen = render(&mut viewer(), 120, 40);
     let header = screen.lines().next().expect("header");
-    assert!(header.starts_with("Annorex · last reply · claude (idle)"), "{header}");
-    assert!(header.contains("claude (idle) · reply 1/3"), "{header}");
+    assert!(header.starts_with("Annorex · last reply · Claude Code (idle)"), "{header}");
+    assert!(header.contains("Claude Code (idle) · reply 1/3"), "{header}");
     assert!(header.ends_with("[ Send ▸ ]"), "{header}");
 }
 
@@ -227,13 +227,13 @@ fn header_shows_blocked_kind() {
         safety: Safety::Blocked { kind: Some("permission".into()), msg: Some("allow bash?".into()) },
     });
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
-    assert!(header.contains("opencode (waiting for permission)"), "{header}");
+    assert!(header.contains("OpenCode (waiting for permission)"), "{header}");
     app.set_state(AgentState {
         agent: Some(Agent::OpenCode),
         safety: Safety::Blocked { kind: None, msg: None },
     });
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
-    assert!(header.contains("opencode (blocked)"), "{header}");
+    assert!(header.contains("OpenCode (blocked)"), "{header}");
 }
 
 #[test]
@@ -241,10 +241,10 @@ fn header_shows_working() {
     let mut app = viewer();
     app.set_state(state(Agent::Pi, "working"));
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
-    assert!(header.contains("pi (working…)"), "{header}");
+    assert!(header.contains("Pi (working…)"), "{header}");
     app.set_state(AgentState { agent: Some(Agent::Pi), safety: Safety::Clear { state: None } });
     let header = render(&mut app, 120, 40).lines().next().expect("header").to_owned();
-    assert!(header.contains("pi (unknown)"), "{header}");
+    assert!(header.contains("Pi (unknown)"), "{header}");
 }
 
 #[test]

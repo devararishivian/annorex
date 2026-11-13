@@ -832,7 +832,7 @@ mod tests {
         .expect("send");
         let stop = AtomicBool::new(false);
         run_loop(&mut app(), &mut events, &mut canvas, &stop, &rx, &mut no_effects()).expect("loop");
-        assert!(canvas.header().contains("pi (working…)"), "{}", canvas.header());
+        assert!(canvas.header().contains("Pi (working…)"), "{}", canvas.header());
     }
     /// A runner that is never called: the draft keys need no Rex call.
     struct NoRex;

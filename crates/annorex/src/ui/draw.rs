@@ -418,7 +418,8 @@ fn send_button(app: &App) -> (String, Style) {
         }
         _ => "",
     };
-    let agent = app.state.agent.map_or_else(String::new, |agent| format!(" → {}", agent.host().label()));
+    let agent =
+        app.state.agent.map_or_else(String::new, |agent| format!(" → {}", agent.host().display_name()));
     let style = if matches!(app.state.safety, Safety::Blocked { .. }) { dim } else { bold };
     (format!("[ Send {count}{effect}{agent} ▸ ]"), style)
 }
@@ -600,6 +601,8 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
             .map(|part| part.replace("unsent in reply ", "").replace("unsent in ", ""))
             .collect();
         lefts.push(format!("{base} · unsent {}", compact.join(" · ")));
+        // Then without the name of the view, so the unsent notice outlasts the longer agent name.
+        lefts.push(format!("{state} · {position} · unsent {}", compact.join(" · ")));
     }
     lefts.push(base);
     // A narrow header keeps the position and the agent before the name of the view.

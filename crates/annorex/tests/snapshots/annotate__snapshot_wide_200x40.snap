@@ -2,7 +2,7 @@
 source: crates/annorex/tests/annotate.rs
 expression: "render(&mut app, 200, 40)"
 ---
-Annorex · last reply · claude (idle) · reply 1/1 · unsent in reply 1                                                                                                               [ Send 1 → claude ▸ ]
+Annorex · last reply · Claude Code (idle) · reply 1/1 · unsent in reply 1                                                                                                     [ Send 1 → Claude Code ▸ ]
  Plan
 
 ▍We change the login page. The old page stays for a week.                                                                                                              ┌ 💬 comment ───────────────────┐

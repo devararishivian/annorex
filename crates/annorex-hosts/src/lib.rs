@@ -38,6 +38,15 @@ impl Host {
         }
     }
 
+    /// The product name the UI shows to people.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "Claude Code",
+            Self::Pi => "Pi",
+            Self::OpenCode => "OpenCode",
+        }
+    }
+
     /// Every host with a transcript reader, for messages that list them.
     pub const ALL: [Host; 3] = [Host::ClaudeCode, Host::Pi, Host::OpenCode];
 }

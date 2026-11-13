@@ -397,7 +397,7 @@ fn header_send_button_names_the_agent() {
     press(&mut app, "jcfirst\n");
     press(&mut app, "jcsecond\n");
     let header = header_of(&mut app, 100);
-    assert!(header.ends_with("[ Send 2 → pi ▸ ]"), "{header}");
+    assert!(header.ends_with("[ Send 2 → Pi ▸ ]"), "{header}");
 }
 
 #[test]

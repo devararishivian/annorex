@@ -2,7 +2,7 @@
 source: crates/annorex/tests/viewer.rs
 expression: "render(&mut app, 120, 40)"
 ---
-Annorex · last reply · claude (idle) · reply 1/3                                                              [ Send ▸ ]
+Annorex · last reply · Claude Code (idle) · reply 1/3                                                         [ Send ▸ ]
 ▍Migration plan
 
  We change the login page and the session store. The work has four steps, and each
