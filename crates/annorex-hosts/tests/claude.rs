@@ -110,3 +110,18 @@ fn newer_record_types_leave_the_replies_unchanged() {
     assert_eq!(newer, plain);
     assert!(!newer.iter().any(|m| m.text.contains("blob text")), "{newer:?}");
 }
+
+#[test]
+fn a_shell_command_after_a_reply_is_not_a_human_message() {
+    let jsonl = [
+        r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"fix it"}}"#,
+        r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"done"}]}}"#,
+        r#"{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":"<bash-input>git diff</bash-input>"}}"#,
+        r#"{"type":"user","uuid":"u3","parentUuid":"u2","message":{"role":"user","content":"<bash-stdout>x</bash-stdout><bash-stderr></bash-stderr>"}}"#,
+    ]
+    .join("\n");
+    let newest = parse_messages(&jsonl, 1);
+    assert_eq!(newest.len(), 1, "{newest:?}");
+    assert_eq!(newest[0].role, Role::Assistant);
+    assert_eq!(newest[0].text, "done");
+}

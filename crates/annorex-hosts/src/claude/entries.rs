@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: none in logic; the header line only.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: the header line, and the shared machine-prefix list now also names the interrupt notice and the shell-mode tags.
 //! One transcript line, reduced to what rendering and branch-walking need.
 
 use serde_json::Value;
@@ -7,12 +7,18 @@ use serde_json::Value;
 const SKIPPED_TYPES: [&str; 6] =
     ["progress", "system", "file-history-snapshot", "file-history-delta", "queue-operation", "attachment"];
 /// Prefixes that mark a `user` entry as machinery rather than a typed prompt.
-const MACHINE_PREFIXES: [&str; 5] = [
+/// The `!` shell mode of Claude Code stores the command and its output as `user` text too.
+pub(super) const MACHINE_PREFIXES: [&str; 10] = [
+    "[Request interrupted",
     "<local-command-",
     "<command-name>",
+    "<command-message>",
     "<system-reminder>",
     "<system-notification>",
     "<task-notification>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

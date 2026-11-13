@@ -3,6 +3,7 @@
 
 use serde_json::Value;
 
+use super::entries::MACHINE_PREFIXES;
 use crate::changes::{Changed, Event, collect};
 
 const TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
@@ -46,16 +47,7 @@ fn is_meta(line: &Value) -> bool {
 /// Text that the user did not type: an interrupt notice or a wrapper of a slash command.
 fn is_injected(text: &str) -> bool {
     let text = text.trim_start();
-    text.is_empty()
-        || [
-            "[Request interrupted",
-            "<command-name>",
-            "<command-message>",
-            "<local-command",
-            "<system-reminder>",
-        ]
-        .iter()
-        .any(|prefix| text.starts_with(prefix))
+    text.is_empty() || MACHINE_PREFIXES.iter().any(|prefix| text.starts_with(prefix))
 }
 
 fn is_typed_text(block: &Value) -> bool {
@@ -193,6 +185,17 @@ mod tests {
             summary,
         ];
         assert_eq!(run(&lines, 1), ["/w/a.rs"]);
+    }
+
+    #[test]
+    fn bash_mode_lines_are_not_prompts() {
+        let input =
+            r#"{"type":"user","message":{"role":"user","content":"<bash-input>git diff</bash-input>"}}"#
+                .to_owned();
+        let output = r#"{"type":"user","message":{"role":"user","content":"<bash-stdout>x</bash-stdout><bash-stderr></bash-stderr>"}}"#.to_owned();
+        let lines =
+            [prompt("fix it"), tool("t1", "Edit", "file_path", "src/a.rs"), res("t1", false), input, output];
+        assert_eq!(run(&lines, 1), ["src/a.rs"]);
     }
 
     #[test]
