@@ -1162,10 +1162,14 @@ fn range_styles_follow_the_kind() {
         buffer.cell((2, y)).expect("cell").style()
     };
     let good = cell("good part");
-    assert_eq!(good.bg, Some(Color::Green), "looks good: green background");
+    assert!(matches!(good.bg, None | Some(Color::Reset)), "looks good: no fill");
+    assert!(good.add_modifier.contains(Modifier::UNDERLINED), "looks good: underlined");
+    assert_eq!(good.underline_color, Some(Color::Green), "looks good: green underline");
     let asked = cell("asked part");
-    assert_eq!(asked.fg, Some(Color::Yellow), "comment: yellow");
+    assert!(matches!(asked.fg, None | Some(Color::Reset)), "comment: normal text color");
+    assert!(matches!(asked.bg, None | Some(Color::Reset)), "comment: no fill");
     assert!(asked.add_modifier.contains(Modifier::UNDERLINED), "comment: underlined");
+    assert_eq!(asked.underline_color, Some(Color::Yellow), "comment: yellow underline");
     let gone = cell("gone part");
     assert_eq!(gone.fg, Some(Color::Red), "remove: red");
     assert!(gone.add_modifier.contains(Modifier::CROSSED_OUT), "remove: crossed out");
@@ -1174,6 +1178,42 @@ fn range_styles_follow_the_kind() {
     assert!(old.add_modifier.contains(Modifier::CROSSED_OUT), "replace: crossed out");
     let end = cell("the end");
     assert!(!end.add_modifier.contains(Modifier::UNDERLINED | Modifier::CROSSED_OUT), "no note: no style");
+}
+
+#[test]
+fn a_row_under_a_note_has_a_bar_in_the_note_color_in_the_margin() {
+    use ratatui::style::Color;
+    let mut app = four_kinds();
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let screen = render(&mut app, 80, 24);
+    let margin = |text: &str| {
+        let y = u16::try_from(row_of(&screen, text)).expect("row");
+        let cell = buffer.cell((0, y)).expect("cell");
+        (cell.symbol().to_owned(), cell.fg)
+    };
+    assert_eq!(margin("good part"), ("\u{258d}".to_owned(), Color::Green));
+    assert_eq!(margin("asked part"), ("\u{258d}".to_owned(), Color::Yellow));
+    assert_eq!(margin("gone part"), ("\u{258d}".to_owned(), Color::Red));
+    assert_eq!(margin("old part"), ("\u{258d}".to_owned(), Color::Magenta));
+    assert_eq!(margin("the end").0, "\u{258d}", "the focused block has the bar");
+    assert_eq!(margin("the end").1, Color::Cyan, "the cyan focus bar shows where the block has no note");
+}
+
+#[test]
+fn the_cyan_focus_bar_wins_on_the_focused_block_with_a_note() {
+    use ratatui::style::Color;
+    let mut app = four_kinds();
+    press(&mut app, "kkkk");
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let screen = render(&mut app, 80, 24);
+    let focused = u16::try_from(row_of(&screen, "good part")).expect("row");
+    let other = u16::try_from(row_of(&screen, "asked part")).expect("row");
+    assert_eq!(buffer.cell((0, focused)).expect("cell").fg, Color::Cyan, "{screen}");
+    assert_eq!(buffer.cell((0, other)).expect("cell").fg, Color::Yellow, "{screen}");
 }
 
 /// The cells of the screen as a grid of symbols and styles.

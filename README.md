@@ -77,8 +77,9 @@ The keys `o` and `d` save the note at once. No note box opens, and the action ba
 has the text `Looks good:` and the quote. A looks good note and a remove note have no text. Press `e` on them to see the
 message `Looks good has no text.` or `Remove has no text.`
 
-Notes show in place. Looks good has a green background. A comment is underlined in yellow. Remove is red and crossed
-out. Replace is magenta and crossed out. At 120 columns or more, each note has a card in a rail on the right. Where
+Notes show in place. The text under a note keeps its color. Looks good has a green underline. A comment has a yellow
+underline. Remove is red and crossed out. Replace is magenta and crossed out. A bar in the note color shows in the left
+margin of each row under a note. The cyan focus bar shows on the focused block instead. At 120 columns or more, each note has a card in a rail on the right. Where
 there is no rail, a dot in the note color marks the note in the right margin. This holds also in one column, when
 the document is 21 columns or more wide.
 
@@ -158,7 +159,7 @@ Each mouse action has a key. The help screen does not list the mouse actions.
 ## Theme
 
 Annorex uses the 16 ANSI colors of the terminal. It follows the Rex theme, light or dark. Rex gives programs no way to
-read the theme.
+read the theme. Notes have no background fill. They use an underline and a bar in the left margin.
 
 ## Troubleshooting
 

@@ -210,8 +210,7 @@ The layout changes with the size of the window:
 
 - 120 columns or more: the file tree on the left (when it shows), the document, and the card rail on the
   right. The tree is 28 columns wide. The rail is 34 columns wide. Each note has a card in the rail.
-  The document is 100 columns wide at most with the rail. On a wider pane, the rail sits next to the document, and the
-  space on the right stays empty.
+  The document takes all the room between the tree and the rail.
 - 100 to 119 columns: the file tree on the left (when it shows) and the document. There is no rail. A dot in the color of the note
   marks the note in the right margin of the block.
 - Less than 100 columns, or less than 16 rows: one column. The tree and the list of notes open over the document.
@@ -227,8 +226,12 @@ The header shows the view, the agent and its state, and the position. It adds `u
 `queued` for Claude Code or `steers` for Pi and OpenCode. After a send, it shows `[ Sent HH:MM ]`. The footer shows the
 keys of the current mode. Annorex leaves out the hints that do not fit, from the end. `? help` stays while it fits.
 
-The note colors are the 16 ANSI colors. Looks good has a green background. A comment is underlined in yellow. Remove is
-red and crossed out. Replace is magenta and crossed out.
+The note colors are the 16 ANSI colors. The text under a note keeps its color. Looks good has a green underline. A
+comment has a yellow underline. Remove is red and crossed out. Replace is magenta and crossed out. A bar in the note
+color shows in the left margin of each row under a note. The cyan focus bar shows on the focused block instead.
+
+A table that is wider than the window gets narrower columns, and its cells wrap. Each column keeps its longest word, up
+to 20 columns. If even these widths do not fit, Annorex clips the lines of the table.
 
 ### The mouse
 

@@ -13,7 +13,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::app::{App, BoxView, Confirm, Docked, Focus, ReplySource, Screen, StartView, match_ranges};
 use super::bar::{draw_action_bar, shown_rows};
-use super::cards::{Side, draw_pick, draw_side, range_style, rank, split_markers};
+use super::cards::{Side, draw_pick, draw_side, kind_color, range_style, rank, split_markers};
 use super::editor::MAX_ROWS;
 use super::focus::{Mode, View};
 use super::hits::Hit;
@@ -818,21 +818,21 @@ fn draw_doc(frame: &mut Frame, app: &mut App, area: Rect, fill_width: u16) {
             };
             let number_width = usize::from(gutter.saturating_sub(1));
             let in_focus = focused.as_ref().is_some_and(|block| block.lines.contains(&row.doc_line));
-            let mut spans = vec![margin_span(in_focus, margin)];
+            let offsets = row.offsets();
+            let kinds = note_kinds(&offsets, &annotated);
+            let mut spans = vec![margin_span(in_focus, top_kind(&kinds), margin)];
             if gutter > 0 {
                 spans.push(Span::styled(format!("{number:>number_width$}"), number_style));
                 spans.push(Span::raw(" "));
             }
             let cursor = cursor_cell.filter(|&(index, _)| index == top_row + offset).map(|(_, cell)| cell);
-            let offsets = row.offsets();
             let flags = |ranges: &[std::ops::Range<usize>]| -> Vec<bool> {
                 offsets
                     .iter()
                     .map(|at| at.is_some_and(|at| ranges.iter().any(|range| range.contains(&at))))
                     .collect()
             };
-            let marks =
-                Marks { kinds: note_kinds(&offsets, &annotated), selected: flags(selection.as_slice()) };
+            let marks = Marks { kinds, selected: flags(selection.as_slice()) };
             spans.extend(row_spans(row, &matches, cursor, &marks));
             Line::from(spans)
         })
@@ -860,10 +860,12 @@ fn margin_and_gutter(doc: &Doc, area: Rect) -> (u16, u16) {
     (margin, gutter)
 }
 
-/// The margin cell of a row: the focus bar in a focused block, else blanks.
-fn margin_span(in_focus: bool, margin: u16) -> Span<'static> {
-    if in_focus && margin > 0 {
-        Span::styled("\u{258d}", Style::new().fg(Color::Cyan))
+/// The margin cell of a row: the cyan focus bar in a focused block, else a bar in the color of the
+/// note under the row, else blanks.
+fn margin_span(in_focus: bool, note: Option<Kind>, margin: u16) -> Span<'static> {
+    if margin > 0 && (in_focus || note.is_some()) {
+        let color = if in_focus { Color::Cyan } else { note.map_or(Color::Cyan, kind_color) };
+        Span::styled("\u{258d}", Style::new().fg(color))
     } else {
         Span::raw(" ".repeat(usize::from(margin)))
     }
@@ -995,6 +997,11 @@ fn note_kinds(offsets: &[Option<usize>], annotated: &[(std::ops::Range<usize>, K
                 .max_by_key(|kind| rank(*kind))
         })
         .collect()
+}
+
+/// The type that shows in the margin of a row: the highest rank under any character of the row.
+fn top_kind(kinds: &[Option<Kind>]) -> Option<Kind> {
+    kinds.iter().flatten().copied().max_by_key(|kind| rank(*kind))
 }
 
 /// Which characters of a row are under a note, of which type, and which are selected.

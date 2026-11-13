@@ -57,11 +57,13 @@ pub(super) fn kind_color(kind: Kind) -> Color {
     }
 }
 
-/// The style of the text under a note of this type.
+/// The style of the text under a note of this type. Looks good and comment keep the text color and
+/// add an underline in the color of the type. There is no background fill.
 pub(super) fn range_style(kind: Kind) -> Style {
     match kind {
-        Kind::LooksGood => Style::new().fg(Color::Black).bg(Color::Green),
-        Kind::Comment => Style::new().fg(Color::Yellow).add_modifier(Modifier::UNDERLINED),
+        Kind::LooksGood | Kind::Comment => {
+            Style::new().add_modifier(Modifier::UNDERLINED).underline_color(kind_color(kind))
+        }
         Kind::Delete => Style::new().fg(Color::Red).add_modifier(Modifier::CROSSED_OUT),
         Kind::Replace => Style::new().fg(Color::Magenta).add_modifier(Modifier::CROSSED_OUT),
     }
@@ -325,6 +327,29 @@ pub(super) fn draw_pick(frame: &mut Frame, app: &mut App, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn looks_good_and_comment_are_underlined_in_the_note_color_without_a_fill() {
+        for kind in [Kind::LooksGood, Kind::Comment] {
+            let style = range_style(kind);
+            assert_eq!(style.bg, None, "{kind:?}: no fill");
+            assert_eq!(style.fg, None, "{kind:?}: the text keeps its color");
+            assert!(style.add_modifier.contains(Modifier::UNDERLINED), "{kind:?}: underlined");
+            assert_eq!(style.underline_color, Some(kind_color(kind)), "{kind:?}: underline color");
+        }
+    }
+
+    #[test]
+    fn delete_and_replace_styles_do_not_change() {
+        assert_eq!(
+            range_style(Kind::Delete),
+            Style::new().fg(Color::Red).add_modifier(Modifier::CROSSED_OUT)
+        );
+        assert_eq!(
+            range_style(Kind::Replace),
+            Style::new().fg(Color::Magenta).add_modifier(Modifier::CROSSED_OUT)
+        );
+    }
 
     #[test]
     fn layout_cards_stacks_without_overlap() {

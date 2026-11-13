@@ -3,10 +3,10 @@ source: crates/annorex/tests/annotate.rs
 expression: "render(&mut app, 120, 40)"
 ---
 Annorex · last reply · claude (idle) · reply 1/1 · unsent in reply 1                               [ Send 2 → claude ▸ ]
- alpha beta gamma                                                                      ┌ 💬 comment ───────────────────┐
+▍alpha beta gamma                                                                      ┌ 💬 comment ───────────────────┐
                                                                                        │ Which page?                   │
  - one                                                                                 └───────────────────────────────┘
- - two                                                                                 ┌ ✕ remove ─────────────────────┐
+▍- two                                                                                 ┌ ✕ remove ─────────────────────┐
                                                                                        │                               │
                                                                                        └──────────────────── x remove ─┘
 
