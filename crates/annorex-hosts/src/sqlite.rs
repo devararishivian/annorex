@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: none in logic; the header line only.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: the header line; the database path is percent-encoded in the SQLite URI.
 //! Read-only `SQLite` access shared by the store-backed hosts (Hermes, `OpenCode`).
 
 use std::path::Path;
@@ -16,11 +16,27 @@ pub(crate) fn open_read_only(db: &Path, what: &str) -> Result<Connection, HostEr
     }
     let flags =
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_URI;
-    let uri = |query: &str| format!("file:{}?{query}", db.display());
+    let uri = |query: &str| format!("file:{}?{query}", uri_path(db));
     match Connection::open_with_flags(uri("mode=ro"), flags) {
         Ok(connection) if probe(&connection) => Ok(connection),
         _ => Connection::open_with_flags(uri("mode=ro&immutable=1"), flags).map_err(|e| sql_error(what, &e)),
     }
+}
+
+/// Percent-encode every byte of `path` outside the unreserved set and `/`, so `?`, `#`, and `%`
+/// stay part of the file name in a `file:` URI.
+fn uri_path(path: &Path) -> String {
+    use std::fmt::Write as _;
+    let text = path.to_string_lossy();
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+            out.push(char::from(byte));
+        } else {
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
 }
 
 /// A read-only WAL open can succeed and still fail on first read when the `-shm` cannot be

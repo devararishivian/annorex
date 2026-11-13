@@ -362,3 +362,22 @@ fn opencode_sessions_for_cwd_exact_directory_only() {
     drop(writer);
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
+
+#[test]
+fn open_read_only_reads_a_database_under_a_path_with_hash_and_percent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let folder = dir.path().join("a#b%41?c");
+    std::fs::create_dir_all(&folder).expect("mkdir");
+    let db = folder.join("opencode.db");
+    let connection = Connection::open(&db).expect("create db");
+    connection.execute_batch(SCHEMA).expect("schema");
+    connection
+        .execute(
+            "INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated)
+             VALUES ('s1', 'p', NULL, 'slug', '/w', 't', '1', 1, 1)",
+            [],
+        )
+        .expect("insert");
+    drop(connection);
+    assert!(opencode::find_session(&db, Path::new("/w")).is_ok());
+}
