@@ -111,6 +111,21 @@ pub enum Check {
     Failed(String),
     /// Rex could not be run, so nothing was checked.
     Skipped,
+    /// The private scratch folder could not be created, so nothing was checked.
+    NoScratch,
+}
+
+impl Check {
+    /// The line that `rex install` prints for this result.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Passed => "Checked the module with rex config check: no errors.".to_owned(),
+            Self::Skipped => "Skipped the module check: rex is not available.".to_owned(),
+            Self::NoScratch => "Skipped the module check: cannot create a private scratch folder.".to_owned(),
+            Self::Failed(message) => format!("rex config check found errors in the module:\n{message}"),
+        }
+    }
 }
 
 /// Check the module with Rex before the user reloads: write the module and an `init.lua` that
@@ -189,6 +204,29 @@ mod tests {
         std::fs::write(path.join("keep.txt"), "x").expect("file");
         assert!(make_scratch(&path).is_err());
         assert!(path.join("keep.txt").exists());
+    }
+
+    #[test]
+    fn make_scratch_fails_on_a_symbolic_link() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("target");
+        std::fs::create_dir(&target).expect("target");
+        std::fs::write(target.join("keep.txt"), "x").expect("file");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("link");
+        assert!(make_scratch(&link).is_err());
+        assert!(target.join("keep.txt").exists());
+        let dangling = dir.path().join("dangling");
+        std::os::unix::fs::symlink(dir.path().join("missing"), &dangling).expect("link");
+        assert!(make_scratch(&dangling).is_err());
+        assert!(dangling.symlink_metadata().is_ok());
+        assert!(!dir.path().join("missing").exists());
+    }
+
+    #[test]
+    fn check_summary_tells_a_scratch_failure_from_a_missing_rex() {
+        assert!(Check::NoScratch.summary().contains("private scratch folder"));
+        assert!(Check::Skipped.summary().contains("rex is not available"));
     }
 
     #[test]

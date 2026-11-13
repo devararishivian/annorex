@@ -378,18 +378,12 @@ fn rex_install(
                 let _ = std::fs::remove_dir_all(&scratch);
                 result
             }
-            Err(_) => Check::Skipped,
+            Err(_) => Check::NoScratch,
         },
         Err(_) => Check::Skipped,
     };
     lines.push(String::new());
-    match &checked {
-        Check::Passed => lines.push("Checked the module with rex config check: no errors.".to_owned()),
-        Check::Skipped => lines.push("Skipped the module check: rex is not available.".to_owned()),
-        Check::Failed(message) => {
-            lines.push(format!("rex config check found errors in the module:\n{message}"));
-        }
-    }
+    lines.push(checked.summary());
     lines.push(String::new());
     lines.push("Then run: rex config reload".to_owned());
     writeln!(out, "{}", lines.join("\n")).map_err(|error| io_failure(&error))?;
