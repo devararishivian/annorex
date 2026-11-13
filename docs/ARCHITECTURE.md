@@ -1,6 +1,7 @@
 # Architecture
 
-> **Current state: block review, the action bar, notes in place, and mouse support built.** The Rex adapter, agent detection, dialog check,
+> **Current state: block review, the action bar, notes in place, and mouse support built.** The Rex adapter, agent
+detection, dialog check,
 > payload, delivery, transcript readers, Lua module, install, layer placement, reply loading, document model, wrapping,
 > layout, UI, terminal loop, config, keys, review, drafts, send, clipboard, file loading, file tree, fuzzy find, and
 > file watch are **built**.
