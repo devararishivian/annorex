@@ -192,6 +192,37 @@ fn drag_after_an_emoji_selects_the_cells_under_the_pointer() {
 }
 
 #[test]
+fn a_vanished_reply_leaves_no_selection_message() {
+    let mut app = App::new(
+        state(),
+        Screen::Viewer,
+        vec![reply("r1", "alpha beta\n"), reply("r2", "gamma delta\n")],
+        &Config::default(),
+    );
+    press(&mut app, "0vlll");
+    // The shown reply `r1` goes, and `r2` changes: the old selection must not move onto `r2`.
+    app.set_replies(vec![reply("r2", "zzz\n")]);
+    assert_eq!(app.status(), None, "no message about a selection that is not there");
+    assert_eq!(app.mode(), Mode::Browse);
+}
+
+#[test]
+fn the_strip_stands_under_the_text_after_an_emoji() {
+    let mut app = viewer("\u{26a0}\u{fe0f} Note\n");
+    let screen = frame(&mut app, NARROW);
+    let (x, y) = find(&screen, "Note");
+    app.handle_mouse(event(MouseEventKind::Down(MouseButton::Left), (x, y)));
+    app.handle_mouse(event(MouseEventKind::Drag(MouseButton::Left), (x + 3, y)));
+    app.handle_mouse(event(MouseEventKind::Up(MouseButton::Left), (x + 3, y)));
+    let screen = frame(&mut app, NARROW);
+    assert_eq!(
+        find(&screen, "\u{2590} o "),
+        (x, y + 1),
+        "the strip starts under `Note`, past the 2 cells of the emoji"
+    );
+}
+
+#[test]
 fn drag_in_progress_shows_no_strip() {
     let mut app = viewer("alpha beta gamma\n");
     let screen = frame(&mut app, NARROW);

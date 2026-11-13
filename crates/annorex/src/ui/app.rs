@@ -735,7 +735,7 @@ impl App {
         }
         self.changes.remove(id);
         let changed = if old == new { Vec::new() } else { vec![(id.to_owned(), old, new)] };
-        let selected = self.selection_range();
+        let selected = self.selection_before();
         if self.shown_id.as_deref() == Some(id) {
             let (line, top, focus) = (self.cursor_line(), self.top, self.focus_range());
             self.show_reply(position);
@@ -852,7 +852,7 @@ impl App {
             .then(|| self.replies.get(self.panel_index).map(|reply| reply.id.clone()))
             .flatten();
         let (top, cursor, focus) = (self.top, self.cursor, self.focus_range());
-        let selected = self.selection_range();
+        let selected = self.selection_before();
         // The open files stay after the replies.
         let mut replies = replies;
         replies.extend(self.replies.iter().filter(|reply| self.files.contains_key(&reply.id)).cloned());
@@ -884,8 +884,17 @@ impl App {
 
     /// Move the selection of the shown reply to its text in the new source. `old` is the range of the
     /// selection before the change. A selection whose text is gone ends, and the footer says so.
-    fn follow_selection(&mut self, old: Option<Range<usize>>, changed: &[(String, String, String)]) {
-        let (Some(range), Some(id)) = (old, self.shown_id.as_deref()) else { return };
+    fn follow_selection(
+        &mut self,
+        old: Option<(String, Range<usize>)>,
+        changed: &[(String, String, String)],
+    ) {
+        let Some((id, range)) = old else { return };
+        // The shown reply must be the same one, with its selection still on.
+        if self.shown_id.as_deref() != Some(id.as_str()) || self.selection.is_none() {
+            return;
+        }
+        let id = id.as_str();
         let Some((_, old_source, new_source)) = changed.iter().find(|(changed_id, ..)| changed_id == id)
         else {
             return;
@@ -907,6 +916,11 @@ impl App {
         };
         self.cursor = end;
         self.snap_cursor();
+    }
+
+    /// The id of the shown reply and the range of its selection, before a change of the text.
+    fn selection_before(&self) -> Option<(String, Range<usize>)> {
+        Some((self.shown_id.clone()?, self.selection_range()?))
     }
 
     /// The nearest cursor stop at or before `offset`.
