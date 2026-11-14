@@ -32,7 +32,7 @@ pub fn write_cache(path: &Path, cache: &Cache) -> std::io::Result<()> {
     }
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(format!(".{}.tmp", std::process::id()));
-    let temporary = std::path::PathBuf::from(temporary);
+    let temporary = PathBuf::from(temporary);
     std::fs::write(&temporary, serde_json::to_vec(cache)?)?;
     std::fs::rename(&temporary, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&temporary);
@@ -114,6 +114,113 @@ pub fn cached_latest(path: &Path, now: u64, fetch: impl FnOnce() -> Option<Strin
     let latest = fetch().or_else(|| cache.and_then(|cache| cache.latest));
     let _ = write_cache(path, &Cache { checked_at: now, latest: latest.clone() });
     latest
+}
+
+/// The file name of the cache in the state directory.
+const CACHE_FILE: &str = "update-check.json";
+
+/// The path of the cache file.
+pub fn cache_path(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    Some(crate::draft::state_dir(env)?.join(CACHE_FILE))
+}
+
+/// How the user installed Annorex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    /// The Homebrew formula.
+    Homebrew,
+    /// The shell installer of the release.
+    Installer,
+    /// `cargo install`, or any other way.
+    Cargo,
+}
+
+#[derive(Deserialize)]
+struct Receipt {
+    install_prefix: String,
+}
+
+/// The install prefix in the receipt of the shell installer, field `install_prefix`. The receipt is
+/// `$XDG_CONFIG_HOME/annorex/annorex-receipt.json`, else `$HOME/.config/annorex/annorex-receipt.json`.
+/// A missing or broken receipt gives `None`.
+pub fn receipt_prefix(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    let absolute = |name: &str| env(name).map(PathBuf::from).filter(|path| path.is_absolute());
+    let base = absolute("XDG_CONFIG_HOME").or_else(|| absolute("HOME").map(|home| home.join(".config")))?;
+    let receipt: Receipt =
+        serde_json::from_slice(&std::fs::read(base.join("annorex").join("annorex-receipt.json")).ok()?)
+            .ok()?;
+    (!receipt.install_prefix.is_empty()).then(|| PathBuf::from(receipt.install_prefix))
+}
+
+/// The canonical form of a path, or the path itself when it cannot be resolved.
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The install channel of the binary `exe`.
+pub fn channel(exe: &Path, receipt_prefix: Option<&Path>) -> Channel {
+    let exe = canonical(exe);
+    let mut names = exe.components().map(std::path::Component::as_os_str);
+    let in_cellar = names.any(|name| name == "Cellar") && names.next().is_some_and(|name| name == "annorex");
+    if in_cellar {
+        return Channel::Homebrew;
+    }
+    match receipt_prefix {
+        Some(prefix) if exe.starts_with(canonical(prefix)) => Channel::Installer,
+        _ => Channel::Cargo,
+    }
+}
+
+const INSTALLER_COMMAND: &str = "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/latest/download/annorex-installer.sh | sh";
+
+/// The command that upgrades Annorex, or `None` when the user must upgrade by hand.
+pub fn upgrade_command(channel: Channel) -> Option<Vec<String>> {
+    let words: &[&str] = match channel {
+        Channel::Homebrew => &["brew", "upgrade", "annorex"],
+        Channel::Installer => &["sh", "-c", INSTALLER_COMMAND],
+        Channel::Cargo => return None,
+    };
+    Some(words.iter().map(|word| (*word).to_owned()).collect())
+}
+
+/// The command to show to the user.
+pub fn command_text(channel: Channel) -> &'static str {
+    match channel {
+        Channel::Homebrew => "brew upgrade annorex",
+        Channel::Installer => INSTALLER_COMMAND,
+        Channel::Cargo => "cargo install --git https://github.com/devararishivian/annorex --locked annorex",
+    }
+}
+
+/// The short hint for a notice in the viewer.
+pub fn hint(channel: Channel) -> &'static str {
+    match channel {
+        Channel::Homebrew => "brew upgrade annorex",
+        Channel::Installer | Channel::Cargo => "annorex update",
+    }
+}
+
+/// What `annorex update` does after it knows the latest version.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Plan {
+    /// The current version is the newest.
+    Current,
+    /// Print the line and stop.
+    Notice(String),
+    /// Print `Running: ...` and run the command.
+    Run(Vec<String>),
+}
+
+/// Decides the action of `annorex update`. It runs nothing.
+pub fn plan(current: &str, latest: &str, check_only: bool, channel: Channel) -> Plan {
+    if !newer(current, latest) {
+        return Plan::Current;
+    }
+    let notice = || Plan::Notice(format!("Annorex {latest} is available. Run: {}", command_text(channel)));
+    match upgrade_command(channel) {
+        Some(command) if !check_only => Plan::Run(command),
+        _ => notice(),
+    }
 }
 
 #[cfg(test)]
@@ -212,5 +319,107 @@ mod tests {
         assert!(!disabled(env(&[("ANNOREX_NO_UPDATE_CHECK", "0")])));
         assert!(!disabled(env(&[("ANNOREX_NO_UPDATE_CHECK", "")])));
         assert!(!disabled(env(&[])));
+    }
+
+    #[test]
+    fn channel_finds_homebrew_by_the_cellar_path() {
+        let exe = Path::new("/opt/homebrew/Cellar/annorex/0.2.0/bin/annorex");
+        assert_eq!(channel(exe, None), Channel::Homebrew);
+    }
+
+    #[test]
+    fn channel_finds_the_installer_by_the_receipt_prefix() {
+        let exe = Path::new("/u/.cargo/bin/annorex");
+        assert_eq!(channel(exe, Some(Path::new("/u/.cargo"))), Channel::Installer);
+        assert_eq!(channel(exe, None), Channel::Cargo);
+        assert_eq!(channel(exe, Some(Path::new("/other"))), Channel::Cargo);
+    }
+
+    #[test]
+    fn channel_resolves_symlinks() {
+        let dir = tempfile::tempdir().expect("dir");
+        let real = dir.path().join("Cellar/annorex/0.2.0/bin");
+        std::fs::create_dir_all(&real).expect("dirs");
+        std::fs::write(real.join("annorex"), "").expect("file");
+        std::fs::create_dir_all(dir.path().join("bin")).expect("bin");
+        let link = dir.path().join("bin/annorex");
+        std::os::unix::fs::symlink(real.join("annorex"), &link).expect("link");
+        assert_eq!(channel(&link, None), Channel::Homebrew);
+        let prefix = dir.path().join("bin");
+        assert_eq!(channel(&link, Some(&prefix)), Channel::Homebrew);
+        let plain = dir.path().join("bin/other");
+        std::fs::write(&plain, "").expect("file");
+        assert_eq!(channel(&plain, Some(dir.path())), Channel::Installer);
+    }
+
+    #[test]
+    fn receipt_prefix_reads_the_receipt() {
+        let dir = tempfile::tempdir().expect("dir");
+        let folder = dir.path().join("annorex");
+        std::fs::create_dir_all(&folder).expect("dir");
+        let xdg = dir.path().to_str().expect("utf8");
+        let pairs = [("XDG_CONFIG_HOME", xdg)];
+        let reader = env(&pairs);
+        assert_eq!(receipt_prefix(&reader), None);
+        let file = folder.join("annorex-receipt.json");
+        std::fs::write(&file, "{").expect("write");
+        assert_eq!(receipt_prefix(&reader), None);
+        std::fs::write(&file, r#"{"install_prefix":"/u/.cargo","version":"0.1.0"}"#).expect("write");
+        assert_eq!(receipt_prefix(&reader), Some(PathBuf::from("/u/.cargo")));
+    }
+
+    #[test]
+    fn receipt_prefix_falls_back_to_home() {
+        let dir = tempfile::tempdir().expect("dir");
+        let folder = dir.path().join(".config/annorex");
+        std::fs::create_dir_all(&folder).expect("dir");
+        std::fs::write(folder.join("annorex-receipt.json"), r#"{"install_prefix":"/p"}"#).expect("write");
+        let home = dir.path().to_str().expect("utf8");
+        assert_eq!(receipt_prefix(env(&[("HOME", home)])), Some(PathBuf::from("/p")));
+    }
+
+    #[test]
+    fn upgrade_commands_per_channel() {
+        assert_eq!(upgrade_command(Channel::Cargo), None);
+        assert_eq!(
+            upgrade_command(Channel::Homebrew),
+            Some(vec!["brew".into(), "upgrade".into(), "annorex".into()])
+        );
+        let installer = upgrade_command(Channel::Installer).expect("command");
+        let [shell, flag, script] = installer.as_slice() else { panic!("three words") };
+        assert_eq!((shell.as_str(), flag.as_str()), ("sh", "-c"));
+        assert!(script.ends_with("annorex-installer.sh | sh"));
+    }
+
+    #[test]
+    fn hints_per_channel() {
+        assert_eq!(hint(Channel::Homebrew), "brew upgrade annorex");
+        assert_eq!(hint(Channel::Installer), "annorex update");
+        assert_eq!(hint(Channel::Cargo), "annorex update");
+    }
+
+    #[test]
+    fn plan_decides_without_running() {
+        assert_eq!(plan("0.2.0", "0.2.0", false, Channel::Homebrew), Plan::Current);
+        assert_eq!(plan("0.2.0", "nightly", false, Channel::Homebrew), Plan::Current);
+        assert_eq!(
+            plan("0.1.0", "0.2.0", true, Channel::Homebrew),
+            Plan::Notice("Annorex 0.2.0 is available. Run: brew upgrade annorex".to_owned())
+        );
+        assert_eq!(
+            plan("0.1.0", "0.2.0", false, Channel::Homebrew),
+            Plan::Run(upgrade_command(Channel::Homebrew).expect("command"))
+        );
+        let cargo = "Annorex 0.2.0 is available. Run: cargo install --git https://github.com/devararishivian/annorex --locked annorex";
+        assert_eq!(plan("0.1.0", "0.2.0", false, Channel::Cargo), Plan::Notice(cargo.to_owned()));
+        assert_eq!(plan("0.1.0", "0.2.0", true, Channel::Cargo), Plan::Notice(cargo.to_owned()));
+    }
+
+    #[test]
+    fn cache_path_is_in_the_state_dir() {
+        assert_eq!(
+            cache_path(env(&[("XDG_STATE_HOME", "/x")])),
+            Some(PathBuf::from("/x/annorex/update-check.json"))
+        );
     }
 }

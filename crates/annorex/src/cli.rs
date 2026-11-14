@@ -3,6 +3,7 @@
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 
@@ -16,6 +17,9 @@ use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
 use crate::tui::{Start, run_viewer};
+use crate::update::{
+    Cache, Plan, cache_path, channel, command_text, fetch_latest, plan, receipt_prefix, write_cache,
+};
 
 /// Exit code: sent, pasted, or probe complete.
 pub const EXIT_OK: i32 = 0;
@@ -82,6 +86,12 @@ enum Command {
         session: Option<String>,
         /// Files to open at the start, relative to the work directory of the agent.
         paths: Vec<PathBuf>,
+    },
+    /// Check for a newer release and upgrade Annorex.
+    Update {
+        /// Only check. Do not run the upgrade.
+        #[arg(long)]
+        check: bool,
     },
     /// Set up the Rex integration.
     Rex {
@@ -157,6 +167,7 @@ pub fn run(
         }
         Command::Last { target, session } => last(&env, &target, session),
         Command::Files { target, session, paths } => files(&env, &target, session, paths),
+        Command::Update { check } => update(&env, check, out, err),
         Command::Rex { command: RexCommand::Install { dir } } => rex_install(&env, dir, out),
         Command::Rex { command: RexCommand::Open { view: OpenView::Last { target, session } } } => {
             rex_open(&env, &View::Last, &target, session, out)
@@ -171,6 +182,52 @@ pub fn run(
         Err(failure) => {
             let _ = writeln!(err, "annorex: {}", failure.message);
             failure.code
+        }
+    }
+}
+
+fn update(
+    env: &impl Fn(&str) -> Option<OsString>,
+    check_only: bool,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> Result<i32, Failure> {
+    let current = env!("CARGO_PKG_VERSION");
+    let Some(latest) = fetch_latest() else {
+        let _ = writeln!(err, "annorex: cannot check for a new release");
+        return Ok(EXIT_FAILURE);
+    };
+    let exe = std::env::current_exe().unwrap_or_default();
+    let channel = channel(&exe, receipt_prefix(env).as_deref());
+    match plan(current, &latest, check_only, channel) {
+        Plan::Current => {
+            writeln!(out, "Annorex {current} is the newest release.").map_err(|e| io_failure(&e))?;
+            Ok(EXIT_OK)
+        }
+        Plan::Notice(line) => {
+            writeln!(out, "{line}").map_err(|e| io_failure(&e))?;
+            Ok(EXIT_OK)
+        }
+        Plan::Run(command) => {
+            writeln!(out, "Running: {}", command_text(channel)).map_err(|e| io_failure(&e))?;
+            let _ = out.flush();
+            let (program, args) = command
+                .split_first()
+                .ok_or_else(|| Failure { code: EXIT_FAILURE, message: "empty upgrade command".to_owned() })?;
+            let status = std::process::Command::new(program)
+                .args(args)
+                .status()
+                .map_err(|e| Failure { code: EXIT_FAILURE, message: format!("cannot run {program}: {e}") })?;
+            if !status.success() {
+                return Ok(status.code().unwrap_or(EXIT_FAILURE));
+            }
+            if let Some(path) = cache_path(env) {
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+                let _ = write_cache(&path, &Cache { checked_at: now, latest: None });
+            }
+            writeln!(out, "Rex loads the new Annorex module the next time you open Annorex.")
+                .map_err(|e| io_failure(&e))?;
+            Ok(EXIT_OK)
         }
     }
 }

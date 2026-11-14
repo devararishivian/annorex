@@ -184,3 +184,9 @@ fn help_lists_files() {
     let help = text(&annorex(&["--help"], &[], "").stdout);
     assert!(help.contains("files"), "{help}");
 }
+
+#[test]
+fn update_help_lists_check() {
+    let help = text(&annorex(&["update", "--help"], &[], "").stdout);
+    assert!(help.contains("--check"), "{help}");
+}
