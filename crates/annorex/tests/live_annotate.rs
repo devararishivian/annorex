@@ -244,13 +244,14 @@ fn annotate_and_send_for_each_agent() {
             ));
         }
 
-        // 4. The draft has sent_at.
-        let sent = wait_until(Duration::from_secs(10), || {
-            drafts(&state_dir, live.agent).iter().any(|draft| draft["sent_at"].is_string()).then_some(())
+        // 4. The send took the notes: the draft file is gone and no draft has sent_at.
+        let cleared = wait_until(Duration::from_secs(10), || {
+            let left = drafts(&state_dir, live.agent);
+            (left.is_empty() && left.iter().all(|draft| !draft["sent_at"].is_string())).then_some(())
         });
-        log(start, &format!("{name} draft: sent_at set {}", sent.is_some()));
-        if sent.is_none() {
-            fail(format!("{name} draft: no sent_at in {:?}", drafts(&state_dir, live.agent)));
+        log(start, &format!("{name} draft: cleared after the send {}", cleared.is_some()));
+        if cleared.is_none() {
+            fail(format!("{name} draft: still on disk after the send: {:?}", drafts(&state_dir, live.agent)));
         }
 
         // 5. q closes the viewer without the question.

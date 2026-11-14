@@ -203,13 +203,14 @@ fn review_files_for_each_agent() {
             ));
         }
 
-        // 4. Both drafts have sent_at. q closes the viewer without the question.
-        let sent = wait_until(Duration::from_secs(10), || {
+        // 4. The send took both notes: both drafts are gone and none has sent_at.
+        //    q closes the viewer without the question.
+        let cleared = wait_until(Duration::from_secs(10), || {
             let (all, sent) = file_drafts(&state_dir, live.agent);
-            (all == 2 && sent == 2).then_some(())
+            (all == 0 && sent == 0).then_some(())
         });
-        log(start, &format!("{name} drafts: both have sent_at {}", sent.is_some()));
-        if sent.is_none() {
+        log(start, &format!("{name} drafts: both cleared after the send {}", cleared.is_some()));
+        if cleared.is_none() {
             fail(format!("{name} drafts: {:?}", file_drafts(&state_dir, live.agent)));
         }
         keys(&rex, &viewer, "q");
@@ -220,7 +221,8 @@ fn review_files_for_each_agent() {
             continue;
         }
 
-        // 5. Open again, change two.txt, and wait for the banner. r clears it, the note follows.
+        // 5. Open again: the files start clean. Add a new note on two.txt, change the file, and wait for the
+        //    banner. r clears it, the new note follows.
         if wait_for_state(&rex, &live.block, &["idle", "done"], ARRIVAL_TIMEOUT).is_none() {
             fail(format!("{name} banner: the agent did not finish the reply to the export"));
             continue;
@@ -233,6 +235,15 @@ fn review_files_for_each_agent() {
         wait_until(Duration::from_secs(10), || {
             capture(&session, &viewer).contains("alpha line").then_some(())
         });
+        let reopened = capture(&session, &viewer);
+        let is_clean = !reopened.contains("[ Sent") && !reopened.contains(NOTE_TWO);
+        log(start, &format!("{name} reopen: no sent label and no old note {is_clean}"));
+        if !is_clean {
+            fail(format!("{name} reopen: the sent notes came back:\n{reopened}"));
+        }
+        for step in ["0", "v", "llll", "c", NOTE_TWO, "\r"] {
+            keys(&rex, &viewer, step);
+        }
         std::fs::write(live.cwd.join("two.txt"), format!("a new first line\n{TWO}")).expect("change two.txt");
         let changed = Instant::now();
         let banner = wait_until(Duration::from_secs(5), || {
