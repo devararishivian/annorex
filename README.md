@@ -15,10 +15,36 @@ notes back to the agent.
 [license-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [platform-badge]: https://img.shields.io/badge/platform-macOS-lightgrey.svg
 
-![Annorex shows a reply of a coding agent with notes in place](docs/assets/annorex-review.png)
+![Annorex over a Claude Code reply in Rex, with notes beside the text that they quote](docs/assets/annorex-hero.png)
 
 Annorex works with Claude Code, Pi, and OpenCode in Rex on macOS. It opens over the window of the agent. You select
 the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
+
+<details>
+<summary>See a review from start to end in five screenshots</summary>
+
+1. The agent finishes a reply in Rex.
+
+   ![Claude Code shows a reply with a summary, a table, a code example, and two open questions](docs/assets/annorex-flow-1-reply.png)
+
+2. Press `cmd+shift+a`. Annorex opens over the window of the agent. Select text with `v` and the cursor keys. The
+   action bar shows the four note types.
+
+   ![Annorex shows a text selection in the reply and the action bar with the four note types](docs/assets/annorex-flow-2-select.png)
+
+3. Press `c`, write the comment in the note box, and press `enter`.
+
+   ![Annorex shows the note box under a list item, with a comment in it](docs/assets/annorex-flow-3-comment.png)
+
+4. Press `T` to show the file tree. Open a file that the agent changed and write a note on it.
+
+   ![Annorex shows the file tree on the left and a file with a comment on the right](docs/assets/annorex-flow-4-files.png)
+
+5. Press `S`. Annorex sends all notes in one message and closes. The agent works on the notes.
+
+   ![Claude Code shows its answer to the notes, with passing tests and the changed files](docs/assets/annorex-flow-5-result.png)
+
+</details>
 
 ## Why
 
@@ -99,8 +125,6 @@ the selection and show the action bar. The action bar has the four note types. Y
 
 ## Annotate files
 
-![Annorex shows the file tree on the left and a file with notes on the right](docs/assets/annorex-files.png)
-
 1. Focus the pane of the agent.
 2. Press `cmd+shift+f`. Annorex opens with the file tree of the work directory of the agent.
 3. Choose a file in the tree and press `enter`. Or press `ctrl+p` and type a part of its name.
@@ -111,8 +135,6 @@ The tree puts the files that the agent changed since your last prompt at the top
 changes an open file, a banner shows. Press `r` to read the file again. Your notes move with their text.
 
 ## Send the notes to the agent
-
-![Annorex shows the notes and the send button before a send to the agent](docs/assets/annorex-send.png)
 
 Press `S`, or click the send button `[ Send N → agent ▸ ]` in the header. One message holds the notes on all replies
 and files. A send gives only the notes that Annorex did not send before.
