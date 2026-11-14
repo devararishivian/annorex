@@ -182,8 +182,7 @@ pub fn run_viewer(
     };
     let mut app = viewer.start_app(start);
     app.set_state(viewer.state.clone());
-    if !no_update_check
-        && !update::disabled(env)
+    if update::should_check(no_update_check, env)
         && let Some(notices) = spawn_update_check(env)
     {
         app.start_update_check(notices);

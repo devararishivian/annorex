@@ -86,10 +86,16 @@ pub fn disabled(env: impl Fn(&str) -> Option<OsString>) -> bool {
         || env("ANNOREX_NO_UPDATE_CHECK").is_some_and(|value| !value.is_empty() && value != "0")
 }
 
+/// True when the flag `--no-update-check` and the environment both permit the check.
+pub fn should_check(no_update_check: bool, env: impl Fn(&str) -> Option<OsString>) -> bool {
+    !no_update_check && !disabled(env)
+}
+
 /// Asks GitHub for the latest release. Any failure gives `None`.
 pub fn fetch_latest() -> Option<String> {
+    // `-q` must be the first argument: then curl does not read `~/.curlrc`.
     let output = Command::new("/usr/bin/curl")
-        .args(["-fsS", "--max-time", "5"])
+        .args(["-q", "-fsS", "--max-time", "5"])
         .args(["-H", "Accept: application/vnd.github+json"])
         .args(["-H", "X-GitHub-Api-Version: 2026-03-10"])
         .args(["-H", concat!("User-Agent: annorex/", env!("CARGO_PKG_VERSION"))])
@@ -171,7 +177,9 @@ pub fn channel(exe: &Path, receipt_prefix: Option<&Path>) -> Channel {
     }
 }
 
-const INSTALLER_COMMAND: &str = "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/latest/download/annorex-installer.sh | sh";
+/// The installer runs only after the download is complete, so a failed download makes the
+/// command fail. A plain `curl ... | sh` exits with 0 when curl fails.
+const INSTALLER_COMMAND: &str = "script=$(curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/latest/download/annorex-installer.sh) && printf '%s\\n' \"$script\" | sh";
 
 /// The command that upgrades Annorex, or `None` when the user must upgrade by hand.
 pub fn upgrade_command(channel: Channel) -> Option<Vec<String>> {
@@ -194,7 +202,12 @@ pub fn command_text(channel: Channel) -> &'static str {
 
 /// The notice in the viewer when `latest` is newer.
 pub fn notice(latest: &str, channel: Channel) -> String {
-    format!("Annorex {latest} is available. Run: {}", hint(channel))
+    available(latest, hint(channel))
+}
+
+/// The line that names a newer version and the command to run.
+fn available(latest: &str, command: &str) -> String {
+    format!("Annorex {latest} is available. Run: {command}")
 }
 
 /// The short hint for a notice in the viewer.
@@ -221,7 +234,7 @@ pub fn plan(current: &str, latest: &str, check_only: bool, channel: Channel) -> 
     if !newer(current, latest) {
         return Plan::Current;
     }
-    let notice = || Plan::Notice(format!("Annorex {latest} is available. Run: {}", command_text(channel)));
+    let notice = || Plan::Notice(available(latest, command_text(channel)));
     match upgrade_command(channel) {
         Some(command) if !check_only => Plan::Run(command),
         _ => notice(),
@@ -327,6 +340,40 @@ mod tests {
     }
 
     #[test]
+    fn should_check_reads_the_flag_and_the_variable() {
+        assert!(!should_check(true, env(&[])));
+        assert!(!should_check(false, env(&[("ANNOREX_NO_UPDATE_CHECK", "1")])));
+        assert!(should_check(false, env(&[])));
+    }
+
+    #[test]
+    fn the_printed_command_is_the_command_that_runs() {
+        for channel in [Channel::Homebrew, Channel::Installer, Channel::Cargo] {
+            let Some(command) = upgrade_command(channel) else { continue };
+            let run = match channel {
+                Channel::Installer => command.get(2).expect("script").clone(),
+                _ => command.join(" "),
+            };
+            assert_eq!(command_text(channel), run, "{channel:?}");
+        }
+    }
+
+    #[test]
+    fn the_installer_command_fails_when_the_download_fails() {
+        let text = command_text(Channel::Installer);
+        assert!(text.starts_with("script=$(curl --proto '=https' --tlsv1.2 -LsSf "), "{text}");
+        assert!(text.ends_with(") && printf '%s\\n' \"$script\" | sh"), "{text}");
+        // A download that fails must make the whole command fail. `false` takes the place of curl.
+        let failed = text.replacen("curl ", "false ", 1);
+        let status = Command::new("/bin/sh").args(["-c", &failed]).status().expect("sh");
+        assert!(!status.success());
+        // A download that works runs the script.
+        let worked = "script=$(printf 'exit 7') && printf '%s\\n' \"$script\" | sh";
+        let status = Command::new("/bin/sh").args(["-c", worked]).status().expect("sh");
+        assert_eq!(status.code(), Some(7));
+    }
+
+    #[test]
     fn channel_finds_homebrew_by_the_cellar_path() {
         let exe = Path::new("/opt/homebrew/Cellar/annorex/0.2.0/bin/annorex");
         assert_eq!(channel(exe, None), Channel::Homebrew);
@@ -393,7 +440,8 @@ mod tests {
         let installer = upgrade_command(Channel::Installer).expect("command");
         let [shell, flag, script] = installer.as_slice() else { panic!("three words") };
         assert_eq!((shell.as_str(), flag.as_str()), ("sh", "-c"));
-        assert!(script.ends_with("annorex-installer.sh | sh"));
+        assert!(script.contains("annorex-installer.sh)"), "{script}");
+        assert!(script.ends_with("| sh"), "{script}");
     }
 
     #[test]
