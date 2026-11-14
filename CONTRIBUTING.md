@@ -29,7 +29,8 @@ CI runs these commands on every push and pull request. Run the same commands bef
 3. Test: `cargo test --workspace`
 4. Licenses: `cargo deny check licenses sources bans`
 
-The fourth command needs `cargo-deny`. CI uses version 0.20.2. Install it with `cargo install --locked cargo-deny --version 0.20.2`.
+The fourth command needs `cargo-deny`. CI uses version 0.20.2. Install it with
+`cargo install --locked cargo-deny --version 0.20.2`.
 
 The workspace forbids `unsafe` code. Clippy runs with the `pedantic` lints, and `unwrap`, `expect`, `panic`, and
 `print_stdout` produce warnings. CI turns each warning into an error.
@@ -42,7 +43,8 @@ them. They run real agents in a temporary Rex session.
 Before you run a live test, make sure of these points:
 
 1. Rex runs on your machine and the `rex` CLI works.
-2. The agents that the test uses are installed. Some tests also make model calls. Read the comment at the top of the test file.
+2. The agents that the test uses are installed. Some tests also make model calls. Read the comment at the top of the
+   test file.
 3. The environment variable `ANNOREX_LIVE=1` is set.
 
 Run one live test with this command. Replace `live_layer` with the name of the test file.

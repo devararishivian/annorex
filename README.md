@@ -76,7 +76,7 @@ the agent. The command palette shows them as "Annorex: review the last reply" an
    The list holds the 25 newest replies. Press `p` later to open the list again.
 4. Press `j` or `k` to choose a block, or click one. A block is a paragraph, a list item, a heading, a code block, or a
    table.
-5. Press `o` to mark the block as good, `c` to comment, `d` to mark it for removal, or `s` to replace it.
+5. Press `o` to mark the block as good or `c` to comment. Press `d` to mark it for removal or `s` to replace it.
 6. For `c` and `s`, type the note in the note box and press `enter`. `o` and `d` save at once and need no text.
 
 To annotate a part of a block, press `v` and move the cursor to select text. This is text mode. Press `v` again to end
@@ -115,7 +115,8 @@ send button shows `queued` or `steers` while the agent works.
 
 After a successful send, Annorex closes. The sent notes leave the draft on disk, and Annorex deletes an empty draft.
 If the send fails, Annorex stays open, keeps your notes, and shows the reason in the footer. If a dialog opens after
-the paste, Annorex does not press Enter. Answer the dialog, then press Enter in the agent pane.
+the paste, Annorex does not press Enter. Annorex then stays open and marks the notes as sent. Answer the dialog, then
+press Enter in the agent pane.
 
 Press `P` to paste the notes without Enter. Press `Y` to copy the notes. Annorex saves your notes after each change.
 When you close Annorex, it keeps the notes that you did not send.
@@ -207,7 +208,7 @@ The idea of the full-window layer comes from herdr-annotate and memex, which bot
 rule of one review layer for each session. Two more ideas come from plannotator-tui. Annorex tests the Lua module with
 `rex config check` on a scratch copy. It finds the window of the agent pane with `session.describe_block`.
 
-Annorex is built with these projects:
+Annorex uses these projects:
 
 - [Ratatui](https://github.com/ratatui/ratatui) draws the terminal interface.
 - [crossterm](https://github.com/crossterm-rs/crossterm) reads the keys and the mouse and controls the terminal.
