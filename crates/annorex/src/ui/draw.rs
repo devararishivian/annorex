@@ -149,8 +149,11 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
                 ];
                 lists(&mut out);
                 // `esc unselect` and `S send` come right after the note keys, so a narrow footer keeps them.
-                out.insert(4, hint(Action::Select, format!("{} text", k(Action::Select))));
-                out.insert(5, hint(Action::Edit, format!("{}/{} edit", k(Action::Edit), k(Action::Remove))));
+                out.insert(4.min(out.len()), hint(Action::Select, format!("{} text", k(Action::Select))));
+                out.insert(
+                    5.min(out.len()),
+                    hint(Action::Edit, format!("{}/{} edit", k(Action::Edit), k(Action::Remove))),
+                );
                 // The least important hint: a narrow footer leaves it out first.
                 out.push(plain("enter actions"));
                 out
