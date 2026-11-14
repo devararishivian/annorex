@@ -903,6 +903,11 @@ impl<'a> Builder<'a> {
         while self.lines.last().is_some_and(DocLine::is_blank) {
             self.lines.pop();
         }
+        // A table whose last rows were blank lost those lines above.
+        let len = self.lines.len();
+        for table in &mut self.tables {
+            table.lines.end = table.lines.end.min(len);
+        }
         (self.lines, self.blocks, self.tables)
     }
 }
@@ -1051,6 +1056,15 @@ mod tests {
         let numbers: Vec<usize> = doc.lines.iter().map(|line| line.line).collect();
         assert_eq!(numbers, [1, 2, 3]);
         assert!(doc.lines.iter().all(|line| line.spans.iter().all(|span| span.style.table)));
+    }
+
+    #[test]
+    fn a_table_that_ends_with_an_empty_row_maps_to_existing_lines() {
+        let doc = Doc::parse("| a |\n|---|\n| |\n");
+        assert_eq!(doc.tables.len(), 1);
+        for table in &doc.tables {
+            assert!(table.lines.end <= doc.lines.len(), "{:?} vs {}", table.lines, doc.lines.len());
+        }
     }
 
     #[test]
