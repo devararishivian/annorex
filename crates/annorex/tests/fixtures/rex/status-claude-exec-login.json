@@ -1,0 +1,14 @@
+{
+  "records": [
+    {
+      "state": "done",
+      "app": "claude-code",
+      "effective_app": "claude-code",
+      "updated_at": "2026-11-14T20:09:11.613272+07:00",
+      "owner": {
+        "pid": 2921,
+        "name": "login"
+      }
+    }
+  ]
+}

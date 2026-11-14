@@ -22,7 +22,7 @@ use crate::draft::{DraftError, DraftKey, DraftStore};
 use crate::files;
 use crate::replies::{
     Candidate, Reply, SessionRef, Source, candidates, load_replies, matching_panes, needs_picker,
-    process_table,
+    process_cwd, process_table,
 };
 use crate::rex::{Rex, RexError, Runner, SystemRunner};
 use crate::safety::{Safety, check};
@@ -408,6 +408,7 @@ impl<R: Runner> Viewer<'_, R> {
         };
         let process = self.rex.process(self.target).map_err(|error| error.to_string())?;
         let source = Source::from_process(agent, &process)
+            .or_else(|| Source::from_exec_child(agent, &process, &process_table().ok()?, process_cwd))
             .ok_or_else(|| "Rex does not report the directory of the agent process".to_owned())?;
         self.state = state;
         self.work = Some(source.clone());

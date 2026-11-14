@@ -9,7 +9,7 @@ use annorex_hosts::roots::Roots;
 use annorex_hosts::{HostError, Message, Role, claude, opencode, pi};
 
 use crate::agent::Agent;
-use crate::rex::{ProcessInfo, Rex, RexError, Runner};
+use crate::rex::{ProcessInfo, Rex, RexError, Runner, lsof_path};
 
 /// The reply list shows a maximum of this many replies (spec §6.3).
 pub const REPLY_LIMIT: usize = 25;
@@ -85,6 +85,38 @@ impl Source {
         let foreground = process.foreground.as_ref()?;
         Some(Self { agent, cwd: foreground.cwd.clone()?, pid: foreground.pid })
     }
+
+    /// The agent that a login shell started with `exec`. The shell gives the terminal back to the
+    /// process group of `login` before the `exec`, so Rex reports `login` (without a directory) as
+    /// the foreground process. The agent is then the only child of that process. `cwd_of` gives the
+    /// directory of a pid. `None` when the foreground process does not have exactly one child.
+    pub fn from_exec_child(
+        agent: Agent,
+        process: &ProcessInfo,
+        process_table: &[(u32, u32)],
+        cwd_of: impl FnOnce(u32) -> Option<PathBuf>,
+    ) -> Option<Self> {
+        let pid = exec_child(process.foreground.as_ref()?.pid, process_table)?;
+        Some(Self { agent, cwd: cwd_of(pid)?, pid })
+    }
+}
+
+/// The only child of `parent` in the process table. `None` for no child or several children.
+pub fn exec_child(parent: u32, process_table: &[(u32, u32)]) -> Option<u32> {
+    let mut children = process_table.iter().filter(|(_, ppid)| *ppid == parent).map(|(pid, _)| *pid);
+    let child = children.next()?;
+    children.next().is_none().then_some(child)
+}
+
+/// The working directory of a process, from `lsof -a -p PID -d cwd -Fn`.
+pub fn process_cwd(pid: u32) -> Option<PathBuf> {
+    let output = std::process::Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then(|| lsof_path(&String::from_utf8_lossy(&output.stdout)))?
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -254,6 +286,57 @@ mod tests {
     use std::process::{ExitStatus, Output};
 
     use super::*;
+
+    fn exec_login_process() -> ProcessInfo {
+        serde_json::from_str(include_str!("../tests/fixtures/rex/process-exec-login.json")).expect("process")
+    }
+
+    /// `lsof -a -p 2924 -d cwd -Fn` for the agent of the fixture.
+    const LSOF_CWD: &str = "p2924\nfcwd\nn/Users/dev/work/project\n";
+
+    #[test]
+    fn exec_child_is_the_only_child_of_the_foreground_process() {
+        assert_eq!(exec_child(2921, &[(1, 0), (2921, 1320), (2924, 2921), (3000, 2924)]), Some(2924));
+        assert_eq!(exec_child(2921, &[(2921, 1320)]), None);
+        assert_eq!(exec_child(2921, &[(2924, 2921), (2925, 2921)]), None);
+    }
+
+    #[test]
+    fn process_cwd_reads_the_directory_of_this_process() {
+        let here = std::env::current_dir().expect("cwd").canonicalize().expect("canonical");
+        assert_eq!(
+            process_cwd(std::process::id()).map(|dir| dir.canonicalize().expect("canonical")),
+            Some(here)
+        );
+    }
+
+    #[test]
+    fn source_of_an_exec_child_has_the_agent_pid_and_cwd() {
+        let process = exec_login_process();
+        assert_eq!(Source::from_process(Agent::ClaudeCode, &process), None);
+        let table = [(2921, 1320), (2924, 2921)];
+        let source = Source::from_exec_child(Agent::ClaudeCode, &process, &table, |pid| {
+            assert_eq!(pid, 2924);
+            lsof_path(LSOF_CWD)
+        });
+        assert_eq!(
+            source,
+            Some(Source {
+                agent: Agent::ClaudeCode,
+                cwd: PathBuf::from("/Users/dev/work/project"),
+                pid: 2924
+            })
+        );
+    }
+
+    #[test]
+    fn no_source_without_one_child_or_its_cwd() {
+        let process = exec_login_process();
+        let none = |_| None;
+        assert_eq!(Source::from_exec_child(Agent::ClaudeCode, &process, &[(2924, 2921)], none), None);
+        let two = [(2924, 2921), (2925, 2921)];
+        assert_eq!(Source::from_exec_child(Agent::ClaudeCode, &process, &two, |_| lsof_path(LSOF_CWD)), None);
+    }
 
     #[test]
     fn session_id_is_the_file_stem_or_the_opencode_id() {

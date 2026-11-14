@@ -138,6 +138,18 @@ mod tests {
     }
 
     #[test]
+    fn detects_claude_that_a_login_shell_started_with_exec() {
+        // Rex reports `login` as the foreground process and as the record owner.
+        let process: ProcessInfo =
+            serde_json::from_str(include_str!("../tests/fixtures/rex/process-exec-login.json"))
+                .expect("process");
+        let status: StatusList =
+            serde_json::from_str(include_str!("../tests/fixtures/rex/status-claude-exec-login.json"))
+                .expect("status");
+        assert_eq!(detect(&process, &status), Some(Agent::ClaudeCode));
+    }
+
+    #[test]
     fn leftover_record_with_a_shell_in_the_foreground_is_not_an_agent() {
         // Rex keeps `done` and `idle` records after the agent exits to the shell.
         let shell = process("shell");

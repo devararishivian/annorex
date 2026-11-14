@@ -1,0 +1,18 @@
+{
+  "last_exit": null,
+  "child": {
+    "pid": 2921,
+    "user_id": 0,
+    "user": "root",
+    "name": "login",
+    "path": "/usr/bin/login"
+  },
+  "foreground": {
+    "pid": 2921,
+    "user_id": 0,
+    "user": "root",
+    "name": "login",
+    "path": "/usr/bin/login"
+  },
+  "home": "/Users/dev"
+}

@@ -196,7 +196,7 @@ fn executable_of(pid: u32) -> Option<PathBuf> {
         output.status.success().then(|| String::from_utf8(output.stdout).ok()).flatten()
     };
     if let Some(path) =
-        run("/usr/sbin/lsof", &["-a", "-p", &pid, "-d", "txt", "-Fn"]).as_deref().and_then(lsof_text_path)
+        run("/usr/sbin/lsof", &["-a", "-p", &pid, "-d", "txt", "-Fn"]).as_deref().and_then(lsof_path)
     {
         return Some(path);
     }
@@ -206,7 +206,7 @@ fn executable_of(pid: u32) -> Option<PathBuf> {
 }
 
 /// The first `n` (name) line of `lsof -Fn` output, when it is an absolute path.
-fn lsof_text_path(output: &str) -> Option<PathBuf> {
+pub fn lsof_path(output: &str) -> Option<PathBuf> {
     let name = output.lines().find_map(|line| line.strip_prefix('n'))?;
     name.starts_with('/').then(|| PathBuf::from(name))
 }
@@ -840,11 +840,11 @@ mod tests {
     }
 
     #[test]
-    fn lsof_text_path_is_the_first_name_line() {
+    fn lsof_path_is_the_first_name_line() {
         let output = "p2416\nftxt\nn/Apps/Rex Server.app/Contents/MacOS/rex\nftxt\nn/usr/lib/dyld\n";
-        assert_eq!(lsof_text_path(output), Some(PathBuf::from("/Apps/Rex Server.app/Contents/MacOS/rex")));
-        assert_eq!(lsof_text_path("p1\nftxt\n"), None);
-        assert_eq!(lsof_text_path("p1\nftxt\nnrelative\n"), None);
+        assert_eq!(lsof_path(output), Some(PathBuf::from("/Apps/Rex Server.app/Contents/MacOS/rex")));
+        assert_eq!(lsof_path("p1\nftxt\n"), None);
+        assert_eq!(lsof_path("p1\nftxt\nnrelative\n"), None);
     }
 
     #[test]
