@@ -74,7 +74,7 @@ brew install devararishivian/tap/annorex
 With the shell installer of the release. It puts the binary in `$CARGO_HOME/bin`, else in `~/.cargo/bin`:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/download/v0.1.0/annorex-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/latest/download/annorex-installer.sh | sh
 ```
 
 From source, with `cargo`:
@@ -134,8 +134,9 @@ next open.
 
 To turn off the check, use one of these ways:
 
-- Set `update_check = false` in `setup{}`.
-- Set the environment variable `ANNOREX_NO_UPDATE_CHECK=1`.
+- Set `update_check = false` in `setup{}`. Use this way for the Rex key actions.
+- Set the environment variable `ANNOREX_NO_UPDATE_CHECK=1`. The variable works when you start Annorex from a shell. This
+  includes `annorex rex open` from a shell.
 
 ## Annotate the last reply
 

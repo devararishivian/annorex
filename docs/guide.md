@@ -65,7 +65,7 @@ Intel. The fully qualified name `devararishivian/tap/annorex` trusts only the An
 run `brew trust --tap devararishivian/tap`. Or use the shell installer of the release:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/download/v0.1.0/annorex-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/latest/download/annorex-installer.sh | sh
 ```
 
 The shell installer puts the binary in `$CARGO_HOME/bin`, else in `~/.cargo/bin`. Set `ANNOREX_INSTALL_DIR` to use a
@@ -156,8 +156,9 @@ shows `run: rex config reload`. Run that command.
 
 To turn off the check, use one of these ways:
 
-- Set `update_check = false` in `setup{}`. See [Lua options](#lua-options).
-- Set the environment variable `ANNOREX_NO_UPDATE_CHECK=1`.
+- Set `update_check = false` in `setup{}`. Use this way for the Rex key actions. See [Lua options](#lua-options).
+- Set the environment variable `ANNOREX_NO_UPDATE_CHECK=1`. The variable works when you start Annorex from a shell. This
+  includes `annorex rex open` from a shell.
 
 The source formula in the repository, `packaging/homebrew/annorex.rb`, builds Annorex with the check turned off. It is
 prepared for homebrew-core. The tap formula `devararishivian/tap/annorex` keeps the check.
