@@ -109,9 +109,10 @@ impl Draft {
 
     /// True when a send took everything in the draft and nothing is in progress.
     fn is_used_up(&self) -> bool {
+        let all_sent = self.review.annotations.iter().all(|a| a.sent_at.is_some());
         self.editing.is_none()
             && self.review.note.trim().is_empty()
-            && (self.sent_at.is_some() || self.review.annotations.iter().all(|a| a.sent_at.is_some()))
+            && (self.sent_at.is_some() || (!self.review.annotations.is_empty() && all_sent))
     }
 }
 
@@ -253,16 +254,13 @@ impl DraftStore {
         }
     }
 
-    /// Save what is in progress in `draft`. The notes that a send took are left out. A draft with
-    /// nothing in progress that a send used up is removed. Refuses to touch a file that `load`
+    /// Save what is in progress in `draft`, after a finished send. The notes that the send took are
+    /// left out. A draft with nothing in progress is removed. Refuses to touch a file that `load`
     /// cannot read.
     pub fn save_in_progress(&self, draft: &Draft) -> Result<(), DraftError> {
         let mut kept = draft.clone();
-        let dropped = kept.review.drop_sent();
-        if dropped > 0 {
-            kept.sent_at = None;
-        }
-        if kept.is_clear() && (dropped > 0 || draft.sent_at.is_some()) {
+        kept.review.drop_sent();
+        if kept.is_clear() {
             self.load(&draft.key)?;
             return self.discard(&draft.key);
         }
@@ -280,11 +278,23 @@ impl DraftStore {
             .map(|entry| entry.path())
             .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
             .collect();
-        paths
-            .into_iter()
-            .filter(|path| Self::read(path).ok().flatten().is_some_and(|draft| draft.is_used_up()))
-            .filter(|path| std::fs::remove_file(path).is_ok())
-            .count()
+        paths.into_iter().filter(|path| self.remove_used_up(path)).count()
+    }
+
+    /// Delete the file at `path` when it is a readable draft that a send used up. When this is the file
+    /// of the current name, an old-name file of the same key goes too, so old notes do not come back.
+    fn remove_used_up(&self, path: &Path) -> bool {
+        let Some(draft) = Self::read(path).ok().flatten().filter(Draft::is_used_up) else { return false };
+        if std::fs::remove_file(path).is_err() {
+            return false;
+        }
+        let legacy = self.legacy_path(&draft.key);
+        if path == self.path(&draft.key)
+            && Self::read(&legacy).ok().flatten().is_some_and(|old| old.key == draft.key)
+        {
+            let _ = std::fs::remove_file(legacy);
+        }
+        true
     }
 
     /// The documents of one session that have annotations and no send, sorted.
@@ -699,5 +709,42 @@ mod tests {
         std::fs::write(&path, "{ not json").expect("write");
         assert!(matches!(store.save_in_progress(&sent_draft("r1")), Err(DraftError::Unreadable { .. })));
         assert_eq!(std::fs::read_to_string(&path).expect("read"), "{ not json");
+    }
+
+    #[test]
+    fn prune_keeps_an_empty_draft_and_a_save_in_progress_removes_it() {
+        let (_dir, store) = store();
+        let empty = Draft::new(key("r1"), "last reply");
+        store.save(&empty).expect("save");
+        assert_eq!(store.prune_sent(), 0);
+        assert!(store.load(&key("r1")).expect("load").is_some());
+        store.save_in_progress(&empty).expect("in progress");
+        assert!(store.load(&key("r1")).expect("load").is_none());
+    }
+
+    #[test]
+    fn prune_also_removes_the_old_name_file_of_a_used_up_draft() {
+        let (_dir, store) = store();
+        let draft = sent_draft("r1");
+        store.save(&draft).expect("save");
+        // The old file holds older, unsent notes of the same key. They must not come back.
+        let older = draft_with_comment("r1", "alpha beta gamma\n");
+        store.save(&older).expect("save");
+        std::fs::rename(store.path(&older.key), store.dir.join("claude-code-s1-r1.json")).expect("rename");
+        store.save(&draft).expect("save");
+        assert_eq!(files_in(&store), 2);
+        store.prune_sent();
+        assert_eq!(files_in(&store), 0);
+        assert!(store.load(&draft.key).expect("load").is_none());
+    }
+
+    #[test]
+    fn prune_never_removes_an_unreadable_old_name_file() {
+        let (_dir, store) = store();
+        store.save(&sent_draft("r1")).expect("save");
+        let broken = store.dir.join("claude-code-s1-r1.json");
+        std::fs::write(&broken, "{ not json").expect("write");
+        store.prune_sent();
+        assert_eq!(std::fs::read_to_string(&broken).expect("read"), "{ not json");
     }
 }
