@@ -86,9 +86,8 @@ impl Source {
         Some(Self { agent, cwd: foreground.cwd.clone()?, pid: foreground.pid })
     }
 
-    /// The agent that a login shell started with `exec`. The shell gives the terminal back to the
-    /// process group of `login` before the `exec`, so Rex reports `login` (without a directory) as
-    /// the foreground process. The agent is then the only child of that process. `cwd_of` gives the
+    /// The agent that a login shell started with `exec`. In this case, Rex reports `login` without a
+    /// directory as the foreground process, and the agent is its only child. `cwd_of` gives the
     /// directory of a pid. `None` when the foreground process does not have exactly one child.
     pub fn from_exec_child(
         agent: Agent,
