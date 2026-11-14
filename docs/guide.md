@@ -49,7 +49,7 @@ is busy.
 
 You need these items:
 
-- Rex on macOS (Apple silicon).
+- Rex on macOS (Apple silicon or Intel).
 - Claude Code, Pi 1.5.0 or later, or OpenCode 2.x.
 - Rust 1.99 or later, to build from source.
 

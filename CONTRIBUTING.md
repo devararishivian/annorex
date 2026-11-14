@@ -9,7 +9,7 @@ Everyone who takes part must follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 - Rust 1.99.1 or newer. The workspace sets `rust-version = "1.99"`, and CI builds with 1.99.1. The
   workspace uses the 2024 edition.
-- macOS. The release targets are `aarch64-apple-darwin` and `x86_64-apple-darwin`.
+- macOS, on Apple silicon or Intel. The release targets are `aarch64-apple-darwin` and `x86_64-apple-darwin`.
 - The `rex` CLI from the Rex terminal. Install Rex from its own site.
 - Optional, for the live tests only: Claude Code, Pi, and OpenCode.
 
