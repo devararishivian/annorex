@@ -1085,17 +1085,14 @@ fn row_spans(
                 Some(Some(kind)) => base.patch(range_style(*kind)),
                 _ => base,
             };
-            let mut style = if cursor == Some(position) {
+            let selected = marks.selected.get(position) == Some(&true);
+            if cursor == Some(position) || selected {
                 noted.add_modifier(Modifier::REVERSED)
             } else if matches.iter().any(|range| range.contains(&position)) {
                 highlight
             } else {
                 noted
-            };
-            if marks.selected.get(position) == Some(&true) {
-                style = style.add_modifier(Modifier::REVERSED);
             }
-            style
         };
         let mut current = String::new();
         let mut current_style = base;
@@ -1577,6 +1574,43 @@ fn age(now: SystemTime, then: SystemTime) -> String {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
+
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)]
+    fn selection_wins_over_a_find_match() {
+        use super::{Marks, range_style, row_spans, style_of};
+        use crate::doc::{DocSpan, SpanStyle};
+        use crate::review::Kind;
+        use crate::wrap::VisualLine;
+        use ratatui::style::{Color, Modifier, Style};
+        let row = VisualLine {
+            doc_line: 0,
+            spans: vec![DocSpan { text: "abcdef".to_owned(), style: SpanStyle::default(), source: None }],
+            first: true,
+        };
+        let marks = Marks {
+            kinds: vec![Some(Kind::Comment); 6],
+            selected: vec![false, true, false, false, false, false],
+        };
+        let spans = row_spans(&row, &[0..4], None, &marks);
+        let style_of_char = |wanted: usize| {
+            let mut at = 0;
+            for span in &spans {
+                let len = span.content.chars().count();
+                if wanted < at + len {
+                    return span.style;
+                }
+                at += len;
+            }
+            unreachable!()
+        };
+        let noted = style_of(SpanStyle::default()).patch(range_style(Kind::Comment));
+        let highlight = Style::new().fg(Color::Black).bg(Color::Yellow);
+        assert_eq!(style_of_char(1), noted.add_modifier(Modifier::REVERSED));
+        assert_eq!(style_of_char(0), highlight);
+        assert_eq!(style_of_char(2), highlight);
+        assert_eq!(style_of_char(4), noted);
+    }
     use jiff::tz::{TimeZone, offset};
 
     use ratatui::Terminal;
