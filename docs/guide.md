@@ -7,6 +7,7 @@ start, read the [README](../README.md). For the design, read [ARCHITECTURE.md](A
 
 - [What Annorex does](#what-annorex-does)
 - [Install](#install)
+- [Update](#update)
 - [Lua options](#lua-options)
 - [Review the last reply](#review-the-last-reply)
 - [Help screen](#help-screen)
@@ -60,7 +61,8 @@ brew install devararishivian/tap/annorex
 ```
 
 Homebrew puts the binary in its own `bin` directory: `/opt/homebrew/bin` on Apple silicon, `/usr/local/bin` on
-Intel. Or use the shell installer of the release:
+Intel. The fully qualified name `devararishivian/tap/annorex` trusts only the Annorex formula. To trust the whole tap,
+run `brew trust --tap devararishivian/tap`. Or use the shell installer of the release:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/download/v0.1.0/annorex-installer.sh | sh
@@ -107,9 +109,10 @@ rex.bind("cmd+shift+f", "annorex_files")
 Run `rex config reload`.
 
 The command prints the path of the binary that Rex starts, after `Rex starts:`. If the path is in a cargo build
-directory (`target/debug` or `target/release`) or in the Homebrew `Cellar`, the command warns you. That path changes
-with each build or version. Run `annorex rex install` again from the installed binary. The module also contains the
-version of Annorex. Run `annorex rex install` again after you upgrade Annorex.
+directory (`target/debug` or `target/release`), the command warns you. That path changes with each build. Run
+`annorex rex install` again from the installed binary. For a Homebrew binary, the module stores the stable `bin` path
+(for example `/opt/homebrew/bin/annorex`), not the versioned `Cellar` path. After an upgrade, you do not need to run
+`annorex rex install` again. See [Update](#update).
 
 Annorex always opens over the full window of the agent. The agent pane keeps its size. There is no option for the
 placement. The key `placement` in `config.toml` and the option `--placement` give an error.
@@ -128,12 +131,43 @@ newest reply is selected. Press `enter` to open the selected reply. Press `esc` 
 keys of the document on the screen: reply keys for a reply, file keys for a file. All keys work in both viewers. One
 send gives the notes on all replies and files to the agent.
 
+## Update
+
+From version 0.2.0, Annorex checks GitHub for a newer release. When one exists, the viewer shows one banner line:
+`Annorex X is available. Run: HINT`. The hint is `brew upgrade annorex` for a Homebrew install. Otherwise it is
+`annorex update`.
+
+The check runs at most once each 24 hours, in the background. A network failure shows nothing. The only request is
+`GET https://api.github.com/repos/devararishivian/annorex/releases/latest`. Annorex never replaces its own binary
+unless you run `annorex update`.
+
+Run `annorex update --check` to look for a newer release and print the result. Run `annorex update` to upgrade. The
+command depends on the install channel:
+
+| Install channel  | What `annorex update` does                           |
+|------------------|------------------------------------------------------|
+| Homebrew         | Runs `brew upgrade annorex`                          |
+| Shell installer  | Runs the latest installer of the release again       |
+| `cargo install`  | Prints the `cargo install` command. You must run it. |
+
+The next time Annorex opens after an upgrade, it replaces the `annorex.lua` of Rex with the new module. It does this
+only for a file that Annorex wrote. Then it asks Rex to reload the configuration. If the reload fails, the next open
+shows `run: rex config reload`. Run that command.
+
+To turn off the check, use one of these ways:
+
+- Set `update_check = false` in `setup{}`. See [Lua options](#lua-options).
+- Set the environment variable `ANNOREX_NO_UPDATE_CHECK=1`.
+
+The Homebrew source formula builds Annorex with the check turned off.
+
 ## Lua options
 
-`setup{}` takes one option, `bin`. It gives the `annorex` binary that the actions start:
+`setup{}` takes two options. The option `bin` gives the `annorex` binary that the actions start. The option
+`update_check = false` turns off the check for a newer release. The default is `true`:
 
 ```lua
-require("annorex").setup{ bin = "/path/to/annorex" }
+require("annorex").setup{ bin = "/path/to/annorex", update_check = false }
 ```
 
 A value with a `/` is a path. The file must exist. A value without a `/` is a name that Rex finds on its own `PATH`.
@@ -576,6 +610,7 @@ annorex rex open last --target block:...
 annorex files --target block:... [PATH...]
 annorex rex open files --target block:... [PATH...]
 annorex rex install [--dir DIR]
+annorex update [--check]
 ```
 
 `annorex probe` prints the agent, its state, a dialog when one shows, the bracketed paste mode, and whether a send is
@@ -629,6 +664,8 @@ Exit codes:
 - A sideways swipe hides the Rex sidebar. Turn off the Rex setting "Use a gesture to toggle the sidebar".
 - A drag does not select text for Rex copy. Annorex uses the mouse, so a drag selects text in Annorex. Annorex has no
   key that copies the selected text. `Y` copies the notes. Each note contains its quoted text.
+- Annorex does not find the agent in a pane that started the agent with `exec` from a login shell. This works from
+  version 0.2.0. Update Annorex.
 - "pane too small". Make the window larger than 40 columns and 10 rows.
 
 ## Known limits

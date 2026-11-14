@@ -83,6 +83,9 @@ From source, with `cargo`:
 cargo install --git https://github.com/devararishivian/annorex --locked annorex
 ```
 
+The fully qualified name `devararishivian/tap/annorex` trusts only the Annorex formula. If you want to trust the whole
+tap, run `brew trust --tap devararishivian/tap`.
+
 For more install options, read [Install](docs/guide.md#install) in the guide.
 
 ## Set up Rex
@@ -108,6 +111,33 @@ Rex has no plugin system. It has custom actions in its Lua configuration file `i
 
 The action `annorex_last` opens the last reply. The action `annorex_files` opens the files of the work directory of
 the agent. The command palette shows them as "Annorex: review the last reply" and "Annorex: review files".
+
+## Update
+
+From version 0.2.0, Annorex tells you about a newer release. The viewer shows one banner line:
+`Annorex X is available. Run: HINT`. The hint is `brew upgrade annorex` for a Homebrew install. Otherwise it is
+`annorex update`.
+
+Annorex checks at most once each 24 hours, in the background. If the network fails, it shows nothing. The only request
+is `GET https://api.github.com/repos/devararishivian/annorex/releases/latest`.
+
+Run `annorex update --check` to look for a newer release without an upgrade. Run `annorex update` to upgrade. The command
+depends on how you installed Annorex:
+
+- Homebrew: it runs `brew upgrade annorex`.
+- Shell installer: it runs the latest installer again.
+- `cargo install`: it prints the `cargo install` command. You must run it yourself.
+
+The next time Annorex opens after an upgrade, it writes the new `annorex.lua` and asks Rex to reload the configuration.
+You do not need to run `annorex rex install` again. If the reload fails, Annorex shows `run: rex config reload` at the
+next open.
+
+To turn off the check, use one of these ways:
+
+- Set `update_check = false` in `setup{}`.
+- Set the environment variable `ANNOREX_NO_UPDATE_CHECK=1`.
+
+The Homebrew formula builds Annorex from source with the check turned off.
 
 ## Annotate the last reply
 
@@ -197,10 +227,11 @@ names, and the configuration file: [docs/guide.md](docs/guide.md).
 
 ## Lua options
 
-`setup{}` takes one option, `bin`. It gives the path of the `annorex` binary:
+`setup{}` takes two options. The option `bin` gives the path of the `annorex` binary. The option `update_check = false`
+turns off the check for a newer release:
 
 ```lua
-require("annorex").setup{ bin = "/path/to/annorex" }
+require("annorex").setup{ bin = "/path/to/annorex", update_check = false }
 ```
 
 Rex runs actions with a short `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), not the `PATH` of your shell. Without `bin`,

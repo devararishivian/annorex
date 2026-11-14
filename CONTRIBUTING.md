@@ -84,7 +84,12 @@ formula `packaging/homebrew/annorex.rb`:
 
 1. Set `url` to the source archive of the new tag, for example
    `https://github.com/devararishivian/annorex/archive/refs/tags/v0.2.0.tar.gz`.
-2. Download that archive and get its checksum with `shasum -a 256 FILE`.
+2. Get the checksum of that archive. Replace `URL` with the `url` from step 1:
+
+   ```sh
+   curl -sL URL | shasum -a 256
+   ```
+
 3. Set `sha256` to that checksum. Remove the comment above `sha256`.
 4. Commit the change. CI checks the formula with `brew style`.
 
