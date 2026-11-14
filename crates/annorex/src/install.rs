@@ -96,6 +96,72 @@ pub fn install(dir: &Path, bin: Option<&Path>) -> Result<Installed, InstallError
     Ok(Installed { path, replaced })
 }
 
+/// The path of the binary to write into the module. A Homebrew binary runs from
+/// `<prefix>/Cellar/annorex/<version>/bin/annorex`, and an upgrade removes that folder. So when
+/// `<prefix>/bin/annorex` exists, use it: it stays the same across upgrades. Else use `exe`.
+pub fn stable_bin(exe: &Path) -> PathBuf {
+    let Ok(canonical) = exe.canonicalize() else {
+        return exe.to_path_buf();
+    };
+    let name = |path: Option<&Path>, expected: &str| {
+        path.and_then(Path::file_name).is_some_and(|name| name == expected)
+    };
+    let bin_dir = canonical.parent();
+    let formula = bin_dir.and_then(Path::parent).and_then(Path::parent);
+    let cellar = formula.and_then(Path::parent);
+    if name(Some(&canonical), "annorex")
+        && name(bin_dir, "bin")
+        && name(formula, "annorex")
+        && name(cellar, "Cellar")
+        && let Some(prefix) = cellar.and_then(Path::parent)
+    {
+        let stable = prefix.join("bin").join("annorex");
+        if stable.exists() {
+            return stable;
+        }
+    }
+    exe.to_path_buf()
+}
+
+/// The version in the marker line of an installed module, for example `0.1.0`.
+pub fn installed_version(contents: &str) -> Option<&str> {
+    let rest = contents.lines().next()?.strip_prefix(MODULE_MARKER)?.strip_prefix(" (annorex ")?;
+    rest.split_once(')').map(|(version, _)| version)
+}
+
+/// The result of a module refresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refresh {
+    /// The module has the version of this binary.
+    Current,
+    /// The module had another version. The refresh wrote the module of this binary.
+    Updated,
+    /// There is no module.
+    Absent,
+    /// The module does not have the marker line. The refresh did not change it.
+    Foreign,
+}
+
+/// Write the module of this binary to `dir` when an earlier install wrote a module of another
+/// version. Never create a missing module, never change a module without the marker, and never
+/// open `init.lua`.
+pub fn refresh(dir: &Path, bin: Option<&Path>) -> Result<Refresh, InstallError> {
+    let path = dir.join(MODULE_FILE);
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Refresh::Absent),
+        Err(error) => return Err(error.into()),
+    };
+    if !existing.lines().next().is_some_and(|line| line.starts_with(MODULE_MARKER)) {
+        return Ok(Refresh::Foreign);
+    }
+    if installed_version(&existing) == Some(env!("CARGO_PKG_VERSION")) {
+        return Ok(Refresh::Current);
+    }
+    std::fs::write(&path, module_contents(bin))?;
+    Ok(Refresh::Updated)
+}
+
 /// The outcome of one `rex config check` run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Probe {
@@ -422,6 +488,97 @@ mod tests {
             Ok(Probe { success: false, message: "error annorex.lua:3: boom".to_owned() })
         });
         assert_eq!(result, Check::Failed("error annorex.lua:3: boom".to_owned()));
+    }
+
+    /// A Homebrew layout in a temporary folder: `T/Cellar/annorex/0.2.0/bin/annorex`. The folder
+    /// path is canonical, so it compares with the canonical path of the binary.
+    fn cellar() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical");
+        let exe = root.join("Cellar/annorex/0.2.0/bin/annorex");
+        std::fs::create_dir_all(exe.parent().expect("parent")).expect("cellar");
+        std::fs::write(&exe, "").expect("binary");
+        (dir, root, exe)
+    }
+
+    #[test]
+    fn stable_bin_maps_cellar_to_prefix_bin() {
+        let (_dir, root, exe) = cellar();
+        assert_eq!(stable_bin(&exe), exe, "without <prefix>/bin/annorex, keep the input");
+        std::fs::create_dir_all(root.join("bin")).expect("bin");
+        std::os::unix::fs::symlink(&exe, root.join("bin/annorex")).expect("link");
+        assert_eq!(stable_bin(&exe), root.join("bin/annorex"));
+    }
+
+    #[test]
+    fn stable_bin_keeps_a_path_outside_the_cellar() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let exe = dir.path().join("bin/annorex");
+        std::fs::create_dir_all(exe.parent().expect("parent")).expect("bin");
+        std::fs::write(&exe, "").expect("binary");
+        assert_eq!(stable_bin(&exe), exe);
+        let missing = Path::new("/nonexistent/Cellar/annorex/0.2.0/bin/annorex");
+        assert_eq!(stable_bin(missing), missing);
+    }
+
+    #[test]
+    fn rex_install_writes_the_stable_bin() {
+        let (_dir, root, exe) = cellar();
+        std::fs::create_dir_all(root.join("bin")).expect("bin");
+        std::os::unix::fs::symlink(&exe, root.join("bin/annorex")).expect("link");
+        let text = module_contents(Some(&stable_bin(&exe)));
+        let line = format!("local INSTALLED_BIN = \"{}\"\n", root.join("bin/annorex").display());
+        assert!(text.contains(&line), "{text}");
+        assert!(!text.contains("Cellar"), "{text}");
+    }
+
+    #[test]
+    fn installed_version_reads_the_marker_line() {
+        assert_eq!(installed_version(&module_contents(None)), Some(env!("CARGO_PKG_VERSION")));
+        assert_eq!(installed_version(&format!("{MODULE_MARKER} (annorex 0.0.1); x\n")), Some("0.0.1"));
+        assert_eq!(installed_version("-- my own annorex.lua (annorex 0.0.1)\n"), None);
+        assert_eq!(installed_version(""), None);
+    }
+
+    #[test]
+    fn refresh_of_a_missing_module_is_absent() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        assert!(matches!(refresh(dir.path(), None), Ok(Refresh::Absent)));
+        assert!(!dir.path().join(MODULE_FILE).exists(), "the refresh never creates the module");
+        let missing = dir.path().join("missing");
+        assert!(matches!(refresh(&missing, None), Ok(Refresh::Absent)));
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn refresh_of_the_same_version_is_current() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(MODULE_FILE);
+        let text = module_contents(Some(Path::new("/opt/x/annorex")));
+        std::fs::write(&path, &text).expect("module");
+        assert!(matches!(refresh(dir.path(), None), Ok(Refresh::Current)));
+        assert_eq!(std::fs::read_to_string(&path).expect("module"), text);
+    }
+
+    #[test]
+    fn refresh_updates_another_version() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(MODULE_FILE);
+        let current = format!("(annorex {})", env!("CARGO_PKG_VERSION"));
+        let old = module_contents(None).replacen(&current, "(annorex 0.0.1)", 1);
+        std::fs::write(&path, old).expect("old module");
+        let bin = Path::new("/opt/homebrew/bin/annorex");
+        assert!(matches!(refresh(dir.path(), Some(bin)), Ok(Refresh::Updated)));
+        assert_eq!(std::fs::read_to_string(&path).expect("module"), module_contents(Some(bin)));
+    }
+
+    #[test]
+    fn refresh_leaves_a_foreign_module() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(MODULE_FILE);
+        std::fs::write(&path, "-- my own annorex.lua\n").expect("foreign");
+        assert!(matches!(refresh(dir.path(), None), Ok(Refresh::Foreign)));
+        assert_eq!(std::fs::read_to_string(&path).expect("kept"), "-- my own annorex.lua\n");
     }
 
     #[test]

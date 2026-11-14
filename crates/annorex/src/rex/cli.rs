@@ -25,6 +25,9 @@ impl<R: Runner + ?Sized> Runner for &R {
     }
 }
 
+/// How long [`Rex::reload_config_later`] waits before the reload.
+pub(crate) const RELOAD_DELAY: Duration = Duration::from_secs(1);
+
 /// How long one Rex call can take. A call that takes longer fails with [`RexError::Timeout`].
 pub(crate) const REX_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -382,6 +385,26 @@ impl<R: Runner> Rex<R> {
         self.api_call("session.focus_block", &serde_json::json!({ "block_id": block })).map(drop)
     }
 
+    /// Run `rex config reload` in a child that starts after `RELOAD_DELAY` and that Annorex does
+    /// not wait for. Rex cancels an action when its config file reloads while the action runs, so
+    /// the reload must come after the action that started Annorex ends. The child has its own
+    /// process group, so the end of the action does not stop it.
+    pub fn reload_config_later(&self) -> std::io::Result<()> {
+        use std::os::unix::process::CommandExt as _;
+        // The path of rex is the argument `$0`, so the shell never reads it as code.
+        let script = format!("sleep {}; exec \"$0\" config reload", RELOAD_DELAY.as_secs());
+        Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .arg(&self.bin)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map(drop)
+    }
+
     /// Write `data` to the terminal input of `block`, as if the user typed it.
     pub fn write(&self, block: &str, data: &str) -> Result<(), RexError> {
         self.block_call(block, "write", &serde_json::json!({ "data": data })).map(drop)
@@ -493,6 +516,27 @@ mod tests {
         let stdin: serde_json::Value =
             serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
         assert_eq!(stdin["data"].as_str().map(str::len), Some(300_000));
+    }
+
+    #[test]
+    fn reload_config_later_runs_rex_config_reload_after_the_delay() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("dir");
+        let log = dir.path().join("args");
+        let bin = dir.path().join("rex");
+        std::fs::write(&bin, format!("#!/bin/sh\necho \"$@\" > '{}'\n", log.display())).expect("script");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let rex = Rex::new(bin, "session:s1".to_owned(), FakeRunner::default());
+        let start = Instant::now();
+        rex.reload_config_later().expect("spawn");
+        assert!(start.elapsed() < RELOAD_DELAY, "the call must not wait: {:?}", start.elapsed());
+        assert!(!log.exists(), "the reload must wait for the delay");
+        while !log.exists() && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(start.elapsed() >= RELOAD_DELAY, "{:?}", start.elapsed());
+        assert_eq!(std::fs::read_to_string(&log).expect("args"), "config reload\n");
+        assert!(rex.runner.calls.borrow().is_empty(), "the reload does not use the runner");
     }
 
     #[test]

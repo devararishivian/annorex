@@ -11,7 +11,10 @@ use crate::agent::{Agent, BusyEffect, detect};
 use crate::config::Config;
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
 use crate::draft::{DraftStore, drafts_dir};
-use crate::install::{Check, InstallError, check_module, config_dir, install, run_rex_config_check};
+use crate::install::{
+    Check, InstallError, Refresh, check_module, config_dir, install, refresh, run_rex_config_check,
+    stable_bin,
+};
 use crate::open::{Existing, OpenError, View, open_view};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
@@ -414,8 +417,9 @@ fn rex_install(
             "cannot find the Rex config directory: give --dir, or set REX_CONFIG, XDG_CONFIG_HOME, or HOME"
                 .to_owned(),
     })?;
-    // Rex runs actions with a short PATH, so the module starts this binary by its full path.
-    let exe = std::env::current_exe().ok();
+    // Rex runs actions with a short PATH, so the module starts this binary by its full path. A
+    // Homebrew binary gets the path that stays the same across upgrades.
+    let exe = std::env::current_exe().ok().map(|exe| stable_bin(&exe));
     let installed = install(&dir, exe.as_deref()).map_err(|error| Failure {
         code: if matches!(error, InstallError::Foreign { .. }) { EXIT_REFUSED } else { EXIT_FAILURE },
         message: error.to_string(),
@@ -464,9 +468,9 @@ fn install_note(exe: Option<&Path>) -> Vec<String> {
     let mut lines = vec![format!("Rex starts: {exe}")];
     let parts: Vec<&str> = exe.split('/').collect();
     let build = parts.windows(2).any(|pair| matches!(pair, ["target", "debug" | "release"]));
-    if build || parts.contains(&"Cellar") {
+    if build {
         lines.push(
-            "This path changes with each build or version. Run annorex rex install again from the installed binary."
+            "This path changes with each build. Run annorex rex install again from the installed binary."
                 .to_owned(),
         );
     }
@@ -488,20 +492,36 @@ fn rex_open(
         code: EXIT_FAILURE,
         message: format!("cannot find the path of the annorex binary: {error}"),
     })?;
-    let opened =
-        open_view(&rex, view, target, rex.session(), &exe, no_update_check).map_err(|error| match error {
-            OpenError::Rex(rex) => Failure::from(rex),
-            OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
-            OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
-        })?;
+    let opened = open_view(&rex, view, target, rex.session(), &exe, no_update_check);
+    // After an upgrade, the installed module is still the old one. Refresh it after the view
+    // opens: the reload must not come while the action runs. A failed refresh never stops the open.
+    let reload_notice =
+        refresh_module(config_dir(env), &stable_bin(&exe), || rex.reload_config_later().is_ok());
+    let opened = opened.map_err(|error| match error {
+        OpenError::Rex(rex) => Failure::from(rex),
+        OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
+        OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
+    })?;
     let json = serde_json::to_string(&opened)
         .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
     writeln!(out, "{json}").map_err(|error| io_failure(&error))?;
     // The Lua action shows the first line of the error to the user.
-    if let Some(message) = opened.existing.as_ref().and_then(Existing::notice) {
+    if let Some(message) = reload_notice.or_else(|| opened.existing.as_ref().and_then(Existing::notice)) {
         return Err(Failure { code: EXIT_REFUSED, message });
     }
     Ok(EXIT_OK)
+}
+
+/// Refresh the module in `dir` with `bin` when it has another version, then call `reload` to make
+/// Rex read it. Returns the notice for the user when `reload` fails. Other failures give no notice:
+/// the old module still works.
+fn refresh_module(dir: Option<PathBuf>, bin: &Path, reload: impl FnOnce() -> bool) -> Option<String> {
+    match refresh(&dir?, Some(bin)) {
+        Ok(Refresh::Updated) if !reload() => {
+            Some("updated the Annorex module; run: rex config reload".to_owned())
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -523,13 +543,63 @@ mod tests {
     }
 
     #[test]
-    fn install_note_names_the_binary_and_warns_for_a_build_or_cellar_path() {
+    fn install_note_names_the_binary_and_warns_for_a_build_path() {
         let note = |path: &str| install_note(Some(Path::new(path))).join("\n");
         assert_eq!(note("/Users/me/.cargo/bin/annorex"), "Rex starts: /Users/me/.cargo/bin/annorex");
         assert!(note("/src/annorex/target/debug/annorex").contains("changes with each build"));
-        assert!(note("/opt/homebrew/Cellar/annorex/0.1.0/bin/annorex").contains("changes with each build"));
+        assert_eq!(note("/opt/homebrew/bin/annorex"), "Rex starts: /opt/homebrew/bin/annorex");
         let unknown = install_note(None).join("\n");
         assert!(unknown.contains("$CARGO_HOME/bin") && unknown.contains("/opt/homebrew/bin"), "{unknown}");
+    }
+
+    /// A config folder with a module of version 0.0.1, as an earlier release wrote it.
+    fn old_module() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let current = format!("(annorex {})", env!("CARGO_PKG_VERSION"));
+        let old = crate::install::module_contents(None).replacen(&current, "(annorex 0.0.1)", 1);
+        std::fs::write(dir.path().join("annorex.lua"), old).expect("old module");
+        dir
+    }
+
+    #[test]
+    fn refresh_module_reloads_rex_after_an_update() {
+        let dir = old_module();
+        let mut reloads = 0;
+        let notice = refresh_module(Some(dir.path().to_path_buf()), Path::new("/opt/x/annorex"), || {
+            reloads += 1;
+            true
+        });
+        assert_eq!(notice, None);
+        assert_eq!(reloads, 1);
+        let text = std::fs::read_to_string(dir.path().join("annorex.lua")).expect("module");
+        assert!(text.contains(env!("CARGO_PKG_VERSION")), "{text}");
+        assert!(text.contains("local INSTALLED_BIN = \"/opt/x/annorex\""), "{text}");
+    }
+
+    #[test]
+    fn refresh_module_asks_for_a_reload_when_rex_fails() {
+        let dir = old_module();
+        let notice = refresh_module(Some(dir.path().to_path_buf()), Path::new("/opt/x/annorex"), || false);
+        assert_eq!(notice.as_deref(), Some("updated the Annorex module; run: rex config reload"));
+    }
+
+    #[test]
+    fn refresh_module_does_not_reload_without_an_update() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut reloads = 0;
+        let mut reload = || {
+            reloads += 1;
+            true
+        };
+        assert_eq!(refresh_module(Some(dir.path().to_path_buf()), Path::new("/x"), &mut reload), None);
+        assert_eq!(refresh_module(None, Path::new("/x"), &mut reload), None);
+        std::fs::write(dir.path().join("annorex.lua"), crate::install::module_contents(None))
+            .expect("module");
+        assert_eq!(refresh_module(Some(dir.path().to_path_buf()), Path::new("/x"), &mut reload), None);
+        std::fs::write(dir.path().join("annorex.lua"), "-- mine\n").expect("foreign");
+        assert_eq!(refresh_module(Some(dir.path().to_path_buf()), Path::new("/x"), &mut reload), None);
+        assert_eq!(reloads, 0);
+        assert!(!dir.path().join("init.lua").exists());
     }
 
     #[test]

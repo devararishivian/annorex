@@ -39,7 +39,9 @@ fn install(dir: &Path, init_line: &str) -> PathBuf {
     init
 }
 
-/// `rex do INIT --action annorex_last` with only `HOME`, the short `PATH`, and `REX_SERVER`.
+/// `rex do INIT --action annorex_last` with only `HOME`, the short `PATH`, `REX_SERVER`, and
+/// `REX_CONFIG`. `REX_CONFIG` names `init`, so the module refresh uses the test folder and never
+/// the real config.
 fn run_action(rex: &Path, home: &Path, init: &Path, session: &str, block: &str) -> Output {
     let mut command = Command::new(rex);
     command
@@ -48,7 +50,8 @@ fn run_action(rex: &Path, home: &Path, init: &Path, session: &str, block: &str) 
         .args(["--action", "annorex_last", "-s", session, "-b", block])
         .env_clear()
         .env("HOME", home)
-        .env("PATH", SHORT_PATH);
+        .env("PATH", SHORT_PATH)
+        .env("REX_CONFIG", init);
     if let Some(server) = std::env::var_os("REX_SERVER") {
         command.env("REX_SERVER", server);
     }
@@ -127,6 +130,27 @@ fn installed_module_works_with_the_environment_of_a_rex_action() {
     let expected = "the annorex binary /nonexistent/annorex from setup{} does not exist";
     if output.status.success() || !stderr.contains(expected) {
         failures.push(format!("bad bin: expected {expected:?}, got {stderr:?}"));
+    }
+
+    // 4. A module of an older version: `rex open` writes the module of this binary.
+    let config = work.path().join("config-old");
+    let init = install(&config, "require(\"annorex\").setup{}");
+    let module = config.join("annorex.lua");
+    let current = std::fs::read_to_string(&module).expect("module");
+    let version = format!("(annorex {})", env!("CARGO_PKG_VERSION"));
+    std::fs::write(&module, current.replacen(&version, "(annorex 0.0.1)", 1)).expect("old module");
+    let output = run_action(&rex, &real_home, &init, &session, &block);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    log(start, &format!("old module: exit {:?}, {}", output.status.code(), stderr.trim()));
+    let refreshed = std::fs::read_to_string(&module).expect("module");
+    if refreshed != current {
+        failures.push(format!(
+            "old module: expected the module of this binary, got {:?}",
+            refreshed.lines().next()
+        ));
+    }
+    if !stderr.contains(NOT_AGENT) {
+        failures.push(format!("old module: expected {NOT_AGENT:?}, got {stderr:?}"));
     }
 
     cleanup.dirs.push(work);
