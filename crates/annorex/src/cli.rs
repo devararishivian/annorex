@@ -474,6 +474,13 @@ fn install_note(exe: Option<&Path>) -> Vec<String> {
                 .to_owned(),
         );
     }
+    // `stable_bin` keeps a Cellar path only when `<prefix>/bin/annorex` is missing: an unlinked keg.
+    if parts.contains(&"Cellar") {
+        lines.push(
+            "This path changes with each version. Run brew link annorex, then annorex rex install again."
+                .to_owned(),
+        );
+    }
     lines
 }
 
@@ -492,10 +499,14 @@ fn rex_open(
         code: EXIT_FAILURE,
         message: format!("cannot find the path of the annorex binary: {error}"),
     })?;
-    // A reload that an earlier open started and that failed gives its notice now, once.
-    let failed = crate::draft::state_dir(env).map(|dir| dir.join(RELOAD_FAILED_FILE));
-    let failed_before = take_reload_failed(failed.as_deref());
+    // The viewer runs in a pane that Rex starts, without this environment. So the variable
+    // goes to the viewer as the flag.
+    let no_update_check = !crate::update::should_check(no_update_check, env);
     let opened = open_view(&rex, view, target, rex.session(), &exe, no_update_check);
+    // A reload that an earlier open started and that failed gives its notice now, once. A failed
+    // open keeps the marker for the next open.
+    let failed = crate::draft::state_dir(env).map(|dir| dir.join(RELOAD_FAILED_FILE));
+    let failed_before = reload_failed_before(opened.is_ok(), failed.as_deref());
     // After an upgrade, the installed module is still the old one. Refresh it after the view
     // opens: the reload must not come while the action runs. A failed refresh never stops the open.
     // Without a state folder, the failure of the reload cannot be recorded, so ask the user.
@@ -531,6 +542,11 @@ const RELOAD_NOTICE: &str = "updated the Annorex module; run: rex config reload"
 /// Remove the marker of a failed reload. True when it was there.
 fn take_reload_failed(marker: Option<&Path>) -> bool {
     marker.is_some_and(|marker| std::fs::remove_file(marker).is_ok())
+}
+
+/// After a successful open, remove the marker of a failed reload. True when it was there.
+fn reload_failed_before(opened: bool, marker: Option<&Path>) -> bool {
+    opened && take_reload_failed(marker)
 }
 
 /// The notice that `rex open` gives after the view is open. The Lua action shows only the first
@@ -579,6 +595,29 @@ mod tests {
         assert_eq!(note("/opt/homebrew/bin/annorex"), "Rex starts: /opt/homebrew/bin/annorex");
         let unknown = install_note(None).join("\n");
         assert!(unknown.contains("$CARGO_HOME/bin") && unknown.contains("/opt/homebrew/bin"), "{unknown}");
+    }
+
+    #[test]
+    fn install_note_warns_for_a_cellar_path() {
+        let note = install_note(Some(Path::new("/opt/homebrew/Cellar/annorex/0.2.0/bin/annorex")));
+        assert_eq!(note.len(), 2, "{note:?}");
+        assert_eq!(
+            note.get(1).map(String::as_str),
+            Some(
+                "This path changes with each version. Run brew link annorex, then annorex rex install again."
+            )
+        );
+    }
+
+    #[test]
+    fn a_failed_open_keeps_the_reload_marker() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let marker = dir.path().join(RELOAD_FAILED_FILE);
+        std::fs::write(&marker, "").expect("marker");
+        assert!(!reload_failed_before(false, Some(&marker)));
+        assert!(marker.exists(), "a failed open keeps the marker for the next open");
+        assert!(reload_failed_before(true, Some(&marker)));
+        assert!(!marker.exists());
     }
 
     /// A config folder with a module of version 0.0.1, as an earlier release wrote it.
