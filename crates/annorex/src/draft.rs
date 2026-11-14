@@ -139,13 +139,18 @@ struct FileOut<'a> {
     draft: &'a Draft,
 }
 
-/// The directory of the drafts: `$XDG_STATE_HOME/annorex/drafts` when that variable is an
-/// absolute path, else `$HOME/.local/state/annorex/drafts`.
-pub fn drafts_dir(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+/// The state directory of Annorex: `$XDG_STATE_HOME/annorex` when that variable is an absolute
+/// path, else `$HOME/.local/state/annorex`.
+pub fn state_dir(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     let absolute = |name: &str| env(name).map(PathBuf::from).filter(|path| path.is_absolute());
     let base =
         absolute("XDG_STATE_HOME").or_else(|| absolute("HOME").map(|home| home.join(".local/state")))?;
-    Some(base.join("annorex").join("drafts"))
+    Some(base.join("annorex"))
+}
+
+/// The directory of the drafts: the folder `drafts` in the state directory.
+pub fn drafts_dir(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    Some(state_dir(env)?.join("drafts"))
 }
 
 /// A part of a file name: only `[A-Za-z0-9._-]`, at most 80 characters.
@@ -630,6 +635,15 @@ mod tests {
         let home = drafts_dir(env(&[("HOME", "/h")]));
         assert_eq!(home, Some(PathBuf::from("/h/.local/state/annorex/drafts")));
         assert_eq!(drafts_dir(env(&[])), None);
+    }
+
+    #[test]
+    fn state_dir_uses_xdg_state_home() {
+        let dir = state_dir(env(&[("XDG_STATE_HOME", "/x"), ("HOME", "/h")]));
+        assert_eq!(dir, Some(PathBuf::from("/x/annorex")));
+        let home = state_dir(env(&[("HOME", "/h")]));
+        assert_eq!(home, Some(PathBuf::from("/h/.local/state/annorex")));
+        assert_eq!(state_dir(env(&[])), None);
     }
 
     #[test]
