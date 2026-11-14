@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a problem in Annorex.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the problem. Say what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the steps in order.
+      placeholder: |
+        1. Open a pane with the agent.
+        2. Open Annorex.
+        3. Do this.
+    validations:
+      required: true
+  - type: input
+    id: annorex-version
+    attributes:
+      label: Annorex version
+      description: Run `annorex --version` and paste the output.
+      placeholder: annorex 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: rex-version
+    attributes:
+      label: Rex version
+      description: Run `rex version` and paste the first line of the output.
+      placeholder: rex 0.1.0-preview.17
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent name and version
+      description: Name the agent (Claude Code, Pi, or OpenCode) and its version.
+      placeholder: Claude Code 2.1.325
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or screenshots
+      description: Paste any error text. Remove private data first.
+    validations:
+      required: false
