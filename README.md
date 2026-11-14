@@ -4,11 +4,14 @@ Annotate the replies and files of a coding agent in a [Rex](https://www.superlog
 notes back to the agent.
 
 [![CI][ci-badge]][ci]
+[![Release][release-badge]][release]
 [![License: MIT][license-badge]](LICENSE)
 [![Platform: macOS][platform-badge]](#install)
 
 [ci-badge]: https://github.com/devararishivian/annorex/actions/workflows/ci.yml/badge.svg
 [ci]: https://github.com/devararishivian/annorex/actions/workflows/ci.yml
+[release-badge]: https://img.shields.io/github/v/release/devararishivian/annorex
+[release]: https://github.com/devararishivian/annorex/releases/latest
 [license-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [platform-badge]: https://img.shields.io/badge/platform-macOS-lightgrey.svg
 
@@ -17,16 +20,14 @@ notes back to the agent.
 Annorex works with Claude Code, Pi, and OpenCode in Rex on macOS. It opens over the window of the agent. You select
 the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
 
-> Status: pre-release. No release exists yet. Install Annorex from source with `cargo`.
-
 ## Why
 
 A reply of a coding agent is often long. In the chat box of the agent, it is hard to point at one line of that reply.
 You copy the text, add your comment, and repeat this for each point.
 
 Annorex lets you mark the exact text instead. Each note quotes its text, so the agent knows which part you mean. Notes
-on many replies and files go to the agent in one message. Annorex
-deletes your notes from disk only after a send that it finished.
+on many replies and files go to the agent in one message. Annorex deletes your notes from disk only after a send that
+it finished.
 
 ## Install
 
@@ -34,16 +35,29 @@ You need these items:
 
 - Rex on macOS (Apple silicon or Intel).
 - Claude Code, Pi 1.5.0 or later, or OpenCode 2.x.
-- Rust 1.99 or later, to build from source.
+- Rust 1.99 or later, only to build from source.
 
-Build and install the `annorex` binary with `cargo`:
+Install the `annorex` binary in one of these three ways.
+
+With Homebrew:
+
+```sh
+brew install devararishivian/tap/annorex
+```
+
+With the shell installer of the release. It puts the binary in `$CARGO_HOME/bin`, else in `~/.cargo/bin`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/download/v0.1.0/annorex-installer.sh | sh
+```
+
+From source, with `cargo`:
 
 ```sh
 cargo install --git https://github.com/devararishivian/annorex --locked annorex
 ```
 
-`cargo` puts the binary in `$CARGO_HOME/bin`, else in `~/.cargo/bin`. For more install options, read
-[Install](docs/guide.md#install) in the guide.
+For more install options, read [Install](docs/guide.md#install) in the guide.
 
 ## Set up Rex
 

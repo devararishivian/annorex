@@ -51,9 +51,25 @@ You need these items:
 
 - Rex on macOS (Apple silicon or Intel).
 - Claude Code, Pi 1.5.0 or later, or OpenCode 2.x.
-- Rust 1.99 or later, to build from source.
+- Rust 1.99 or later, only to build from source.
 
-Install the binary from the repository on GitHub:
+Each release has prebuilt binaries for Apple silicon and Intel. Install the binary with Homebrew:
+
+```sh
+brew install devararishivian/tap/annorex
+```
+
+Homebrew puts the binary in its own `bin` directory: `/opt/homebrew/bin` on Apple silicon, `/usr/local/bin` on
+Intel. Or use the shell installer of the release:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/devararishivian/annorex/releases/download/v0.1.0/annorex-installer.sh | sh
+```
+
+The shell installer puts the binary in `$CARGO_HOME/bin`, else in `~/.cargo/bin`. Set `ANNOREX_INSTALL_DIR` to use a
+different directory. The binary then goes in the `bin` directory below it.
+
+To build from source, install the binary from the repository on GitHub:
 
 ```sh
 cargo install --git https://github.com/devararishivian/annorex --locked annorex
@@ -65,7 +81,8 @@ Or install it from a clone of the repository. Run this command in the root direc
 cargo install --path crates/annorex --locked
 ```
 
-`cargo` puts the binary in `$CARGO_HOME/bin`, else in `~/.cargo/bin`. Then write the Lua module:
+`cargo` puts the binary in `$CARGO_HOME/bin`, else in `~/.cargo/bin`. After each install method, write the Lua
+module:
 
 ```sh
 annorex rex install
