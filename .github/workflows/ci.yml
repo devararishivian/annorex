@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -47,6 +47,13 @@ jobs:
 
       - name: Check licenses, sources, and bans
         run: cargo deny check licenses sources bans
+
+      # brew style applies the formula rules only to a file in a Formula directory.
+      - name: Check the Homebrew formula style
+        run: |
+          mkdir -p "$RUNNER_TEMP/Formula"
+          cp packaging/homebrew/annorex.rb "$RUNNER_TEMP/Formula/annorex.rb"
+          brew style "$RUNNER_TEMP/Formula/annorex.rb"
 
       # Advisories can appear without a change in this repository. They warn but do not fail.
       - name: Check advisories

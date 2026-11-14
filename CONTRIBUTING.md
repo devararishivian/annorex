@@ -77,6 +77,17 @@ The types in the history are `feat`, `fix`, `docs`, `test`, `perf`, `ci`, and `b
 
 Keep each pull request to one change. Explain what the change does and why.
 
+## Releases
+
+The release workflow builds the binaries when you push a version tag. After a release, update the source-build
+formula `packaging/homebrew/annorex.rb`:
+
+1. Set `url` to the source archive of the new tag, for example
+   `https://github.com/devararishivian/annorex/archive/refs/tags/v0.2.0.tar.gz`.
+2. Download that archive and get its checksum with `shasum -a 256 FILE`.
+3. Set `sha256` to that checksum. Remove the comment above `sha256`.
+4. Commit the change. CI checks the formula with `brew style`.
+
 ## Reports
 
 To report a bug or ask for a feature, open an issue and use the form. To report a security problem, follow

@@ -19,3 +19,5 @@ publish-jobs = ["homebrew"]
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+# Whether to enable GitHub Attestations
+github-attestations = true
