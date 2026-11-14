@@ -25,7 +25,8 @@ A reply of a coding agent is often long. In the chat box of the agent, it is har
 You copy the text, add your comment, and repeat this for each point.
 
 Annorex lets you mark the exact text instead. Each note quotes its text, so the agent knows which part you mean. Notes
-on many replies and files go to the agent in one message. Annorex keeps your notes on disk until the agent gets them.
+on many replies and files go to the agent in one message. Annorex
+deletes your notes from disk only after a send that it finished.
 
 ## Install
 
@@ -119,7 +120,8 @@ the paste, Annorex does not press Enter. Annorex then stays open and marks the n
 press Enter in the agent pane.
 
 Press `P` to paste the notes without Enter. Press `Y` to copy the notes. Annorex saves your notes after each change.
-When you close Annorex, it keeps the notes that you did not send.
+When you close Annorex, it keeps the notes that you did not send. After `P` or a held Enter, the notes stay, marked as
+sent, until you remove them with `x`.
 
 ## Keys
 

@@ -1,7 +1,8 @@
 //! Drafts: the review of one document, saved to disk after each change.
 //!
-//! Annorex deletes a draft only after a successful send, or when every note in it was sent. Work
-//! in progress stays: an unsent note, a general note that no send took, and an open note box.
+//! Annorex deletes a draft only after a send that it finished, or when the draft holds no note. A
+//! paste or a held Enter marks the notes as sent but keeps them on disk. Work in progress stays: an
+//! unsent note, a general note that no send took, and an open note box.
 //! A file that Annorex cannot read is kept as it is, never written over and never deleted, because
 //! it can hold the work of the user.
 
@@ -71,6 +72,10 @@ pub struct Draft {
     pub updated_at: String,
     /// RFC 3339, UTC. Set after a send or a paste. A new change clears it.
     pub sent_at: Option<String>,
+    /// True only after a send that Annorex finished. A paste or a held Enter does not set it. Only a
+    /// draft with this mark can be deleted at the next start. A draft of an older release has none.
+    #[serde(default)]
+    pub finished: bool,
 }
 
 /// The time now as RFC 3339 in UTC.
@@ -88,6 +93,7 @@ impl Draft {
             editing: None,
             updated_at: now(),
             sent_at: None,
+            finished: false,
         }
     }
 
@@ -95,6 +101,7 @@ impl Draft {
     pub fn touch(&mut self) {
         self.updated_at = now();
         self.sent_at = None;
+        self.finished = false;
     }
 
     /// Record a send or a paste.
@@ -107,12 +114,13 @@ impl Draft {
         self.review.annotations.is_empty() && self.review.note.trim().is_empty() && self.editing.is_none()
     }
 
-    /// True when a send took everything in the draft and nothing is in progress.
+    /// True when a finished send took everything in the draft and nothing is in progress. A draft
+    /// with no note at all and no open note box counts too: it holds nothing. A paste or a held
+    /// Enter does not make a draft used up, so those notes stay until the user removes them.
     fn is_used_up(&self) -> bool {
         let all_sent = self.review.annotations.iter().all(|a| a.sent_at.is_some());
-        self.editing.is_none()
-            && self.review.note.trim().is_empty()
-            && (self.sent_at.is_some() || (!self.review.annotations.is_empty() && all_sent))
+        let nothing_open = self.editing.is_none() && self.review.note.trim().is_empty();
+        nothing_open && (self.review.annotations.is_empty() || (self.finished && all_sent))
     }
 }
 
@@ -261,15 +269,20 @@ impl DraftStore {
         let mut kept = draft.clone();
         kept.review.drop_sent();
         if kept.is_clear() {
-            self.load(&draft.key)?;
+            if let Some(mut saved) = self.load(&draft.key)? {
+                // If the delete fails, the mark lets the next start remove the file.
+                saved.finished = true;
+                self.save(&saved)?;
+            }
             return self.discard(&draft.key);
         }
+        kept.finished = false;
         kept.sent_at = None;
         self.save(&kept)
     }
 
-    /// Delete each readable draft that a send used up: every note was sent, no general note is
-    /// unsent, and no note box is open. A file that cannot be read stays. Returns how many were
+    /// Delete each readable draft that a finished send used up (every note was sent, no general note
+    /// is unsent, and no note box is open) and each draft with no note. A paste or a held Enter does not count. A file that cannot be read stays. Returns how many were
     /// deleted.
     pub fn prune_sent(&self) -> usize {
         let Ok(entries) = std::fs::read_dir(&self.dir) else { return 0 };
@@ -631,6 +644,14 @@ mod tests {
         draft
     }
 
+    /// A draft that a finished send used up but that the delete left on disk.
+    fn finished_draft(document: &str) -> Draft {
+        let mut draft = sent_draft(document);
+        draft.mark_sent();
+        draft.finished = true;
+        draft
+    }
+
     fn files_in(store: &DraftStore) -> usize {
         std::fs::read_dir(&store.dir).map_or(0, Iterator::count)
     }
@@ -639,7 +660,7 @@ mod tests {
     fn prune_deletes_fully_sent_drafts_and_keeps_in_progress_and_unreadable_ones() {
         let (_dir, store) = store();
         // Every note was sent: deleted.
-        store.save(&sent_draft("sent")).expect("save");
+        store.save(&finished_draft("sent")).expect("save");
         // An unsent note: kept.
         store.save(&draft_with_comment("unsent", "alpha beta gamma\n")).expect("save");
         // A sent note and an unsent one: kept.
@@ -712,20 +733,88 @@ mod tests {
     }
 
     #[test]
-    fn prune_keeps_an_empty_draft_and_a_save_in_progress_removes_it() {
+    fn prune_removes_an_empty_draft() {
         let (_dir, store) = store();
-        let empty = Draft::new(key("r1"), "last reply");
-        store.save(&empty).expect("save");
+        store.save(&Draft::new(key("r1"), "last reply")).expect("save");
+        assert_eq!(store.prune_sent(), 1);
+        assert!(store.load(&key("r1")).expect("load").is_none());
+    }
+
+    #[test]
+    fn a_pasted_draft_survives_the_next_start() {
+        let (_dir, store) = store();
+        let mut pasted = sent_draft("r1");
+        pasted.mark_sent();
+        store.save(&pasted).expect("save");
+        assert_eq!(store.prune_sent(), 0);
+        assert_eq!(store.load(&key("r1")).expect("load"), Some(pasted));
+    }
+
+    #[test]
+    fn a_held_enter_draft_survives_the_next_start() {
+        let (_dir, store) = store();
+        let mut held = sent_draft("r1");
+        held.mark_sent();
+        // A held Enter saves exactly what a paste saves.
+        store.save(&held).expect("save");
         assert_eq!(store.prune_sent(), 0);
         assert!(store.load(&key("r1")).expect("load").is_some());
-        store.save_in_progress(&empty).expect("in progress");
-        assert!(store.load(&key("r1")).expect("load").is_none());
+    }
+
+    #[test]
+    fn an_old_draft_with_a_send_time_and_no_marker_is_kept() {
+        let (_dir, store) = store();
+        let mut old = sent_draft("r1");
+        old.mark_sent();
+        store.save(&old).expect("save");
+        let path = store.path(&key("r1"));
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("json");
+        json.as_object_mut().expect("object").remove("finished");
+        std::fs::write(&path, serde_json::to_vec(&json).expect("bytes")).expect("write");
+        assert_eq!(store.prune_sent(), 0);
+        assert!(store.load(&key("r1")).expect("load").is_some());
+    }
+
+    #[test]
+    fn prune_keeps_a_draft_with_a_send_time_and_an_unsent_note() {
+        let (_dir, store) = store();
+        let mut draft = sent_draft("r1");
+        let id = draft.review.add("alpha beta gamma\n", Kind::Comment, 0..5);
+        draft.review.update(id, |a| a.note = "more".to_owned());
+        draft.mark_sent();
+        draft.finished = true;
+        store.save(&draft).expect("save");
+        assert_eq!(store.prune_sent(), 0);
+        assert!(store.load(&key("r1")).expect("load").is_some());
+    }
+
+    #[test]
+    fn a_finished_send_leaves_no_draft_for_the_next_start() {
+        let (_dir, store) = store();
+        let mut draft = sent_draft("r1");
+        draft.mark_sent();
+        store.save(&draft).expect("save");
+        store.save_in_progress(&draft).expect("in progress");
+        assert_eq!(files_in(&store), 0);
+        assert_eq!(store.prune_sent(), 0);
+    }
+
+    #[test]
+    fn a_marked_finished_draft_is_pruned_when_the_delete_failed() {
+        let (_dir, store) = store();
+        let mut draft = sent_draft("r1");
+        draft.mark_sent();
+        draft.finished = true;
+        store.save(&draft).expect("save");
+        assert_eq!(store.prune_sent(), 1);
+        assert_eq!(files_in(&store), 0);
     }
 
     #[test]
     fn prune_also_removes_the_old_name_file_of_a_used_up_draft() {
         let (_dir, store) = store();
-        let draft = sent_draft("r1");
+        let draft = finished_draft("r1");
         store.save(&draft).expect("save");
         // The old file holds older, unsent notes of the same key. They must not come back.
         let older = draft_with_comment("r1", "alpha beta gamma\n");
@@ -741,7 +830,7 @@ mod tests {
     #[test]
     fn prune_never_removes_an_unreadable_old_name_file() {
         let (_dir, store) = store();
-        store.save(&sent_draft("r1")).expect("save");
+        store.save(&finished_draft("r1")).expect("save");
         let broken = store.dir.join("claude-code-s1-r1.json");
         std::fs::write(&broken, "{ not json").expect("write");
         store.prune_sent();

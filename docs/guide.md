@@ -33,7 +33,7 @@ start, read the [README](../README.md). For the design, read [ARCHITECTURE.md](A
 - Send, paste, and copy. Annorex exports your notes as Markdown. It sends them to the agent, pastes them without
   Enter, or copies them. A send gives only the notes that Annorex did not send before. The notes of all replies and
   open files go in one message.
-- Drafts. Annorex saves your notes to disk after each change. It deletes the notes that a send took.
+- Drafts. Annorex saves your notes to disk after each change. It deletes notes only after a send that it finished.
 - New reply banner. When the agent answers while Annorex is open, a banner says `The agent has a new reply. Press r
   to read it.` Annorex reads the transcript every 2 seconds.
 - Change banner. When the agent changes an open file, a banner shows. Press `r` to read the file again. Your notes
@@ -457,9 +457,11 @@ note box, so a restart does not lose half a note. When you close Annorex, it kee
 
 After the agent got the message, Annorex deletes the notes that the send took. It deletes the draft file when nothing
 else is in it. The next time that you open the reply or the file, it starts clean. The sent notes with their quoted
-text do not stay on disk. After a paste with `P`, or when Enter was held, the notes stay in the draft as sent.
+text do not stay on disk. After a paste with `P`, or when Enter was held, the notes stay in the draft, marked as
+sent. Annorex does not delete them. You remove them with `x`.
 
-When Annorex starts, it deletes each draft in which every note was sent and no note box is open. If a draft file is
+When Annorex starts, it deletes each draft that a finished send used up and each draft with no note. It keeps a draft
+that only a paste or a held Enter marked. If a draft file is
 unreadable, Annorex keeps it and shows a message. Annorex does not delete a file that it cannot read, except when you
 discard the notes with `X`.
 
