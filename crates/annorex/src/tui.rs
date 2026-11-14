@@ -25,7 +25,7 @@ use crate::replies::{
 };
 use crate::rex::{Rex, RexError, Runner, SystemRunner};
 use crate::safety::{Safety, check};
-use crate::send::{apply_result, send_review};
+use crate::send::{SendResult, apply_result, save_after_send, send_review};
 use crate::ui::{AgentState, App, Effect, ReplySource, Screen, StartView, draw};
 
 /// The longest wait for an event before the loop draws again.
@@ -468,8 +468,8 @@ impl<R: Runner> Viewer<'_, R> {
     fn send(&self, app: &mut App, mode: DeliveryMode) {
         let export = app.export();
         let result = send_review(self.rex, &RealSleeper, self.target, &export, mode, self.enter_delay);
-        if apply_result(app, result, &crate::draft::now()) {
-            self.save_drafts(app);
+        if apply_result(app, result.clone(), &crate::draft::now()) {
+            self.save_drafts(app, &result);
             self.refresh_marks(app);
         }
     }
@@ -502,20 +502,16 @@ impl<R: Runner> Viewer<'_, R> {
             }
             return;
         };
-        let error = app.draft(agent, &session).and_then(|draft| store.save_in_progress(&draft).err());
+        let error = app.draft(agent, &session).and_then(|draft| store.save(&draft).err());
         app.set_save_error(error.map(|error| error.to_string()));
     }
 
-    /// Save the drafts of all documents: after a send, every document changed its sent state.
-    fn save_drafts(&self, app: &mut App) {
+    /// Save the drafts of all documents after a send. A finished send clears what it took. A paste
+    /// or a held Enter keeps the notes with their sent marks.
+    fn save_drafts(&self, app: &mut App, result: &SendResult) {
         let (Some(store), Some(agent)) = (&self.store, self.state.agent) else { return };
-        // Try every draft. One failed write must not leave the others unsaved.
-        let errors: Vec<_> = app
-            .drafts(agent, |id| self.session_of(id))
-            .iter()
-            .filter_map(|draft| store.save_in_progress(draft).err())
-            .collect();
-        let error = errors.into_iter().next();
+        let drafts = app.drafts(agent, |id| self.session_of(id));
+        let error = save_after_send(store, &drafts, result);
         app.set_save_error(error.map(|error| error.to_string()));
     }
 

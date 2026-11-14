@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RexApi, Sleeper, deliver};
+use crate::draft::{Draft, DraftError, DraftStore};
 use crate::ui::App;
 
 /// The limit of the delivery (spec §7.4). Annorex cannot see the input box of the agent.
@@ -88,6 +89,18 @@ pub fn apply_result(app: &mut App, result: SendResult, now: &str) -> bool {
             false
         }
     }
+}
+
+/// Save the drafts after `apply_result` said so. Only a finished send (`Sent`) clears the notes
+/// that it took. A paste or a held Enter keeps them on disk with their sent marks. Tries every
+/// draft and returns the first error.
+pub fn save_after_send(store: &DraftStore, drafts: &[Draft], result: &SendResult) -> Option<DraftError> {
+    let finished = *result == SendResult::Sent;
+    let errors: Vec<DraftError> = drafts
+        .iter()
+        .filter_map(|draft| if finished { store.save_in_progress(draft) } else { store.save(draft) }.err())
+        .collect();
+    errors.into_iter().next()
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ use annorex::config::Config;
 use annorex::replies::Reply;
 use annorex::review::Kind;
 use annorex::safety::Safety;
+use annorex::send::SendResult;
 use annorex::ui::{AgentState, App, Effect, Screen, draw};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -556,7 +557,7 @@ fn send_with_note_puts_the_note_first() {
 
 #[test]
 fn send_marks_the_draft_sent_and_a_change_makes_it_unsent_again() {
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
     assert!(header(&mut app).contains("[ Send 1 → Claude Code ▸ ]"), "{}", header(&mut app));
     assert!(apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z"));
@@ -573,7 +574,7 @@ fn send_marks_the_draft_sent_and_a_change_makes_it_unsent_again() {
 
 #[test]
 fn a_refused_send_keeps_the_draft_unsent() {
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
     let before = app.draft(Agent::ClaudeCode, "s").expect("draft").review;
     assert!(!apply_result(&mut app, SendResult::Refused("Not sent: x".to_owned()), "2026-11-09T14:30:00Z"));
@@ -584,7 +585,7 @@ fn a_refused_send_keeps_the_draft_unsent() {
 
 #[test]
 fn sending_clears_the_general_note() {
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
     press(&mut app, "Mhello\n");
     apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z");
@@ -637,7 +638,7 @@ fn quit_with_unsent_notes_asks_once() {
 #[test]
 fn quit_prompt_send_and_discard() {
     use annorex::deliver::DeliveryMode;
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
     press(&mut app, "q");
     assert_eq!(press_key(&mut app, KeyCode::Char('s'), KeyModifiers::NONE), Effect::Send(DeliveryMode::Send));
@@ -660,7 +661,7 @@ fn quit_prompt_send_and_discard() {
 
 #[test]
 fn quit_after_send_does_not_ask() {
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
     apply_result(&mut app, SendResult::Sent, "2026-11-09T14:30:00Z");
     assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::Quit);
@@ -820,7 +821,7 @@ fn x_removes_an_unreadable_draft_of_an_empty_review() {
 #[test]
 fn held_enter_in_the_quit_flow_stays_open() {
     use annorex::deliver::DeliveryMode;
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let mut app = annotated(Agent::ClaudeCode, idle());
     press(&mut app, "q");
     assert_eq!(press_key(&mut app, KeyCode::Char('s'), KeyModifiers::NONE), Effect::Send(DeliveryMode::Send));
@@ -1540,7 +1541,7 @@ fn footer_shows_esc_unselect_only_with_focus() {
 
 #[test]
 fn successful_send_quits() {
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let mut app = app("alpha beta gamma\n");
     press(&mut app, "vllllo");
     assert!(!app.should_exit());
@@ -1551,7 +1552,7 @@ fn successful_send_quits() {
 
 #[test]
 fn failed_send_stays_open() {
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let mut app = app("alpha beta gamma\n");
     press(&mut app, "vllllo");
     apply_result(&mut app, SendResult::Refused("Not sent: the agent shows a dialog.".to_owned()), "t");
@@ -1591,14 +1592,13 @@ fn drafts_store() -> (tempfile::TempDir, annorex::draft::DraftStore) {
 
 /// What the viewer does after a change: save the draft of the shown reply.
 fn save_shown(app: &App, store: &annorex::draft::DraftStore) {
-    store.save_in_progress(&app.draft(Agent::ClaudeCode, "s").expect("draft")).expect("save");
+    store.save(&app.draft(Agent::ClaudeCode, "s").expect("draft")).expect("save");
 }
 
-/// What the viewer does after a send that worked: save the drafts of all documents.
-fn save_all(app: &App, store: &annorex::draft::DraftStore) {
-    for draft in app.drafts(Agent::ClaudeCode, |_| Some("s".to_owned())) {
-        store.save_in_progress(&draft).expect("save");
-    }
+/// What the viewer does after a send that `apply_result` accepted: save the drafts of all documents.
+fn save_all(app: &App, store: &annorex::draft::DraftStore, result: &SendResult) {
+    let drafts = app.drafts(Agent::ClaudeCode, |_| Some("s".to_owned()));
+    assert!(annorex::send::save_after_send(store, &drafts, result).is_none());
 }
 
 /// Close and open again: a new app reads the draft of `id`.
@@ -1640,14 +1640,14 @@ fn an_open_note_box_survives_close_and_reopen() {
 
 #[test]
 fn after_a_successful_send_the_reply_reopens_clean() {
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let (_dir, store) = drafts_store();
     let mut first = app(TEXT);
     press(&mut first, "cx\n");
     save_shown(&first, &store);
     assert_eq!(draft_files(&store), 1);
     assert!(apply_result(&mut first, SendResult::Sent, "2026-11-09T14:30:00Z"));
-    save_all(&first, &store);
+    save_all(&first, &store, &SendResult::Sent);
     assert_eq!(draft_files(&store), 0, "the draft file is gone");
     let mut second = reopen(&store, "r1");
     assert!(second.review().is_none_or(|review| review.annotations.is_empty()));
@@ -1656,7 +1656,7 @@ fn after_a_successful_send_the_reply_reopens_clean() {
 
 #[test]
 fn a_failed_send_keeps_the_draft() {
-    use annorex::send::{SendResult, apply_result};
+    use annorex::send::apply_result;
     let (_dir, store) = drafts_store();
     let mut first = app(TEXT);
     press(&mut first, "cx\n");
@@ -1665,7 +1665,7 @@ fn a_failed_send_keeps_the_draft() {
         [SendResult::Refused("Not sent: x".to_owned()), SendResult::Failed("Not sent: y".to_owned())]
     {
         if apply_result(&mut first, result, "2026-11-09T14:30:00Z") {
-            save_all(&first, &store);
+            save_all(&first, &store, &SendResult::Failed(String::new()));
         }
     }
     assert_eq!(draft_files(&store), 1);
@@ -1695,9 +1695,34 @@ fn a_send_that_took_some_documents_keeps_the_others() {
     store.save(&parked).expect("save");
     app.restore("r2", store.load(&key_of("r2")).expect("load").expect("draft"));
     app.finish_send("2026-11-09T14:30:00Z");
-    save_all(&app, &store);
+    save_all(&app, &store, &SendResult::Sent);
     assert!(store.load(&key_of("r1")).expect("load").is_none(), "the sent reply is clean");
     let kept = store.load(&key_of("r2")).expect("load").expect("the open note box stays");
     assert_eq!(kept.editing.map(|editing| editing.text), Some("half".to_owned()));
     assert!(kept.sent_at.is_none());
+}
+
+/// A send that the agent did not finish keeps the notes on disk, with their sent marks.
+fn assert_notes_kept_after(result: &SendResult) {
+    use annorex::send::apply_result;
+    let (_dir, store) = drafts_store();
+    let mut first = app(TEXT);
+    press(&mut first, "cx\n");
+    save_shown(&first, &store);
+    assert!(apply_result(&mut first, result.clone(), "2026-11-09T14:30:00Z"));
+    save_all(&first, &store, result);
+    assert_eq!(draft_files(&store), 1, "the draft file stays");
+    let kept = store.load(&key_of("r1")).expect("load").expect("draft");
+    assert_eq!(kept.review.annotations.len(), 1);
+    assert!(kept.review.annotations[0].sent_at.is_some(), "the note keeps its sent mark");
+}
+
+#[test]
+fn a_held_send_keeps_the_notes_on_disk() {
+    assert_notes_kept_after(&SendResult::Held("Pasted, but Enter was held.".to_owned()));
+}
+
+#[test]
+fn a_paste_keeps_the_notes_on_disk() {
+    assert_notes_kept_after(&SendResult::Pasted);
 }

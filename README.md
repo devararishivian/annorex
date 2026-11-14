@@ -193,7 +193,7 @@ Shift+Cmd+O). These points describe Annorex only:
   agent in one message.
 - The file tree puts the files that the agent changed at the top.
 - Annorex keeps a draft of each note on disk. A closed viewer or a restart does not lose a note that you did not send.
-  After a send that works, Annorex deletes the sent notes from the disk.
+  After the agent got the message, Annorex deletes the sent notes from the disk.
 - Annorex shows a banner when a file changes on disk while you annotate it.
 - Annorex checks the agent before it sends. It refuses when the agent shows a dialog or has not reported its state. It
   keeps your notes.
