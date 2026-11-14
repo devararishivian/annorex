@@ -2,7 +2,7 @@
 
 use std::ffi::OsString;
 use std::io::{Read, Write as _};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -25,7 +25,8 @@ impl<R: Runner + ?Sized> Runner for &R {
     }
 }
 
-/// How long [`Rex::reload_config_later`] waits before the reload.
+/// How long [`Rex::reload_config_later`] waits before the reload. The action that started Annorex
+/// must have ended; a user action that starts within about 1 s after an upgrade can be cancelled once.
 pub(crate) const RELOAD_DELAY: Duration = Duration::from_secs(1);
 
 /// How long one Rex call can take. A call that takes longer fails with [`RexError::Timeout`].
@@ -388,15 +389,17 @@ impl<R: Runner> Rex<R> {
     /// Run `rex config reload` in a child that starts after `RELOAD_DELAY` and that Annorex does
     /// not wait for. Rex cancels an action when its config file reloads while the action runs, so
     /// the reload must come after the action that started Annorex ends. The child has its own
-    /// process group, so the end of the action does not stop it.
-    pub fn reload_config_later(&self) -> std::io::Result<()> {
+    /// process group, so the end of the action does not stop it. When the reload fails, the child
+    /// creates the file `failed`, so the next open can tell the user.
+    pub fn reload_config_later(&self, failed: &Path) -> std::io::Result<()> {
         use std::os::unix::process::CommandExt as _;
-        // The path of rex is the argument `$0`, so the shell never reads it as code.
-        let script = format!("sleep {}; exec \"$0\" config reload", RELOAD_DELAY.as_secs());
+        // The paths are the arguments `$0` and `$1`, so the shell never reads them as code.
+        let script = format!("sleep {}; \"$0\" config reload || : > \"$1\"", RELOAD_DELAY.as_secs());
         Command::new("/bin/sh")
             .arg("-c")
             .arg(script)
             .arg(&self.bin)
+            .arg(failed)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -527,8 +530,9 @@ mod tests {
         std::fs::write(&bin, format!("#!/bin/sh\necho \"$@\" > '{}'\n", log.display())).expect("script");
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("mode");
         let rex = Rex::new(bin, "session:s1".to_owned(), FakeRunner::default());
+        let failed = dir.path().join("reload-failed");
         let start = Instant::now();
-        rex.reload_config_later().expect("spawn");
+        rex.reload_config_later(&failed).expect("spawn");
         assert!(start.elapsed() < RELOAD_DELAY, "the call must not wait: {:?}", start.elapsed());
         assert!(!log.exists(), "the reload must wait for the delay");
         while !log.exists() && start.elapsed() < Duration::from_secs(10) {
@@ -537,6 +541,27 @@ mod tests {
         assert!(start.elapsed() >= RELOAD_DELAY, "{:?}", start.elapsed());
         assert_eq!(std::fs::read_to_string(&log).expect("args"), "config reload\n");
         assert!(rex.runner.calls.borrow().is_empty(), "the reload does not use the runner");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!failed.exists(), "a reload that works writes no marker");
+    }
+
+    #[test]
+    fn reload_config_later_marks_a_failed_reload() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("dir");
+        let bin = dir.path().join("rex");
+        std::fs::write(&bin, "#!/bin/sh\nexit 1\n").expect("script");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let rex = Rex::new(bin, "session:s1".to_owned(), FakeRunner::default());
+        // A path with a space and a quote must not break the script.
+        let failed = dir.path().join("state 'x'/reload-failed");
+        std::fs::create_dir_all(failed.parent().expect("parent")).expect("state");
+        rex.reload_config_later(&failed).expect("spawn");
+        let start = Instant::now();
+        while !failed.exists() && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(failed.exists(), "a failed reload writes the marker");
     }
 
     #[test]

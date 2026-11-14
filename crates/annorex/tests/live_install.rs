@@ -132,7 +132,8 @@ fn installed_module_works_with_the_environment_of_a_rex_action() {
         failures.push(format!("bad bin: expected {expected:?}, got {stderr:?}"));
     }
 
-    // 4. A module of an older version: `rex open` writes the module of this binary.
+    // 4. A module of an older version: `rex open` writes the module of this binary. This also
+    // starts a real delayed reload of the server's own config, which is harmless.
     let config = work.path().join("config-old");
     let init = install(&config, "require(\"annorex\").setup{}");
     let module = config.join("annorex.lua");

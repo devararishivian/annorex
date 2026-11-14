@@ -92,7 +92,7 @@ pub fn install(dir: &Path, bin: Option<&Path>) -> Result<Installed, InstallError
         Err(error) => return Err(error.into()),
     };
     std::fs::create_dir_all(dir)?;
-    std::fs::write(&path, module_contents(bin))?;
+    write_atomic(&path, &module_contents(bin))?;
     Ok(Installed { path, replaced })
 }
 
@@ -158,8 +158,20 @@ pub fn refresh(dir: &Path, bin: Option<&Path>) -> Result<Refresh, InstallError> 
     if installed_version(&existing) == Some(env!("CARGO_PKG_VERSION")) {
         return Ok(Refresh::Current);
     }
-    std::fs::write(&path, module_contents(bin))?;
+    write_atomic(&path, &module_contents(bin))?;
     Ok(Refresh::Updated)
+}
+
+/// Write `contents` to a temporary file beside `path`, then rename it to `path`. So Rex never
+/// reads a module that is only partly written.
+fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
+    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let temp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let written = std::fs::write(&temp, contents).and_then(|()| std::fs::rename(&temp, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written
 }
 
 /// The outcome of one `rex config check` run.
@@ -579,6 +591,26 @@ mod tests {
         std::fs::write(&path, "-- my own annorex.lua\n").expect("foreign");
         assert!(matches!(refresh(dir.path(), None), Ok(Refresh::Foreign)));
         assert_eq!(std::fs::read_to_string(&path).expect("kept"), "-- my own annorex.lua\n");
+    }
+
+    #[test]
+    fn install_and_refresh_leave_no_temporary_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        install(dir.path(), None).expect("install");
+        let current = format!("(annorex {})", env!("CARGO_PKG_VERSION"));
+        let path = dir.path().join(MODULE_FILE);
+        let old = module_contents(None).replacen(&current, "(annorex 0.0.1)", 1);
+        std::fs::write(&path, old).expect("old module");
+        assert!(matches!(refresh(dir.path(), None), Ok(Refresh::Updated)));
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("dir")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, [MODULE_FILE], "only the module stays");
+        assert_eq!(
+            write_atomic(&dir.path().join("missing/x.lua"), "x").map_err(|e| e.kind()),
+            Err(std::io::ErrorKind::NotFound)
+        );
     }
 
     #[test]

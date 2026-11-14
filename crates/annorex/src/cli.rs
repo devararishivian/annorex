@@ -492,11 +492,20 @@ fn rex_open(
         code: EXIT_FAILURE,
         message: format!("cannot find the path of the annorex binary: {error}"),
     })?;
+    // A reload that an earlier open started and that failed gives its notice now, once.
+    let failed = crate::draft::state_dir(env).map(|dir| dir.join(RELOAD_FAILED_FILE));
+    let failed_before = take_reload_failed(failed.as_deref());
     let opened = open_view(&rex, view, target, rex.session(), &exe, no_update_check);
     // After an upgrade, the installed module is still the old one. Refresh it after the view
     // opens: the reload must not come while the action runs. A failed refresh never stops the open.
-    let reload_notice =
-        refresh_module(config_dir(env), &stable_bin(&exe), || rex.reload_config_later().is_ok());
+    // Without a state folder, the failure of the reload cannot be recorded, so ask the user.
+    let reload_failed = refresh_module(config_dir(env), &stable_bin(&exe), || {
+        failed.as_deref().is_some_and(|failed| {
+            failed.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+                && rex.reload_config_later(failed).is_ok()
+        })
+    })
+    .is_some();
     let opened = opened.map_err(|error| match error {
         OpenError::Rex(rex) => Failure::from(rex),
         OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
@@ -506,10 +515,32 @@ fn rex_open(
         .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
     writeln!(out, "{json}").map_err(|error| io_failure(&error))?;
     // The Lua action shows the first line of the error to the user.
-    if let Some(message) = reload_notice.or_else(|| opened.existing.as_ref().and_then(Existing::notice)) {
+    let existing = opened.existing.as_ref().and_then(Existing::notice);
+    if let Some(message) = open_notice(failed_before || reload_failed, existing) {
         return Err(Failure { code: EXIT_REFUSED, message });
     }
     Ok(EXIT_OK)
+}
+
+/// The file in the state folder that a failed module reload creates.
+const RELOAD_FAILED_FILE: &str = "reload-failed";
+
+/// The notice of a module reload that Rex did not do.
+const RELOAD_NOTICE: &str = "updated the Annorex module; run: rex config reload";
+
+/// Remove the marker of a failed reload. True when it was there.
+fn take_reload_failed(marker: Option<&Path>) -> bool {
+    marker.is_some_and(|marker| std::fs::remove_file(marker).is_ok())
+}
+
+/// The notice that `rex open` gives after the view is open. The Lua action shows only the first
+/// line, so the two notices share one line, the reload notice first.
+fn open_notice(reload: bool, existing: Option<String>) -> Option<String> {
+    match (reload, existing) {
+        (true, Some(existing)) => Some(format!("{RELOAD_NOTICE}; {existing}")),
+        (true, None) => Some(RELOAD_NOTICE.to_owned()),
+        (false, existing) => existing,
+    }
 }
 
 /// Refresh the module in `dir` with `bin` when it has another version, then call `reload` to make
@@ -517,9 +548,7 @@ fn rex_open(
 /// the old module still works.
 fn refresh_module(dir: Option<PathBuf>, bin: &Path, reload: impl FnOnce() -> bool) -> Option<String> {
     match refresh(&dir?, Some(bin)) {
-        Ok(Refresh::Updated) if !reload() => {
-            Some("updated the Annorex module; run: rex config reload".to_owned())
-        }
+        Ok(Refresh::Updated) if !reload() => Some(RELOAD_NOTICE.to_owned()),
         _ => None,
     }
 }
@@ -600,6 +629,27 @@ mod tests {
         assert_eq!(refresh_module(Some(dir.path().to_path_buf()), Path::new("/x"), &mut reload), None);
         assert_eq!(reloads, 0);
         assert!(!dir.path().join("init.lua").exists());
+    }
+
+    #[test]
+    fn take_reload_failed_removes_the_marker_once() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let marker = dir.path().join(RELOAD_FAILED_FILE);
+        assert!(!take_reload_failed(Some(&marker)), "no marker gives no notice");
+        assert!(!take_reload_failed(None));
+        std::fs::write(&marker, "").expect("marker");
+        assert!(take_reload_failed(Some(&marker)));
+        assert!(!marker.exists(), "the marker is removed");
+        assert!(!take_reload_failed(Some(&marker)), "one notice, once");
+    }
+
+    #[test]
+    fn open_notice_puts_the_reload_notice_first_and_keeps_both() {
+        let reload = "updated the Annorex module; run: rex config reload";
+        assert_eq!(open_notice(false, None), None);
+        assert_eq!(open_notice(true, None).as_deref(), Some(reload));
+        assert_eq!(open_notice(false, Some("x is open".to_owned())).as_deref(), Some("x is open"));
+        assert_eq!(open_notice(true, Some("x is open".to_owned())), Some(format!("{reload}; x is open")));
     }
 
     #[test]
