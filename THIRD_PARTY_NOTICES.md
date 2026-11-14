@@ -1,7 +1,8 @@
 # Third-party notices
 
-Annorex contains code from the projects below. Each vendored file starts with a header that gives its origin and the
-changes for Annorex.
+Annorex contains code from the projects below. Each vendored Rust file starts with a header that gives its origin and
+the changes for Annorex. A comment marks the adapted function in `wrap.rs` and the lint table in `Cargo.toml`. The
+test fixtures and `rustfmt.toml` have no header. This file lists them.
 
 ## plannotator-tui
 
@@ -9,12 +10,20 @@ changes for Annorex.
 - URL: <https://github.com/plannotator/plannotator-tui>
 - Commit: `83b0cd91e287df391d5b27029140ff72c32c085d`
 - License: MIT
-- Vendored paths in Annorex:
-    - `crates/annorex-hosts/src/` (from `crates/plannotator-tui-hosts/src/` and
-      `crates/plannotator-tui/src/last/roots.rs`)
-    - `crates/annorex-hosts/tests/` and `crates/annorex-hosts/tests/fixtures/` (from
-      `crates/plannotator-tui-hosts/tests/`)
+- Files in Annorex that come from plannotator-tui:
+    - `crates/annorex-hosts/src/lib.rs`, `claude/mod.rs`, `claude/entries.rs`, `claude/ladder.rs`,
+      `claude/messages.rs`, `opencode.rs`, `pi.rs`, `sqlite.rs`, and `time.rs` (from
+      `crates/plannotator-tui-hosts/src/`)
+    - `crates/annorex-hosts/src/roots.rs` (from `crates/plannotator-tui/src/last/roots.rs`)
+    - `crates/annorex-hosts/tests/claude.rs`, `exact_session.rs`, `ladder.rs`, `opencode.rs`, `pi.rs`, and `roots.rs`
+      (from `crates/plannotator-tui-hosts/tests/`)
+    - The test fixtures in `crates/annorex-hosts/tests/fixtures/` (from `crates/plannotator-tui-hosts/tests/`), except
+      `claude-code-new-records.jsonl` and `pi-new-records.jsonl`
+    - The function `wrap_table` in `crates/annorex/src/wrap.rs`: the column widths and the clip fallback
     - The lint table in the root `Cargo.toml` and the root `rustfmt.toml`
+- These files in `crates/annorex-hosts/` are Annorex code: `changes.rs`, `claude/changes.rs`, `pi_changes.rs`,
+  `opencode_changes.rs`, `tests/display_name.rs`, `tests/fixtures/claude-code-new-records.jsonl`, and
+  `tests/fixtures/pi-new-records.jsonl`.
 
 ```text
 MIT License
