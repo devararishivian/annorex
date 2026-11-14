@@ -292,6 +292,10 @@ impl<R: Runner> Viewer<'_, R> {
     /// work directory gives a message in place of the viewer. Other problems show in the reply list.
     fn start_app(&mut self, start: &Start) -> App {
         self.start = start.clone();
+        if let Some(store) = &self.store {
+            // Drafts that a send used up are gone from the disk before the first read.
+            store.prune_sent();
+        }
         let mut app = self.build_app(start);
         if self.store.is_none() {
             app.set_save_error(Some("no home directory, so no place for drafts".to_owned()));
@@ -498,7 +502,7 @@ impl<R: Runner> Viewer<'_, R> {
             }
             return;
         };
-        let error = app.draft(agent, &session).and_then(|draft| store.save(&draft).err());
+        let error = app.draft(agent, &session).and_then(|draft| store.save_in_progress(&draft).err());
         app.set_save_error(error.map(|error| error.to_string()));
     }
 
@@ -509,7 +513,7 @@ impl<R: Runner> Viewer<'_, R> {
         let errors: Vec<_> = app
             .drafts(agent, |id| self.session_of(id))
             .iter()
-            .filter_map(|draft| store.save(draft).err())
+            .filter_map(|draft| store.save_in_progress(draft).err())
             .collect();
         let error = errors.into_iter().next();
         app.set_save_error(error.map(|error| error.to_string()));

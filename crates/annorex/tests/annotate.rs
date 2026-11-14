@@ -1574,3 +1574,130 @@ fn the_80_column_footer_keeps_esc_unselect_and_s_send() {
     let footer = screen.lines().last().expect("footer");
     assert!(footer.contains("esc unselect") && footer.contains("S send"), "{footer}");
 }
+
+// Drafts: work in progress stays, what a send took goes.
+
+const TEXT: &str = "alpha beta gamma\n";
+
+fn key_of(id: &str) -> annorex::draft::DraftKey {
+    annorex::draft::DraftKey { agent: Agent::ClaudeCode, session: "s".to_owned(), document: id.to_owned() }
+}
+
+fn drafts_store() -> (tempfile::TempDir, annorex::draft::DraftStore) {
+    let dir = tempfile::tempdir().expect("dir");
+    let store = annorex::draft::DraftStore { dir: dir.path().join("drafts") };
+    (dir, store)
+}
+
+/// What the viewer does after a change: save the draft of the shown reply.
+fn save_shown(app: &App, store: &annorex::draft::DraftStore) {
+    store.save_in_progress(&app.draft(Agent::ClaudeCode, "s").expect("draft")).expect("save");
+}
+
+/// What the viewer does after a send that worked: save the drafts of all documents.
+fn save_all(app: &App, store: &annorex::draft::DraftStore) {
+    for draft in app.drafts(Agent::ClaudeCode, |_| Some("s".to_owned())) {
+        store.save_in_progress(&draft).expect("save");
+    }
+}
+
+/// Close and open again: a new app reads the draft of `id`.
+fn reopen(store: &annorex::draft::DraftStore, id: &str) -> App {
+    let mut app = App::new(state(), Screen::Viewer, vec![reply(id, TEXT)], &Config::default());
+    app.set_time_zone(jiff::tz::TimeZone::UTC);
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    if let Some(draft) = store.load(&key_of(id)).expect("load") {
+        app.restore(id, draft);
+    }
+    app
+}
+
+fn draft_files(store: &annorex::draft::DraftStore) -> usize {
+    std::fs::read_dir(&store.dir).map_or(0, Iterator::count)
+}
+
+#[test]
+fn closing_with_unsent_notes_keeps_them_on_reopen() {
+    let (_dir, store) = drafts_store();
+    let mut first = app(TEXT);
+    press(&mut first, "cx\n");
+    save_shown(&first, &store);
+    let second = reopen(&store, "r1");
+    let notes = &second.review().expect("review").annotations;
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].sent_at.is_none() && notes[0].note == "x");
+}
+
+#[test]
+fn an_open_note_box_survives_close_and_reopen() {
+    let (_dir, store) = drafts_store();
+    let mut first = app(TEXT);
+    press(&mut first, "chalf");
+    save_shown(&first, &store);
+    let second = reopen(&store, "r1");
+    assert_eq!(second.editor().map(|editor| editor.text.clone()), Some("half".to_owned()));
+}
+
+#[test]
+fn after_a_successful_send_the_reply_reopens_clean() {
+    use annorex::send::{SendResult, apply_result};
+    let (_dir, store) = drafts_store();
+    let mut first = app(TEXT);
+    press(&mut first, "cx\n");
+    save_shown(&first, &store);
+    assert_eq!(draft_files(&store), 1);
+    assert!(apply_result(&mut first, SendResult::Sent, "2026-11-09T14:30:00Z"));
+    save_all(&first, &store);
+    assert_eq!(draft_files(&store), 0, "the draft file is gone");
+    let mut second = reopen(&store, "r1");
+    assert!(second.review().is_none_or(|review| review.annotations.is_empty()));
+    assert!(!render(&mut second, 100, 12).contains("Sent"));
+}
+
+#[test]
+fn a_failed_send_keeps_the_draft() {
+    use annorex::send::{SendResult, apply_result};
+    let (_dir, store) = drafts_store();
+    let mut first = app(TEXT);
+    press(&mut first, "cx\n");
+    save_shown(&first, &store);
+    for result in
+        [SendResult::Refused("Not sent: x".to_owned()), SendResult::Failed("Not sent: y".to_owned())]
+    {
+        if apply_result(&mut first, result, "2026-11-09T14:30:00Z") {
+            save_all(&first, &store);
+        }
+    }
+    assert_eq!(draft_files(&store), 1);
+    let second = reopen(&store, "r1");
+    let notes = &second.review().expect("review").annotations;
+    assert!(notes.len() == 1 && notes[0].sent_at.is_none());
+}
+
+#[test]
+fn a_send_that_took_some_documents_keeps_the_others() {
+    use annorex::draft::{Draft, Editing};
+    let (_dir, store) = drafts_store();
+    let mut app = three_replies();
+    press(&mut app, "cx\n");
+    save_shown(&app, &store);
+    // Another reply has a note box that is open and no note yet.
+    let mut parked = Draft::new(key_of("r2"), "earlier reply");
+    parked.editing = Some(Editing {
+        kind: Kind::Comment,
+        range: 0..6,
+        text: "half".to_owned(),
+        label: None,
+        general: false,
+        annotation: None,
+        quote: Some("second".to_owned()),
+    });
+    store.save(&parked).expect("save");
+    app.restore("r2", store.load(&key_of("r2")).expect("load").expect("draft"));
+    app.finish_send("2026-11-09T14:30:00Z");
+    save_all(&app, &store);
+    assert!(store.load(&key_of("r1")).expect("load").is_none(), "the sent reply is clean");
+    let kept = store.load(&key_of("r2")).expect("load").expect("the open note box stays");
+    assert_eq!(kept.editing.map(|editing| editing.text), Some("half".to_owned()));
+    assert!(kept.sent_at.is_none());
+}

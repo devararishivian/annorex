@@ -1,7 +1,9 @@
 //! Drafts: the review of one document, saved to disk after each change.
 //!
-//! A draft is never deleted by Annorex on its own. A file that Annorex cannot read is kept as it
-//! is and never written over, because it can hold the work of the user.
+//! Annorex deletes a draft only after a successful send, or when every note in it was sent. Work
+//! in progress stays: an unsent note, a general note that no send took, and an open note box.
+//! A file that Annorex cannot read is kept as it is, never written over and never deleted, because
+//! it can hold the work of the user.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -98,6 +100,18 @@ impl Draft {
     /// Record a send or a paste.
     pub fn mark_sent(&mut self) {
         self.sent_at = Some(now());
+    }
+
+    /// True when no work in progress is left: no annotation, no general note, and no open note box.
+    fn is_clear(&self) -> bool {
+        self.review.annotations.is_empty() && self.review.note.trim().is_empty() && self.editing.is_none()
+    }
+
+    /// True when a send took everything in the draft and nothing is in progress.
+    fn is_used_up(&self) -> bool {
+        self.editing.is_none()
+            && self.review.note.trim().is_empty()
+            && (self.sent_at.is_some() || self.review.annotations.iter().all(|a| a.sent_at.is_some()))
     }
 }
 
@@ -237,6 +251,40 @@ impl DraftStore {
             }
             _ => Ok(()),
         }
+    }
+
+    /// Save what is in progress in `draft`. The notes that a send took are left out. A draft with
+    /// nothing in progress that a send used up is removed. Refuses to touch a file that `load`
+    /// cannot read.
+    pub fn save_in_progress(&self, draft: &Draft) -> Result<(), DraftError> {
+        let mut kept = draft.clone();
+        let dropped = kept.review.drop_sent();
+        if dropped > 0 {
+            kept.sent_at = None;
+        }
+        if kept.is_clear() && (dropped > 0 || draft.sent_at.is_some()) {
+            self.load(&draft.key)?;
+            return self.discard(&draft.key);
+        }
+        kept.sent_at = None;
+        self.save(&kept)
+    }
+
+    /// Delete each readable draft that a send used up: every note was sent, no general note is
+    /// unsent, and no note box is open. A file that cannot be read stays. Returns how many were
+    /// deleted.
+    pub fn prune_sent(&self) -> usize {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else { return 0 };
+        let paths: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect();
+        paths
+            .into_iter()
+            .filter(|path| Self::read(path).ok().flatten().is_some_and(|draft| draft.is_used_up()))
+            .filter(|path| std::fs::remove_file(path).is_ok())
+            .count()
     }
 
     /// The documents of one session that have annotations and no send, sorted.
@@ -565,5 +613,91 @@ mod tests {
     fn drafts_dir_ignores_a_relative_value() {
         let dir = drafts_dir(env(&[("XDG_STATE_HOME", "rel"), ("HOME", "/h")]));
         assert_eq!(dir, Some(PathBuf::from("/h/.local/state/annorex/drafts")));
+    }
+
+    fn sent_draft(document: &str) -> Draft {
+        let mut draft = draft_with_comment(document, "alpha beta gamma\n");
+        draft.review.mark_sent("2026-11-09T10:00:00Z");
+        draft
+    }
+
+    fn files_in(store: &DraftStore) -> usize {
+        std::fs::read_dir(&store.dir).map_or(0, Iterator::count)
+    }
+
+    #[test]
+    fn prune_deletes_fully_sent_drafts_and_keeps_in_progress_and_unreadable_ones() {
+        let (_dir, store) = store();
+        // Every note was sent: deleted.
+        store.save(&sent_draft("sent")).expect("save");
+        // An unsent note: kept.
+        store.save(&draft_with_comment("unsent", "alpha beta gamma\n")).expect("save");
+        // A sent note and an unsent one: kept.
+        let mut mixed = sent_draft("mixed");
+        let id = mixed.review.add("alpha beta gamma\n", Kind::Comment, 0..5);
+        mixed.review.update(id, |a| a.note = "more".to_owned());
+        store.save(&mixed).expect("save");
+        // All sent, but a note box is open: kept.
+        let mut editing = sent_draft("editing");
+        editing.editing = Some(Editing {
+            kind: Kind::Comment,
+            range: 0..5,
+            text: "half".to_owned(),
+            label: None,
+            general: false,
+            annotation: None,
+            quote: None,
+        });
+        store.save(&editing).expect("save");
+        // All sent, but a general note is unsent: kept.
+        let mut general = sent_draft("general");
+        general.review.note = "Please fix all.".to_owned();
+        store.save(&general).expect("save");
+        // A file that Annorex cannot parse: kept as it is.
+        let broken = store.dir.join("claude-code-s1-broken.json");
+        std::fs::write(&broken, "{ not json").expect("write");
+        assert_eq!(files_in(&store), 6);
+        assert_eq!(store.prune_sent(), 1);
+        assert!(store.load(&key("sent")).expect("load").is_none());
+        for kept in ["unsent", "mixed", "editing", "general"] {
+            assert!(store.load(&key(kept)).expect("load").is_some(), "{kept}");
+        }
+        assert_eq!(std::fs::read_to_string(&broken).expect("read"), "{ not json");
+    }
+
+    #[test]
+    fn saving_in_progress_drops_the_sent_notes_and_removes_a_draft_that_is_empty() {
+        let (_dir, store) = store();
+        let mut draft = sent_draft("r1");
+        draft.sent_at = Some("2026-11-09T10:00:00Z".to_owned());
+        store.save(&draft).expect("save");
+        store.save_in_progress(&draft).expect("in progress");
+        assert!(store.load(&key("r1")).expect("load").is_none());
+        assert_eq!(files_in(&store), 0);
+        // With an open note box, the box stays and the sent notes go.
+        let mut open = sent_draft("r2");
+        open.editing = Some(Editing {
+            kind: Kind::Comment,
+            range: 0..5,
+            text: "half".to_owned(),
+            label: None,
+            general: false,
+            annotation: None,
+            quote: None,
+        });
+        store.save_in_progress(&open).expect("in progress");
+        let loaded = store.load(&key("r2")).expect("load").expect("kept");
+        assert!(loaded.review.annotations.is_empty() && loaded.sent_at.is_none());
+        assert_eq!(loaded.editing.map(|e| e.text), Some("half".to_owned()));
+    }
+
+    #[test]
+    fn an_unreadable_draft_is_never_removed_by_a_save() {
+        let (_dir, store) = store();
+        let path = store.path(&key("r1"));
+        std::fs::create_dir_all(&store.dir).expect("dir");
+        std::fs::write(&path, "{ not json").expect("write");
+        assert!(matches!(store.save_in_progress(&sent_draft("r1")), Err(DraftError::Unreadable { .. })));
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "{ not json");
     }
 }

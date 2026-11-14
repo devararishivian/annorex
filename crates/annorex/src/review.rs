@@ -110,6 +110,13 @@ impl Review {
         }
     }
 
+    /// Remove the annotations that a send or a paste took. Returns how many.
+    pub fn drop_sent(&mut self) -> usize {
+        let before = self.annotations.len();
+        self.annotations.retain(|a| a.sent_at.is_none());
+        before - self.annotations.len()
+    }
+
     pub fn remove(&mut self, id: u64) -> Option<Annotation> {
         let index = self.annotations.iter().position(|a| a.id == id)?;
         Some(self.annotations.remove(index))
@@ -381,6 +388,19 @@ mod tests {
     fn a_multi_line_general_note_keeps_its_blank_lines_as_quote_markers() {
         let text = export("one\n\ntwo", &[]);
         assert_eq!(text, "# Note\n\n> one\n>\n> two\n");
+    }
+
+    #[test]
+    fn drop_sent_removes_only_the_notes_that_a_send_took() {
+        let source = "alpha beta\n";
+        let mut review = Review::default();
+        review.add(source, Kind::Comment, 0..5);
+        review.mark_sent("2026-11-09T10:00:00Z");
+        let later = review.add(source, Kind::Delete, 6..10);
+        assert_eq!(review.drop_sent(), 1);
+        assert_eq!(review.annotations.len(), 1);
+        assert_eq!(review.annotations[0].id, later);
+        assert!(review.add(source, Kind::Comment, 0..5) > later, "an id is not used twice");
     }
 
     #[test]

@@ -29,7 +29,7 @@ the [README](../README.md). For the design, read [ARCHITECTURE.md](ARCHITECTURE.
 - **Send, paste, and copy.** Annorex exports your notes as Markdown. It sends them to the agent, pastes them without
   Enter, or copies them. A send gives only the notes that Annorex did not send before. The notes of all replies and
   open files go in one message.
-- **Drafts.** Annorex saves your notes to disk after each change.
+- **Drafts.** Annorex saves your notes to disk after each change. It deletes the notes that a send took.
 - **New reply banner.** When the agent answers while Annorex is open, a banner says `The agent has a new reply. Press r
   to read it.` Annorex looks at the transcript every 2 seconds.
 - **Change banner.** When the agent changes an open file, a banner shows. Press `r` to read the file again. Your notes
@@ -286,8 +286,8 @@ Press any key to close it. The config action name is `help`. The footer shows `?
 2. Press `o` to mark the text as good. This needs no text. Press `c` to comment, `d` to mark the text for removal, or
    `s` to replace it. Type the note. Press `enter`.
 3. Press `S` or click the send button in the header. The button shows `[ Send N → agent ▸ ]`, with N the number of
-   notes. After a send that works, Annorex saves the drafts as sent and closes. If the send fails, Annorex stays open
-   and the footer shows the reason.
+   notes. After a send that works, Annorex deletes the notes that the send took from their drafts and closes. If the
+   send fails, Annorex stays open and keeps the drafts. The footer shows the reason.
 
 The export is Markdown. It starts with `# Annotations on last reply`. For an older reply, the name is
 `earlier reply (HH:MM)` in your local time. If you wrote a general note with `M`, the export starts with the heading
@@ -392,7 +392,12 @@ close one first.
 
 Annorex saves one draft for each reply and for each file in `$XDG_STATE_HOME/annorex/drafts`. The default is
 `~/.local/state/annorex/drafts`. The directory has mode `0700` and the files have mode `0600`. The draft keeps the open
-note box, so a restart does not lose half a note. If a draft file is unreadable, Annorex keeps it and shows a message.
+note box, so a restart does not lose half a note. A closed viewer keeps all notes that no send took.
+
+After a send that works, Annorex deletes the notes that the send took. It deletes the draft file when nothing else is in
+it. The next time that you open the reply or the file, it starts clean. The sent notes with their quoted text do not
+stay on disk. When Annorex starts, it also deletes each draft in which every note was sent and no note box is open. If a
+draft file is unreadable, Annorex keeps it and shows a message. Annorex never deletes a file that it cannot read.
 
 ## The config file
 
