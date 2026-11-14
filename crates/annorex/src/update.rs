@@ -1,7 +1,7 @@
 //! The check for a newer release: a daily cache and one request to the GitHub release API.
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
@@ -39,9 +39,10 @@ pub fn write_cache(path: &Path, cache: &Cache) -> std::io::Result<()> {
     })
 }
 
-/// True when no check happened in the last `CHECK_INTERVAL_SECS`.
+/// True when no check happened in the last `CHECK_INTERVAL_SECS`, or when the time of the last
+/// check is in the future (the clock was set back).
 pub fn due(cache: Option<&Cache>, now: u64) -> bool {
-    cache.is_none_or(|cache| now.saturating_sub(cache.checked_at) >= CHECK_INTERVAL_SECS)
+    cache.is_none_or(|cache| cache.checked_at > now || now - cache.checked_at >= CHECK_INTERVAL_SECS)
 }
 
 /// The version in the `tag_name` field of a release, without a leading `v`.
@@ -155,6 +156,13 @@ mod tests {
         let cache = Cache { checked_at: 100, latest: None };
         assert!(!due(Some(&cache), 100 + 86_399));
         assert!(due(Some(&cache), 100 + 86_400));
+    }
+
+    #[test]
+    fn future_checked_at_is_due() {
+        let cache = Cache { checked_at: 1_000, latest: None };
+        assert!(due(Some(&cache), 999));
+        assert!(!due(Some(&cache), 1_000));
     }
 
     #[test]
