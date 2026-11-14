@@ -54,7 +54,8 @@ fn is_annorex(block: &BlockInfo) -> bool {
 }
 
 /// The `session.new_layer` request for a viewer of `view`: the full `window`, with focus. File paths
-/// follow `--`, so a name that starts with `-` is not read as an option.
+/// follow `--`, so a name that starts with `-` is not read as an option. With `no_update_check`, the
+/// viewer does not check for a newer release.
 pub fn layer_request_for(
     view: &View<'_>,
     target: &str,
@@ -62,11 +63,15 @@ pub fn layer_request_for(
     window: &str,
     exe: &Path,
     cwd: Option<&Path>,
+    no_update_check: bool,
 ) -> serde_json::Value {
     let mut command: Vec<String> =
         [exe.to_string_lossy().as_ref(), view.name(), "--target", target, "--session", session]
             .map(str::to_owned)
             .into();
+    if no_update_check {
+        command.push("--no-update-check".to_owned());
+    }
     if let View::Files(paths) = view
         && !paths.is_empty()
     {
@@ -174,7 +179,7 @@ pub enum OpenError {
 
 /// Open the viewer for the agent in `target`. If the reply viewer of `target` is open, focus it.
 pub fn open_last(api: &impl OpenApi, target: &str, session: &str, exe: &Path) -> Result<Opened, OpenError> {
-    open_view(api, &View::Last, target, session, exe)
+    open_view(api, &View::Last, target, session, exe, false)
 }
 
 /// Open the files viewer for the agent in `target`, with `paths` open. If an Annorex is open in the
@@ -186,7 +191,7 @@ pub fn open_files(
     exe: &Path,
     paths: &[String],
 ) -> Result<Opened, OpenError> {
-    open_view(api, &View::Files(paths), target, session, exe)
+    open_view(api, &View::Files(paths), target, session, exe, false)
 }
 
 /// Show an Annorex block that is already open: restore and raise its layer, or focus a pane of the old
@@ -222,13 +227,15 @@ fn focus_existing(api: &impl OpenApi, found: &Located<'_>, target: &str) -> Resu
 }
 
 /// Open the viewer of `view` for the agent in `target` over the full window of the agent. A session has one
-/// Annorex: if one is open, show it and open nothing.
+/// Annorex: if one is open, show it and open nothing. With `no_update_check`, the viewer does not check
+/// for a newer release.
 pub fn open_view(
     api: &impl OpenApi,
     view: &View<'_>,
     target: &str,
     session: &str,
     exe: &Path,
+    no_update_check: bool,
 ) -> Result<Opened, OpenError> {
     let process = api.process(target)?;
     let status = api.program_status(target)?;
@@ -241,7 +248,7 @@ pub fn open_view(
     }
     let window = api.window_of(target)?;
     let cwd = process.foreground.as_ref().and_then(|fg| fg.cwd.as_deref());
-    let request = layer_request_for(view, target, session, &window, exe, cwd);
+    let request = layer_request_for(view, target, session, &window, exe, cwd, no_update_check);
     let layer = api.new_layer(&request)?;
     let Some(block_id) = layer.block_ids.first().cloned() else {
         // Do not leave a layer without a known block.
@@ -473,7 +480,8 @@ mod tests {
     // S5: `last` and `files` use one label, so either command shows the open Annorex.
     #[test]
     fn last_and_files_use_the_same_label() {
-        let request = |view: &View<'_>| layer_request_for(view, TARGET, "session:s", WINDOW, &exe(), None);
+        let request =
+            |view: &View<'_>| layer_request_for(view, TARGET, "session:s", WINDOW, &exe(), None, false);
         assert_eq!(request(&View::Last)["layout"]["block"]["label"], pane_label(TARGET));
         assert_eq!(request(&View::Files(&[]))["layout"]["block"]["label"], pane_label(TARGET));
     }
@@ -589,6 +597,7 @@ mod tests {
             WINDOW,
             &exe(),
             None,
+            false,
         );
         let block = &request["layout"]["block"];
         assert_eq!(block["label"], pane_label(TARGET));
@@ -607,6 +616,43 @@ mod tests {
             ])
         );
         assert_eq!(block["options"].get("cwd"), None);
+    }
+
+    #[test]
+    fn the_request_has_the_update_flag_only_when_asked() {
+        let command = |view: &View<'_>, no_update_check: bool| {
+            let request = layer_request_for(view, TARGET, "session:s", WINDOW, &exe(), None, no_update_check);
+            request["layout"]["block"]["options"]["command"].clone()
+        };
+        let base = ["/usr/local/bin/annorex", "last", "--target", TARGET, "--session", "session:s"];
+        assert_eq!(command(&View::Last, false), json!(base));
+        assert_eq!(
+            command(&View::Last, true),
+            json!([
+                "/usr/local/bin/annorex",
+                "last",
+                "--target",
+                TARGET,
+                "--session",
+                "session:s",
+                "--no-update-check"
+            ])
+        );
+        let paths = ["a.md".to_owned()];
+        assert_eq!(
+            command(&View::Files(&paths), true),
+            json!([
+                "/usr/local/bin/annorex",
+                "files",
+                "--target",
+                TARGET,
+                "--session",
+                "session:s",
+                "--no-update-check",
+                "--",
+                "a.md"
+            ])
+        );
     }
 
     #[test]

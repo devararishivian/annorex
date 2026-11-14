@@ -9,8 +9,9 @@
 -- and run `rex config reload`.
 --
 -- Options of setup{}:
---   bin        The annorex binary: a path, or a name that Rex looks up on its own PATH.
---              Default: found as described below.
+--   bin           The annorex binary: a path, or a name that Rex looks up on its own PATH.
+--                 Default: found as described below.
+--   update_check  false: the viewer does not check GitHub for a newer release. Default: true.
 --
 -- Rex runs actions with a short PATH (/usr/bin:/bin:/usr/sbin:/sbin), not the PATH of your shell.
 -- So without bin, the module uses the first of these files that exists:
@@ -26,12 +27,13 @@ local M = {}
 
 M.options = {
   bin = nil,
+  update_check = true,
 }
 
 local INSTALLED_BIN = nil -- set by annorex rex install
 
 -- The options that setup{} accepts.
-local KNOWN = { bin = true }
+local KNOWN = { bin = true, update_check = true }
 
 local function first_line(text)
   for line in (text or ""):gmatch("[^\n]+") do
@@ -100,6 +102,7 @@ local function open_view(ctx, view)
     "--target", ctx.block_id,
     "--session", ctx.session_id,
   }
+  if M.options.update_check == false then argv[#argv + 1] = "--no-update-check" end
   local result, err = rex.exec(argv, { timeout = 25 })
   if result == nil then fail(err) end
   if not result.ok then

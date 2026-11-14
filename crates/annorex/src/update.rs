@@ -192,6 +192,11 @@ pub fn command_text(channel: Channel) -> &'static str {
     }
 }
 
+/// The notice in the viewer when `latest` is newer.
+pub fn notice(latest: &str, channel: Channel) -> String {
+    format!("Annorex {latest} is available. Run: {}", hint(channel))
+}
+
 /// The short hint for a notice in the viewer.
 pub fn hint(channel: Channel) -> &'static str {
     match channel {
@@ -396,6 +401,15 @@ mod tests {
         assert_eq!(hint(Channel::Homebrew), "brew upgrade annorex");
         assert_eq!(hint(Channel::Installer), "annorex update");
         assert_eq!(hint(Channel::Cargo), "annorex update");
+    }
+
+    #[test]
+    fn the_notice_names_the_version_and_the_hint() {
+        assert_eq!(notice("9.9.9", Channel::Cargo), "Annorex 9.9.9 is available. Run: annorex update");
+        assert_eq!(
+            notice("9.9.9", Channel::Homebrew),
+            "Annorex 9.9.9 is available. Run: brew upgrade annorex"
+        );
     }
 
     #[test]

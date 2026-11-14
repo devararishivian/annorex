@@ -190,3 +190,22 @@ fn update_help_lists_check() {
     let help = text(&annorex(&["update", "--help"], &[], "").stdout);
     assert!(help.contains("--check"), "{help}");
 }
+
+#[test]
+fn the_viewer_commands_list_the_update_opt_out() {
+    for args in [
+        &["last", "--help"][..],
+        &["files", "--help"][..],
+        &["rex", "open", "last", "--help"][..],
+        &["rex", "open", "files", "--help"][..],
+    ] {
+        let help = text(&annorex(args, &[], "").stdout);
+        assert!(help.contains("--no-update-check"), "{args:?}: {help}");
+    }
+}
+
+#[test]
+fn the_module_has_the_update_check_option() {
+    assert!(annorex::install::MODULE_SOURCE.contains("update_check"));
+    assert!(annorex::install::MODULE_SOURCE.contains("--no-update-check"));
+}

@@ -1,11 +1,12 @@
 //! The terminal loop of the viewer and the `annorex last` command.
 
+use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use annorex_hosts::roots::Roots;
 use ratatui::DefaultTerminal;
@@ -27,6 +28,7 @@ use crate::rex::{Rex, RexError, Runner, SystemRunner};
 use crate::safety::{Safety, check};
 use crate::send::{SendResult, apply_result, save_after_send, send_review};
 use crate::ui::{AgentState, App, Effect, ReplySource, Screen, StartView, draw};
+use crate::update;
 
 /// The longest wait for an event before the loop draws again.
 pub const WAIT: Duration = Duration::from_millis(250);
@@ -152,13 +154,15 @@ pub enum Start {
 
 /// `annorex last` and `annorex files`: review the replies of the agent in `target` and the files of its
 /// work directory in this terminal. Every problem after the Rex discovery shows in the pane, so the user
-/// can read it.
+/// can read it. Unless `no_update_check` or `env` turns it off, a thread checks for a newer release.
 pub fn run_viewer(
     rex: &Rex<SystemRunner>,
     target: &str,
     start: &Start,
     config: &Config,
     store: Option<DraftStore>,
+    env: &impl Fn(&str) -> Option<OsString>,
+    no_update_check: bool,
 ) -> io::Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [SIGHUP, SIGTERM, SIGINT] {
@@ -178,6 +182,12 @@ pub fn run_viewer(
     };
     let mut app = viewer.start_app(start);
     app.set_state(viewer.state.clone());
+    if !no_update_check
+        && !update::disabled(env)
+        && let Some(notices) = spawn_update_check(env)
+    {
+        app.start_update_check(notices);
+    }
     let (sender, updates) = mpsc::channel();
     let watcher = Rex::new(rex.bin.clone(), rex.session.clone(), SystemRunner);
     let pane = target.to_owned();
@@ -196,6 +206,30 @@ pub fn run_viewer(
     restore_terminal();
     hand_back_focus(rex, target);
     result
+}
+
+/// Check for a newer release on a thread, so the viewer never waits. The thread sends the notice only
+/// when a newer release exists. A failure sends nothing. `None` when there is no place for the cache.
+fn spawn_update_check(env: &impl Fn(&str) -> Option<OsString>) -> Option<Receiver<String>> {
+    let path = update::cache_path(env)?;
+    // The thread cannot borrow `env`: keep the variables that the receipt of the installer needs.
+    let vars: Vec<(&str, Option<OsString>)> =
+        ["XDG_CONFIG_HOME", "HOME"].into_iter().map(|name| (name, env(name))).collect();
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else { return };
+        let Some(latest) = update::cached_latest(&path, now.as_secs(), update::fetch_latest) else { return };
+        if !update::newer(env!("CARGO_PKG_VERSION"), &latest) {
+            return;
+        }
+        let prefix = update::receipt_prefix(|name| {
+            vars.iter().find(|(key, _)| *key == name).and_then(|(_, value)| value.clone())
+        });
+        let channel = std::env::current_exe()
+            .map_or(update::Channel::Cargo, |exe| update::channel(&exe, prefix.as_deref()));
+        let _ = sender.send(update::notice(&latest, channel));
+    });
+    Some(receiver)
 }
 
 /// True while the keyboard enhancement flags of this process are on in the terminal.
@@ -548,7 +582,9 @@ impl<R: Runner> Viewer<'_, R> {
         if matches!(app.screen, Screen::Error(_)) {
             // The start found no agent or no directory. Look again.
             let start = self.start.clone();
-            *app = self.start_app(&start);
+            let mut fresh = self.start_app(&start);
+            fresh.keep_update_check(app);
+            *app = fresh;
             app.set_state(self.state.clone());
             return;
         }

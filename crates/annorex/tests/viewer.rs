@@ -572,3 +572,15 @@ fn error_screen_hint_click_quits_with_a_rebound_quit_key() {
     };
     assert_eq!(app.handle_mouse(down), Effect::Quit);
 }
+
+#[test]
+fn snapshot_update_notice_80x24() {
+    let mut app = viewer();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    sender.send("Annorex 9.9.9 is available. Run: annorex update".to_owned()).expect("send");
+    app.start_update_check(receiver);
+    assert!(app.poll_background());
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.contains("Annorex 9.9.9 is available. Run: annorex update"), "{screen}");
+    insta::assert_snapshot!(screen);
+}

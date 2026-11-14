@@ -313,6 +313,10 @@ pub struct App {
     replies_token: Option<std::sync::Arc<()>>,
     /// True when the agent has a reply that the viewer has not read.
     new_reply: bool,
+    /// The notice of a newer release, from the thread of the update check.
+    update_rx: Option<std::sync::mpsc::Receiver<String>>,
+    /// The notice of a newer release. It shows last in the banner.
+    update_notice: Option<String>,
 }
 
 impl App {
@@ -385,6 +389,8 @@ impl App {
             replies_rx: None,
             replies_token: None,
             new_reply: false,
+            update_rx: None,
+            update_notice: None,
         };
         if !replies.is_empty() {
             app.replies = replies;
@@ -607,6 +613,17 @@ impl App {
         self.replies_token = Some(token);
     }
 
+    /// Take the notice of a newer release from the thread of the update check.
+    pub fn start_update_check(&mut self, rx: std::sync::mpsc::Receiver<String>) {
+        self.update_rx = Some(rx);
+    }
+
+    /// Keep the update check of `old` when this app replaces it.
+    pub(crate) fn keep_update_check(&mut self, old: &mut App) {
+        self.update_rx = old.update_rx.take();
+        self.update_notice = old.update_notice.take();
+    }
+
     /// Stop watching for new replies.
     pub fn stop_reply_poll(&mut self) {
         self.replies_rx = None;
@@ -654,6 +671,10 @@ impl App {
             self.file_changed(&change);
             changed = true;
         }
+        while let Some(notice) = self.update_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.update_notice = Some(notice);
+            changed = true;
+        }
         changed
     }
 
@@ -677,12 +698,13 @@ impl App {
         }
     }
 
-    /// The banner for the file on the screen, when it changed on disk.
+    /// The banner: the file on the screen changed on disk, the agent has news, and a newer release exists.
     pub(crate) fn banner(&self) -> Option<String> {
-        match (self.file_banner(), self.agent_banner()) {
-            (Some(file), Some(agent)) => Some(format!("{file}  |  {agent}")),
-            (file, agent) => file.or(agent),
-        }
+        let parts: Vec<String> = [self.file_banner(), self.agent_banner(), self.update_notice.clone()]
+            .into_iter()
+            .flatten()
+            .collect();
+        (!parts.is_empty()).then(|| parts.join("  |  "))
     }
 
     /// The banner for new files that the agent changed, until the user opens the tree.
@@ -2502,4 +2524,57 @@ pub(crate) fn match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
         }
     }
     out
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "tests assert by panicking")]
+mod tests {
+    use super::*;
+    use crate::ui::{AgentState, Screen};
+
+    const NOTICE: &str = "Annorex 9.9.9 is available. Run: annorex update";
+
+    fn app() -> App {
+        let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
+        App::new(state, Screen::Viewer, Vec::new(), &Config::default())
+    }
+
+    fn notice_sent(app: &mut App) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender.send(NOTICE.to_owned()).expect("send");
+        app.start_update_check(receiver);
+        assert!(app.poll_background(), "the notice changes the screen");
+    }
+
+    #[test]
+    fn the_update_notice_shows_in_the_banner() {
+        let mut app = app();
+        assert_eq!(app.banner(), None);
+        notice_sent(&mut app);
+        assert_eq!(app.banner().as_deref(), Some(NOTICE));
+    }
+
+    #[test]
+    fn the_update_notice_comes_last_after_the_file_banner() {
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(dir.path().join("a.txt"), "alpha\n").expect("write");
+        let mut app = app().with_root(dir.path().to_path_buf());
+        app.open_file(crate::files::load(dir.path(), Path::new("a.txt")).expect("load"));
+        std::fs::write(dir.path().join("a.txt"), "changed\n").expect("change");
+        app.file_changed(&Change { path: PathBuf::from("a.txt"), kind: ChangeKind::Modified });
+        notice_sent(&mut app);
+        assert_eq!(
+            app.banner().as_deref(),
+            Some(format!("a.txt changed on disk. Press r to read it again.  |  {NOTICE}").as_str())
+        );
+    }
+
+    #[test]
+    fn a_new_app_keeps_the_update_check_of_the_old_app() {
+        let mut old = app();
+        notice_sent(&mut old);
+        let mut fresh = app();
+        fresh.keep_update_check(&mut old);
+        assert_eq!(fresh.banner().as_deref(), Some(NOTICE));
+    }
 }

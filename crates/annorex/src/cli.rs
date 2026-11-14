@@ -74,6 +74,9 @@ enum Command {
         /// The Rex session of the target. The default is `$REX_SESSION`.
         #[arg(long)]
         session: Option<String>,
+        /// Do not check for a newer release.
+        #[arg(long)]
+        no_update_check: bool,
     },
     /// Review the files of the work directory of the agent in a pane. `annorex rex open files` runs
     /// it in a new pane.
@@ -84,6 +87,9 @@ enum Command {
         /// The Rex session of the target. The default is `$REX_SESSION`.
         #[arg(long)]
         session: Option<String>,
+        /// Do not check for a newer release.
+        #[arg(long)]
+        no_update_check: bool,
         /// Files to open at the start, relative to the work directory of the agent.
         paths: Vec<PathBuf>,
     },
@@ -125,6 +131,9 @@ enum OpenView {
         /// The Rex session of the target. The default is `$REX_SESSION`.
         #[arg(long)]
         session: Option<String>,
+        /// Do not check for a newer release.
+        #[arg(long)]
+        no_update_check: bool,
     },
     /// The viewer of the files. If it is open for the target, focus it.
     Files {
@@ -134,6 +143,9 @@ enum OpenView {
         /// The Rex session of the target. The default is `$REX_SESSION`.
         #[arg(long)]
         session: Option<String>,
+        /// Do not check for a newer release.
+        #[arg(long)]
+        no_update_check: bool,
         /// Files to open at the start.
         paths: Vec<PathBuf>,
     },
@@ -165,16 +177,22 @@ pub fn run(
             let mode = if paste_only { DeliveryMode::PasteOnly } else { DeliveryMode::Send };
             send(&env, &target, session, mode, stdin, out, err)
         }
-        Command::Last { target, session } => last(&env, &target, session),
-        Command::Files { target, session, paths } => files(&env, &target, session, paths),
+        Command::Last { target, session, no_update_check } => {
+            viewer(&env, &target, session, &Start::Last, no_update_check)
+        }
+        Command::Files { target, session, no_update_check, paths } => {
+            viewer(&env, &target, session, &Start::Files(paths), no_update_check)
+        }
         Command::Update { check } => update(&env, check, out, err),
         Command::Rex { command: RexCommand::Install { dir } } => rex_install(&env, dir, out),
-        Command::Rex { command: RexCommand::Open { view: OpenView::Last { target, session } } } => {
-            rex_open(&env, &View::Last, &target, session, out)
-        }
-        Command::Rex { command: RexCommand::Open { view: OpenView::Files { target, session, paths } } } => {
+        Command::Rex {
+            command: RexCommand::Open { view: OpenView::Last { target, session, no_update_check } },
+        } => rex_open(&env, &View::Last, &target, session, no_update_check, out),
+        Command::Rex {
+            command: RexCommand::Open { view: OpenView::Files { target, session, no_update_check, paths } },
+        } => {
             let paths: Vec<String> = paths.iter().map(|path| path.to_string_lossy().into_owned()).collect();
-            rex_open(&env, &View::Files(&paths), &target, session, out)
+            rex_open(&env, &View::Files(&paths), &target, session, no_update_check, out)
         }
     };
     match result {
@@ -367,31 +385,18 @@ pub fn report_sent(out: &mut impl Write, err: &mut impl Write, word: &str) -> i3
     EXIT_OK
 }
 
-fn last(
+/// `annorex last` and `annorex files`.
+fn viewer(
     env: &impl Fn(&str) -> Option<OsString>,
     target: &str,
     session: Option<String>,
+    start: &Start,
+    no_update_check: bool,
 ) -> Result<i32, Failure> {
     let config = load_config(env)?;
     let store = drafts_dir(env).map(|dir| DraftStore { dir });
     let rex = Rex::discover_with(env, session)?;
-    run_viewer(&rex, target, &Start::Last, &config, store).map_err(|error| Failure {
-        code: EXIT_FAILURE,
-        message: format!("cannot use the terminal: {error}"),
-    })?;
-    Ok(EXIT_OK)
-}
-
-fn files(
-    env: &impl Fn(&str) -> Option<OsString>,
-    target: &str,
-    session: Option<String>,
-    paths: Vec<PathBuf>,
-) -> Result<i32, Failure> {
-    let config = load_config(env)?;
-    let store = drafts_dir(env).map(|dir| DraftStore { dir });
-    let rex = Rex::discover_with(env, session)?;
-    run_viewer(&rex, target, &Start::Files(paths), &config, store).map_err(|error| Failure {
+    run_viewer(&rex, target, start, &config, store, env, no_update_check).map_err(|error| Failure {
         code: EXIT_FAILURE,
         message: format!("cannot use the terminal: {error}"),
     })?;
@@ -473,6 +478,7 @@ fn rex_open(
     view: &View<'_>,
     target: &str,
     session: Option<String>,
+    no_update_check: bool,
     out: &mut impl Write,
 ) -> Result<i32, Failure> {
     // A bad config file stops here, with its message, and not later in a pane that closes at once.
@@ -482,11 +488,12 @@ fn rex_open(
         code: EXIT_FAILURE,
         message: format!("cannot find the path of the annorex binary: {error}"),
     })?;
-    let opened = open_view(&rex, view, target, rex.session(), &exe).map_err(|error| match error {
-        OpenError::Rex(rex) => Failure::from(rex),
-        OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
-        OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
-    })?;
+    let opened =
+        open_view(&rex, view, target, rex.session(), &exe, no_update_check).map_err(|error| match error {
+            OpenError::Rex(rex) => Failure::from(rex),
+            OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
+            OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
+        })?;
     let json = serde_json::to_string(&opened)
         .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
     writeln!(out, "{json}").map_err(|error| io_failure(&error))?;
