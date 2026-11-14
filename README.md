@@ -137,8 +137,6 @@ To turn off the check, use one of these ways:
 - Set `update_check = false` in `setup{}`.
 - Set the environment variable `ANNOREX_NO_UPDATE_CHECK=1`.
 
-The Homebrew formula builds Annorex from source with the check turned off.
-
 ## Annotate the last reply
 
 1. Focus the pane of Claude Code, Pi, or OpenCode.

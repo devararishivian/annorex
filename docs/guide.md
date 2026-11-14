@@ -159,7 +159,8 @@ To turn off the check, use one of these ways:
 - Set `update_check = false` in `setup{}`. See [Lua options](#lua-options).
 - Set the environment variable `ANNOREX_NO_UPDATE_CHECK=1`.
 
-The Homebrew source formula builds Annorex with the check turned off.
+The source formula in the repository, `packaging/homebrew/annorex.rb`, builds Annorex with the check turned off. It is
+prepared for homebrew-core. The tap formula `devararishivian/tap/annorex` keeps the check.
 
 ## Lua options
 
@@ -664,8 +665,8 @@ Exit codes:
 - A sideways swipe hides the Rex sidebar. Turn off the Rex setting "Use a gesture to toggle the sidebar".
 - A drag does not select text for Rex copy. Annorex uses the mouse, so a drag selects text in Annorex. Annorex has no
   key that copies the selected text. `Y` copies the notes. Each note contains its quoted text.
-- Annorex does not find the agent in a pane that started the agent with `exec` from a login shell. This works from
-  version 0.2.0. Update Annorex.
+- Annorex does not find the agent in a pane that started the agent with `exec` from a login shell. Version 0.1.0 has
+  this fault. Update to version 0.2.0 or later.
 - "pane too small". Make the window larger than 40 columns and 10 rows.
 
 ## Known limits

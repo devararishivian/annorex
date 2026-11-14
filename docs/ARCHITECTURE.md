@@ -1,7 +1,7 @@
 # Architecture
 
-> Current state: all parts in the table below are built. The CI workflow and the release workflow exist. No release
-> has run yet.
+> Current state: all parts in the table below are built. The CI workflow and the release workflow exist. Version
+> 0.1.0 is released.
 
 ## Overview
 
@@ -52,8 +52,8 @@ Annorex has two parts:
 | UI                 | Built | ratatui screens: the document with the header (the send button) and a footer for each mode, the centered boxes (reply list and finder), the session picker, the help screen, and errors. The same screens work in a second mode for files: the tree, the fuzzy find, and the change banner. Plain text files have a line number gutter. Markdown has none. A resize keeps the top line.                                                                                                      |
 | Terminal loop      | Built | `annorex last` and `annorex files`. Waits a maximum of 250 ms for an event, applies all queued events, and draws one time. A mouse press after an earlier event of the same batch first draws, so the click uses the new hit map. A batch of only pointer moves draws nothing. Stops on `q`, on SIGHUP, SIGTERM, or SIGINT, or when the terminal input ends. Reads the agent state every 2 seconds on a thread.                                                                              |
 | Commands           | Built | `annorex probe`, `annorex deliver`, `annorex last`, `annorex files`, `annorex update`, `annorex rex install`, `annorex rex open last`, and `annorex rex open files`.                                                                                                                                                                                                                                                                                                                                           |
-| Update check       | Built | `update.rs`. Asks `/usr/bin/curl` for `GET https://api.github.com/repos/devararishivian/annorex/releases/latest` at most once each 24 hours, in the background. Keeps the result in `update-check.json` in the state folder. A failure is cached and shows nothing. Finds the install channel (Homebrew, shell installer, or cargo). Gives the banner hint, and the plan of `annorex update`. Off with `update_check = false`, `ANNOREX_NO_UPDATE_CHECK=1`, or the build variable `ANNOREX_DISABLE_UPDATE_CHECK`. |
-| Module refresh     | Built | At each `annorex rex open`, replaces `annorex.lua` when its version differs. Replaces only a file with the module marker. Stores the stable Homebrew `bin` path, not the `Cellar` path. Then asks Rex to reload the configuration after a delay, so the reload does not run inside the action. A failed reload leaves a marker, and the next open shows `run: rex config reload`. |
+| Update check       | Built | `update.rs`. Asks `/usr/bin/curl` for `GET https://api.github.com/repos/devararishivian/annorex/releases/latest`. It runs in the background, at most once each 24 hours. It keeps the result in `update-check.json` in the state folder. A failed check is cached and shows nothing. It finds the install channel: Homebrew, shell installer, or cargo. It gives the banner hint and the plan of `annorex update`. Three switches turn it off: `update_check = false`, `ANNOREX_NO_UPDATE_CHECK=1`, and the build variable `ANNOREX_DISABLE_UPDATE_CHECK`. |
+| Module refresh     | Built | At each `annorex rex open`, replaces `annorex.lua` when its version differs. It replaces only a file with the module marker. The module stores the stable Homebrew `bin` path, not the `Cellar` path. Then it asks Rex to reload the configuration after a delay. The delay keeps the reload out of the running action. A failed reload leaves a marker. The next open then shows `run: rex config reload`. |
 | Configuration      | Built | Reads `config.toml` (`enter_delay_ms`, `labels`, `changes_turns`, and `[keys]`). Rejects an unknown key. A bad file gives exit code 64.                                                                                                                                                                                                                                                                                                                                                      |
 | Keys               | Built | Maps each key to an action. Fixed keys cannot be bound. Rejects a key that two actions use.                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Review             | Built | Keeps notes (looks good, comment, remove, replace) on source byte ranges. Each note has a send time. Exports the notes as Markdown with a fence longer than any backtick run in the quote. For many documents, the export has one section for each: the replies first, then the files in the order of opening.                                                                                                                                                                               |
@@ -86,13 +86,14 @@ Annorex has two parts:
   on a macOS runner with Rust 1.99.1. It runs `cargo fmt`, `cargo clippy` with warnings as errors, `cargo test`, and
   `cargo deny check licenses sources bans`. `deny.toml` lists the allowed licenses and sources. It also runs
   `cargo deny check advisories`. A new advisory gives a warning, not a failure.
-- Release (`.github/workflows/release.yml` and `dist-workspace.toml`, configured, not run yet). cargo-dist 0.34.0
+- Release (`.github/workflows/release.yml` and `dist-workspace.toml`, built). cargo-dist 0.34.0
   makes the workflow. A tag with a version number, for example `v0.1.0`, starts it. It builds the binary for
   `aarch64-apple-darwin` and `x86_64-apple-darwin` and puts the archives on a GitHub release. On a pull request, the
   workflow only makes the release plan and publishes nothing.
-- Installers of the release (configured, not run yet). A shell installer puts the binary in `$CARGO_HOME/bin`, else in
+- Installers of the release (built). A shell installer puts the binary in `$CARGO_HOME/bin`, else in
   `~/.cargo/bin`. A Homebrew formula goes to the tap `devararishivian/homebrew-tap` and puts the binary in the
   Homebrew `bin` directory. The Lua module finds the binary in both places.
 - Source formula (`packaging/homebrew/annorex.rb`, built). It builds Annorex from the source archive of a tag with
   `cargo`, with the update check turned off. CI checks it with `brew style`.
-- Until the first release, the only install method is `cargo install` from the source.
+- Install methods: the shell installer, the Homebrew tap formula `devararishivian/tap/annorex`, and `cargo install` from the
+  source.
