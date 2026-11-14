@@ -745,7 +745,11 @@ impl<'a> Builder<'a> {
                     self.push(&text, self.text_style(), &range);
                 }
             }
-            Event::Code(text) => self.push(&text, SpanStyle { code: true, ..self.text_style() }, &range),
+            Event::Code(text) => {
+                let inner = code_inner(self.source, &range);
+                let range = if self.source.get(inner.clone()) == Some(&*text) { inner } else { range };
+                self.push(&text, SpanStyle { code: true, ..self.text_style() }, &range);
+            }
             Event::Html(text) => self.push_lines(&text, &range),
             Event::InlineHtml(text)
             | Event::InlineMath(text)
@@ -802,11 +806,7 @@ impl<'a> Builder<'a> {
             }
             Event::Code(text) if !text.is_empty() => {
                 if let Some(cell) = table.cells.last_mut() {
-                    // The range of the event includes the backticks. The text is between them.
-                    let ticks = source
-                        .get(range.clone())
-                        .map_or(0, |raw| raw.chars().take_while(|&c| c == '`').count());
-                    let inner = range.start + ticks..range.end.saturating_sub(ticks);
+                    let inner = code_inner(source, range);
                     cell.push(piece(text, range, Some(inner)));
                 }
             }
@@ -910,6 +910,12 @@ impl<'a> Builder<'a> {
         }
         (self.lines, self.blocks, self.tables)
     }
+}
+
+/// The range of an inline code event without its backticks.
+fn code_inner(source: &str, range: &Range<usize>) -> Range<usize> {
+    let ticks = source.get(range.clone()).map_or(0, |raw| raw.chars().take_while(|&c| c == '`').count());
+    range.start + ticks..range.end.saturating_sub(ticks)
 }
 
 #[cfg(test)]
@@ -1162,6 +1168,15 @@ mod tests {
         assert_eq!(plains(&doc), ["- item"]);
         assert_eq!(doc.stops(0).len(), 4);
         assert_eq!(doc.locate(doc.stops(0)[0]), (0, 2));
+    }
+
+    #[test]
+    fn inline_code_has_a_stop_for_each_char() {
+        let doc = Doc::parse("a `code` b\n");
+        let stops = doc.stops(0);
+        for offset in [3, 4, 5, 6] {
+            assert!(stops.contains(&offset), "{offset} missing in {stops:?}");
+        }
     }
 
     fn kinds(doc: &Doc) -> Vec<BlockKind> {
