@@ -1,211 +1,195 @@
 # Annorex
 
-Annorex is a review tool for coding agents in the [Rex](https://www.superlogical.com/rex) terminal. You read the
-replies and the files of an agent. You annotate the text. Then Annorex sends your notes back to the agent. It works with
-Claude Code, Pi, and OpenCode on macOS.
+Annotate the replies and files of a coding agent in a [Rex](https://www.superlogical.com/rex) pane, then send your
+notes back to the agent.
 
-> **Status: pre-release, private.** The review of replies and files works. Annorex is not published yet.
+[![CI][ci-badge]][ci]
+[![License: MIT][license-badge]](LICENSE)
+[![Platform: macOS][platform-badge]](#install)
 
-## Requirements
+[ci-badge]: https://github.com/devararishivian/annorex/actions/workflows/ci.yml/badge.svg
+[ci]: https://github.com/devararishivian/annorex/actions/workflows/ci.yml
+[license-badge]: https://img.shields.io/badge/license-MIT-blue.svg
+[platform-badge]: https://img.shields.io/badge/platform-macOS-lightgrey.svg
 
-- Rex on macOS (Apple silicon)
-- Claude Code, Pi 1.5.0 or later, or OpenCode 2.x
-- Rust 1.99 or later, to build from source
+![Annorex shows a reply of a coding agent with notes in place](docs/assets/annorex-review.png)
+
+Annorex works with Claude Code, Pi, and OpenCode in Rex on macOS. It opens over the window of the agent. You select
+the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
+
+> Status: pre-release. No release exists yet. Install Annorex from source with `cargo`.
+
+## Why
+
+A reply of a coding agent is often long. In the chat box of the agent, it is hard to point at one line of that reply.
+You copy the text, add your comment, and repeat this for each point.
+
+Annorex lets you mark the exact text instead. Each note quotes its text, so the agent knows which part you mean. Notes
+on many replies and files go to the agent in one message. Annorex keeps your notes on disk until the agent gets them.
 
 ## Install
 
+You need these items:
+
+- Rex on macOS (Apple silicon).
+- Claude Code, Pi 1.5.0 or later, or OpenCode 2.x.
+- Rust 1.99 or later, to build from source.
+
+Build and install the `annorex` binary with `cargo`:
+
 ```sh
-cargo install --path crates/annorex
-annorex rex install
+cargo install --git https://github.com/devararishivian/annorex --locked annorex
 ```
 
-`annorex rex install` writes the Lua module `annorex.lua` beside the `init.lua` of Rex. It does not change `init.lua`.
-Then add these lines to `init.lua`:
+`cargo` puts the binary in `$CARGO_HOME/bin`, else in `~/.cargo/bin`. For more install options, read
+[Install](docs/guide.md#install) in the guide.
 
-```lua
-require("annorex").setup{}
-rex.bind("cmd+shift+a", "annorex_last")
-rex.bind("cmd+shift+f", "annorex_files")
-```
+## Set up Rex
 
-Run `rex config reload`.
+Rex has no plugin system. It has custom actions in its Lua configuration file `init.lua`. Annorex adds two actions.
 
-Rex runs actions with a short `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), not the `PATH` of your shell. So the module
-looks for the binary itself. It uses the first file that exists:
+1. Write the Lua module `annorex.lua` beside the `init.lua` of Rex:
 
-1. The binary that ran `annorex rex install`. The command prints this path after `Rex starts:`.
-2. `$CARGO_HOME/bin/annorex`, else `~/.cargo/bin/annorex`.
-3. `/opt/homebrew/bin/annorex`, then `/usr/local/bin/annorex`.
-4. `~/.local/bin/annorex`.
+   ```sh
+   annorex rex install
+   ```
 
-If the binary is in a different place, give its path:
+   The command does not change `init.lua`. It prints the path of the binary that Rex starts, after `Rex starts:`.
+2. Add these lines to `init.lua`:
+
+   ```lua
+   require("annorex").setup{}
+   rex.bind("cmd+shift+a", "annorex_last")
+   rex.bind("cmd+shift+f", "annorex_files")
+   ```
+
+3. Run `rex config reload`.
+
+The action `annorex_last` opens the last reply. The action `annorex_files` opens the files of the work directory of
+the agent. The command palette shows them as "Annorex: review the last reply" and "Annorex: review files".
+
+## Annotate the last reply
+
+1. Focus the pane of Claude Code, Pi, or OpenCode.
+2. Press `cmd+shift+a`. Annorex opens over the full window of the agent.
+3. If the agent has two or more replies, choose one in the list and press `enter`. The newest reply is selected first.
+   The list holds the 25 newest replies. Press `p` later to open the list again.
+4. Press `j` or `k` to choose a block, or click one. A block is a paragraph, a list item, a heading, a code block, or a
+   table.
+5. Press `o` to mark the block as good, `c` to comment, `d` to mark it for removal, or `s` to replace it.
+6. For `c` and `s`, type the note in the note box and press `enter`. `o` and `d` save at once and need no text.
+
+To annotate a part of a block, press `v` and move the cursor to select text. This is text mode. Press `v` again to end
+the selection and show the action bar. The action bar has the four note types. You can also drag the mouse over text.
+
+## Annotate files
+
+![Annorex shows the file tree on the left and a file with notes on the right](docs/assets/annorex-files.png)
+
+1. Focus the pane of the agent.
+2. Press `cmd+shift+f`. Annorex opens with the file tree of the work directory of the agent.
+3. Choose a file in the tree and press `enter`. Or press `ctrl+p` and type a part of its name.
+4. Annotate the file with the same keys as a reply.
+5. Open more files in the same way. Press `[` or `]` to go to the previous or the next open file.
+
+The tree puts the files that the agent changed since your last prompt at the top, marked with `*`. When the agent
+changes an open file, a banner shows. Press `r` to read the file again. Your notes move with their text.
+
+## Send the notes to the agent
+
+![Annorex shows the notes and the send button before a send to the agent](docs/assets/annorex-send.png)
+
+Press `S`, or click the send button `[ Send N → agent ▸ ]` in the header. One message holds the notes on all replies
+and files. A send gives only the notes that Annorex did not send before.
+
+Before it sends, Annorex makes sure that the agent can take the message:
+
+- A supported agent runs in the pane.
+- The agent reported its state to Rex.
+- The agent shows no dialog, for example a permission prompt.
+- The pane of the agent turned on bracketed paste.
+
+Then Annorex pastes the notes into the input box of the agent and presses Enter. An idle agent starts to work on the
+notes. When the agent is busy, Claude Code queues the message. Pi and OpenCode use it to steer the current task. The
+send button shows `queued` or `steers` while the agent works.
+
+After a successful send, Annorex closes. The sent notes leave the draft on disk, and Annorex deletes an empty draft.
+If the send fails, Annorex stays open, keeps your notes, and shows the reason in the footer. If a dialog opens after
+the paste, Annorex does not press Enter. Answer the dialog, then press Enter in the agent pane.
+
+Press `P` to paste the notes without Enter. Press `Y` to copy the notes. Annorex saves your notes after each change.
+When you close Annorex, it keeps the notes that you did not send.
+
+## Keys
+
+Press `?` in Annorex to see all keys. This table gives the main keys.
+
+| Key                 | Function                                                                  |
+|---------------------|---------------------------------------------------------------------------|
+| `j` / `k`           | Go to the next or the previous block                                      |
+| `g` / `G`           | Go to the first or the last block (the start or the end in text mode)     |
+| `ctrl+d` / `ctrl+u` | Scroll half a page                                                        |
+| `v` / `V`           | Select characters or lines (text mode)                                    |
+| `h` `l` `w` `b`     | Move by character or by word (text mode)                                  |
+| `enter`             | Show the action bar for the focused block                                 |
+| `o` / `d`           | Note: looks good or remove. Both save at once and need no text            |
+| `c` / `s`           | Note: comment or replace. Both open the note box                          |
+| `e` / `x`           | Edit or delete the note at the focus                                      |
+| `S`                 | Send the notes to the agent                                               |
+| `M`                 | Write a general note, then send                                           |
+| `P`                 | Paste the notes into the agent input box, without Enter                   |
+| `Y`                 | Copy the notes                                                            |
+| `X`                 | Discard the notes of the document on the screen (asks first)              |
+| `a`                 | Move the focus to the list of notes                                       |
+| `p`                 | Open or close the list of replies and open files                          |
+| `T`                 | Hide or show the file tree                                                |
+| `tab`               | Move the focus between the tree, the document, and the card rail          |
+| `ctrl+p`            | Find a file by name                                                       |
+| `[` / `]`           | Show the previous or the next open file                                   |
+| `W`                 | Close the file on the screen                                              |
+| `/`                 | Find text                                                                 |
+| `r`                 | Read the transcript and the files again                                   |
+| `?`                 | Show the help screen                                                      |
+| `esc`               | Step back one level. With nothing selected or focused, quit               |
+| `q`                 | Quit when no note box or text input is open. With unsent notes, ask first |
+
+You can change the keys in the configuration file `config.toml`. The guide lists all keys, the mouse actions, the action
+names, and the configuration file: [docs/guide.md](docs/guide.md).
+
+## Lua options
+
+`setup{}` takes one option, `bin`. It gives the path of the `annorex` binary:
 
 ```lua
 require("annorex").setup{ bin = "/path/to/annorex" }
 ```
 
-## Quickstart
+Rex runs actions with a short `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), not the `PATH` of your shell. Without `bin`,
+the module uses the first of these files that exists:
 
-1. Focus the pane of Claude Code, Pi, or OpenCode.
-2. Press `cmd+shift+a` to review the last reply. Press `cmd+shift+f` to review the files.
-3. At the start, no block has the focus. Press `j` or `k` to choose a block, or click one. A block is a paragraph, a
-   list item, a heading, a code block, or a table. Press `enter` to show the action bar above the block.
-4. Press `o` to mark the block as good, `c` to comment, `d` to mark it for removal, or `s` to replace it. `o` and `d`
-   save at once and need no text. The other keys open a note box. Type the note. Press `enter`.
-5. To annotate a part of a block, press `v` and move to select text. This is text mode. Press `v` again to end the
-   selection and show the action bar. Press `esc` twice to go back to block mode.
-6. Press `S` to send all notes to the agent. After a good send, Annorex closes. If the send fails, Annorex stays open
-   and the footer shows the reason.
-7. To leave Annorex, press `q` when no note box or text input is open. Press `esc` when nothing is selected or focused. With unsent notes, Annorex
-   asks first.
+1. The binary that ran `annorex rex install`.
+2. `$CARGO_HOME/bin/annorex`, else `~/.cargo/bin/annorex`.
+3. `/opt/homebrew/bin/annorex`, then `/usr/local/bin/annorex`.
+4. `~/.local/bin/annorex`.
 
-In the viewer, press `?` to see all keys.
+The guide tells more about `bin` and the error messages of the module: [Lua options](docs/guide.md#lua-options).
 
-## The action bar and notes
+## How it works
 
-The block with the focus has a bar in the left margin. The action bar shows after you finish a selection: when a drag
-ends, after a double click, after `enter` on the focused block, and after the `v` or `V` that ends a selection. The
-action bar shows on the row above the selection. When there is no row above, it shows on the row below. It moves left
-to stay in the document. After `enter`, an item acts on the whole block. The bar has four items: `o ✓ looks good`, `c 💬 comment`,
-`d ✕ remove`, and `s ⇄ replace`. Each item has the icon and the color of its note card. A click on an item does the same as its key.
-
-The keys `o`, `c`, `d`, and `s` also work without the action bar. They act on the focused block or on the selection. A
-focus move with `j` or `k` does not show the action bar. Each key in the document closes it, except `?`. A mouse click
-outside the action bar closes it. The mouse wheel does not close it.
-
-The keys `o` and `d` save the note at once. No note box opens, and the action bar closes. The export of `o looks good`
-has the text `Looks good:` and the quote. A looks good note and a remove note have no text. Press `e` on them to see the
-message `Looks good has no text.` or `Remove has no text.`
-
-Notes show in place. The text under a note keeps its color. Looks good has a green underline. A comment has a yellow
-underline. Remove is red and crossed out. Replace is magenta and crossed out. A bar in the note color shows in the left
-margin of each row under a note. The cyan focus bar shows on the focused block instead. At 120 columns or more, each note has a card in a rail on the right. Where
-there is no rail, a dot in the note color marks the note in the right margin. This holds also in one column, when
-the document is 21 columns or more wide.
-
-The note box opens as a floating box near the block. It has the buttons `save` and `cancel`. `enter` saves. `shift+enter`
-adds a new line when the terminal supports it. Otherwise, use `ctrl+j`. The box shows 8 rows of text and scrolls with
-`PgUp`, `PgDn`, or the mouse wheel.
-
-Press `e` to edit and `x` to delete the note at the focus. A card of a looks good note or a remove note has only the `x remove` button.
-
-## Layout
-
-The layout follows the size of the window.
-
-- 120 columns or more: the file tree on the left (when it shows), the document, and the card rail on the right.
-- 100 to 119 columns: the file tree on the left (when it shows) and the document. There is no card rail.
-- Less than 100 columns, or less than 16 rows: one column. The tree and the lists open over the document.
-- Less than 40 columns or less than 10 rows: Annorex shows "pane too small".
-
-The file viewer starts with the tree. With no path, it shows no document until you open a file. The last-reply viewer starts without it. It opens the reply list first when the agent has two or more replies. Press `enter` to open a reply, or `esc` to quit. `T` shows and hides the tree in both viewers.
-
-The header shows the agent and the send button `[ Send N → agent ▸ ]`. The footer shows the keys of the current view and mode.
-The list of replies (`p`), the file finder (`ctrl+p`), and the session picker open in a box in the center.
-
-## Key cheatsheet
-
-| Key                  | Function                                                                 |
-|----------------------|--------------------------------------------------------------------------|
-| `j` / `k`            | Block mode: go to the next or the previous block                         |
-| `g` / `G`            | Go to the first or the last block (the start or the end in text mode)    |
-| `ctrl+d` / `ctrl+u`  | Scroll half a page                                                       |
-| `v` / `V`            | Select characters or lines (text mode)                                   |
-| `h` `l` `w` `b`      | Move by character or by word (text mode)                                 |
-| `o` / `d`            | Note: looks good or remove. Both save at once and need no text           |
-| `c` / `s`            | Note: comment or replace. Both open the note box                         |
-| `e` / `x`            | Edit or delete the note at the focus                                     |
-| `esc`                | Step back: clear the selection, leave text mode, then remove the focus. With nothing selected, quit |
-| `q`                  | Quit when no note box or text input is open. Unsent notes: asks first    |
-| `S`                  | Send the notes to the agent                                              |
-| `M`                  | Write a general note, then send                                          |
-| `P`                  | Paste the notes into the agent input box, without Enter                  |
-| `Y`                  | Copy the notes                                                           |
-| `X`                  | Discard the notes of the document on the screen (asks first)             |
-| `a`                  | Move the focus to the list of notes                                      |
-| `p`                  | Open or close the list of replies and open files                         |
-| `T`                  | Hide or show the file tree                                               |
-| `tab`                | Move the focus between the tree, the document, and the card rail         |
-| `ctrl+p`             | Find a file by name                                                      |
-| `[` / `]`            | Show the previous or the next open file                                  |
-| `W`                  | Close the file on the screen                                             |
-| `/`                  | Find text                                                                |
-| `r`                  | Read the transcript and the files again                                  |
-| `?`                  | Show the help screen                                                     |
-| `q`                  | Close the viewer                                                         |
-
-For all keys and for the config file, see [docs/guide.md](docs/guide.md).
-
-## Mouse
-
-Each mouse action has a key. The help screen does not list the mouse actions.
-
-| Where                      | Action                   | Result                                                                                                     |
-|----------------------------|--------------------------|------------------------------------------------------------------------------------------------------------|
-| List, document, tree, rail | Wheel                    | Scroll the part under the pointer by 3 lines                                                               |
-| Note box                   | Wheel                    | Scroll the text of the box                                                                                 |
-| Block                      | Click                    | Focus the block                                                                                            |
-| Document text              | Drag                     | Select characters (text mode). The action bar shows at the release                                         |
-| Document text              | Double click             | Select the word and show the action bar                                                                    |
-| Action bar item            | Click                    | Add that note. Looks good and remove save at once. The others open the note box                            |
-| Card                       | Click                    | Focus the note and its block. The card shows `edit` and `remove`. Looks good and remove have `remove` only |
-| Header `Send` button       | Click                    | The same as `S`                                                                                            |
-| Tree row                   | Click                    | Open the file, or open or close the directory                                                              |
-| Row of a list or picker    | Click                    | Open that reply, session, or file                                                                          |
-| Footer hint                | Click                    | Do that action                                                                                             |
-| Note box                   | Click `save` or `cancel` | Save or cancel. A click outside the note box does nothing                                                  |
-| Help screen                | Click                    | Close the help screen                                                                                      |
-
-## Theme
-
-Annorex uses the 16 ANSI colors of the terminal. It follows the Rex theme, light or dark. Rex gives programs no way to
-read the theme. Notes have no background fill. They use an underline and a bar in the left margin.
-
-## Troubleshooting
-
-- **The key does nothing.** Check that the setup lines are in `init.lua`. A shortcut that you set in the Rex app wins
-  over `init.lua`. Remove it or use another key. Then run `rex config reload`.
-- **"annorex was not found; tried: ...".** The binary is not in one of the places that Install lists. Run
-  `annorex rex install` again with the binary that you use. Or set the path with `bin =` in the `setup` call.
-- **"the annorex binary ... from setup{} does not exist".** Correct the path in `bin =`, or remove `bin =`.
-- **"the rex binary was not found".** Annorex looks for `rex` in `REX_BIN_DIR`, then in the Rex process that started
-  it, then in `PATH`. Update Annorex.
-- **"Not sent: the agent has not reported its state yet".** The agent is starting, or it shows a prompt that it does
-  not report, for example the Claude Code trust prompt. Wait until the agent is ready. Then press `S` again. Annorex
-  keeps your notes.
-- **"The agent shows a dialog".** Answer the dialog in the agent pane. Then press `S` again.
-- **"Pasted, but Enter was held".** A dialog opened after the paste. Answer it. Then press Enter in the agent pane.
-- **`alt+enter` does not add a new line.** Set the Option key to send Alt in the Rex settings. Or use `ctrl+j`.
-- **The pane zoom ends when Annorex opens.** This is Rex behavior. Rex does not restore the zoom when you close the
-  viewer.
-- **A sideways swipe hides the Rex sidebar.** Turn off the Rex setting "Use a gesture to toggle the sidebar".
-- **Drag does not select text for Rex copy.** Annorex uses the mouse, so a drag selects text in Annorex. Annorex has no
-  key that copies the selected text. `Y` copies the notes. Each note contains its quoted text.
-- **"pane too small".** Make the window larger than 40 columns and 10 rows.
-
-## How Annorex differs from plannotator-tui
-
-plannotator-tui is a separate project with its own scope. It now has its own Rex integration, "Rex Annotate" (keys
-Shift+Cmd+O). These points describe Annorex only:
-
-- Annorex works only in Rex. It opens one full-window layer in each Rex session and never opens a second one.
-- Annorex shows the replies and the files of the agent in one viewer. One send gives the notes on all of them to the
-  agent in one message.
-- The file tree puts the files that the agent changed at the top.
-- Annorex keeps a draft of each note on disk. A closed viewer or a restart does not lose a note that you did not send.
-  After the agent got the message, Annorex deletes the sent notes from the disk.
-- Annorex shows a banner when a file changes on disk while you annotate it.
-- Annorex checks the agent before it sends. It refuses when the agent shows a dialog or has not reported its state. It
-  keeps your notes.
+Annorex has two parts. A small Lua module adds the actions to Rex. A Rust binary does all other work. The binary
+reads the transcript of the agent from disk, shows it with Ratatui, and talks to Rex only through the `rex` command.
+It never opens a network port. For the full design, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation
 
-- [docs/guide.md](docs/guide.md): all keys, layouts, commands, and settings.
+- [docs/guide.md](docs/guide.md): all keys, layouts, commands, configuration, and troubleshooting.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the design of Annorex.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to build, test, and send a pull request.
 
-## License
+## Give Annorex a star
 
-MIT.
+If Annorex helps you review the work of your agent, give the repository a star on GitHub. A star helps other Rex users
+find Annorex. It also tells us that the work is useful.
 
 ## Acknowledgements
 
@@ -220,8 +204,18 @@ These projects are the base of the Annorex idea:
 - [memex](https://github.com/nicosuave/memex) by Nico Ritschel. memex shows how to connect a Rust tool to Rex.
 
 The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the
-rule of one
-review layer for each session. The check of the Lua module with `rex config check` on a scratch copy, and the lookup of
-the window of the agent pane with `session.describe_block`, follow the same ideas in plannotator-tui.
+rule of one review layer for each session. Two more ideas come from plannotator-tui. Annorex tests the Lua module with
+`rex config check` on a scratch copy. It finds the window of the agent pane with `session.describe_block`.
+
+Annorex is built with these projects:
+
+- [Ratatui](https://github.com/ratatui/ratatui) draws the terminal interface.
+- [crossterm](https://github.com/crossterm-rs/crossterm) reads the keys and the mouse and controls the terminal.
+- [Rex](https://www.superlogical.com/rex) is the terminal that Annorex runs in. Its custom actions and its `rex`
+  command make the integration possible.
 
 Annorex is an independent project. It has no connection to these projects, and they do not endorse it.
+
+## License
+
+Annorex is available under the MIT License. See [LICENSE](LICENSE).
