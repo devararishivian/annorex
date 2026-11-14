@@ -1,0 +1,35 @@
+# Checks for licenses, sources, bans, and advisories. Run with `cargo deny check`.
+# Keys follow cargo-deny 0.20.2.
+
+[graph]
+# Check the macOS targets that the project supports.
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+
+[advisories]
+ignore = []
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "Unlicense",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "WTFPL",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
