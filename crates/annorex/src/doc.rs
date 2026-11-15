@@ -116,8 +116,8 @@ pub enum BlockKind {
 pub struct Block {
     pub kind: BlockKind,
     /// The bytes in `Doc::source` of the block, without the final line feed. For a list item it
-    /// is the item's own text only: from its first character of text to its last, without the
-    /// list marker, without a task marker, and without a nested list.
+    /// is the item's own source only: from its first character to its last, with the inline
+    /// delimiters, without the list marker, without a task marker, and without a nested list.
     pub range: Range<usize>,
     /// The `DocLine` indexes of the block. The first and the last line are not blank.
     pub lines: Range<usize>,
@@ -386,6 +386,14 @@ struct OpenBlock {
     range: Range<usize>,
     /// The `DocLine` index of the first line of the block.
     first_line: usize,
+    /// The source extent of the events in a list item block, with the inline delimiters.
+    extent: Option<Range<usize>>,
+}
+
+impl OpenBlock {
+    fn new(kind: BlockKind, depth: usize, range: &Range<usize>, first_line: usize) -> Self {
+        Self { kind, depth, range: range.clone(), first_line, extent: None }
+    }
 }
 
 struct Pending {
@@ -419,8 +427,6 @@ struct Builder<'a> {
     depth: usize,
     /// The depths of the open list items that open blocks: the items outside any quote.
     items: Vec<usize>,
-    /// The source starts of the task list markers. They are not part of the own text of an item.
-    task_markers: Vec<usize>,
 }
 
 impl<'a> Builder<'a> {
@@ -440,7 +446,6 @@ impl<'a> Builder<'a> {
             open: None,
             depth: 0,
             items: Vec::new(),
-            task_markers: Vec::new(),
         }
     }
 
@@ -454,7 +459,16 @@ impl<'a> Builder<'a> {
             Some(&item) => (BlockKind::ListItem, item),
             None => (kind, depth),
         };
-        self.open = Some(OpenBlock { kind, depth, range: range.clone(), first_line: self.lines.len() });
+        self.open = Some(OpenBlock::new(kind, depth, range, self.lines.len()));
+    }
+
+    /// Widen the extent of an open list item block with the source range of an event.
+    fn widen(&mut self, range: &Range<usize>) {
+        let Some(open) = self.open.as_mut().filter(|open| open.kind == BlockKind::ListItem) else { return };
+        open.extent = Some(match open.extent.take() {
+            Some(all) => all.start.min(range.start)..all.end.max(range.end),
+            None => range.clone(),
+        });
     }
 
     /// Close the open block. Its lines end at its last line that is not blank.
@@ -464,24 +478,14 @@ impl<'a> Builder<'a> {
         let own = self.lines.get(open.first_line..).unwrap_or_default();
         let Some(count) = own.iter().rposition(|line| !line.is_blank()).map(|last| last + 1) else { return };
         let lines = open.first_line..open.first_line + count;
-        let range = if open.kind == BlockKind::ListItem {
-            // The item's own text: the source of its text spans, without the list and task markers.
-            let mut sources = own
-                .iter()
-                .take(count)
-                .flat_map(|line| line.spans.iter())
-                .filter_map(|span| span.source.as_ref().map(|source| source.range.clone()))
-                .filter(|range| !self.task_markers.contains(&range.start));
-            match sources.next() {
-                Some(first) => {
-                    sources.fold(first, |all, range| all.start.min(range.start)..all.end.max(range.end))
-                }
-                None => open.range.start..open.range.start,
-            }
+        let whole = if open.kind == BlockKind::ListItem {
+            // The item's own source: its events without the list and task markers.
+            open.extent.unwrap_or(open.range.start..open.range.start)
         } else {
-            let text = self.source.get(open.range.clone()).unwrap_or_default();
-            open.range.start..open.range.start + text.trim_end_matches(['\n', '\r']).len()
+            open.range.clone()
         };
+        let text = self.source.get(whole.clone()).unwrap_or_default();
+        let range = whole.start..whole.start + text.trim_end_matches(['\n', '\r']).len();
         self.blocks.push(Block { kind: open.kind, range, lines });
     }
 
@@ -516,12 +520,8 @@ impl<'a> Builder<'a> {
                 if self.quote_depth == 0 {
                     self.close_block();
                     self.items.push(self.depth);
-                    self.open = Some(OpenBlock {
-                        kind: BlockKind::ListItem,
-                        depth: self.depth,
-                        range: range.clone(),
-                        first_line: self.lines.len(),
-                    });
+                    self.open =
+                        Some(OpenBlock::new(BlockKind::ListItem, self.depth, range, self.lines.len()));
                 }
                 return;
             }
@@ -632,7 +632,15 @@ impl<'a> Builder<'a> {
 
     /// Handle one Markdown event: the display first, and the block boundaries around it.
     fn event(&mut self, event: Event<'_>, range: Range<usize>) {
+        // The item and list events and the task list marker are not part of the own text of an item.
+        let own = !matches!(
+            event,
+            Event::Start(Tag::Item | Tag::List(_))
+                | Event::End(TagEnd::Item | TagEnd::List(_))
+                | Event::TaskListMarker(_)
+        );
         if self.table.is_some() && self.table_event(&event, &range) {
+            self.widen(&range);
             return;
         }
         let end = match &event {
@@ -643,7 +651,11 @@ impl<'a> Builder<'a> {
             Event::End(tag) => Some(*tag),
             _ => None,
         };
-        self.display_event(event, range);
+        // A block can open in the display step (a rule), so widen after it and before the end.
+        self.display_event(event, range.clone());
+        if own {
+            self.widen(&range);
+        }
         if let Some(tag) = end {
             self.end_block(tag);
         }
@@ -768,7 +780,6 @@ impl<'a> Builder<'a> {
                 self.blank();
             }
             Event::TaskListMarker(done) => {
-                self.task_markers.push(range.start);
                 self.push(if done { "[x] " } else { "[ ] " }, self.text_style(), &range);
             }
         }
@@ -1292,6 +1303,39 @@ mod tests {
         assert_eq!(kinds(&doc), [BlockKind::ListItem; 2]);
         assert_eq!(&doc.source[doc.blocks[0].range.clone()], "x");
         assert_eq!(&doc.source[doc.blocks[1].range.clone()], "done");
+    }
+
+    #[test]
+    fn loose_task_item_range_has_no_task_marker() {
+        let doc = Doc::parse("- [ ] x\n\n- [x] **done**\n");
+        assert_eq!(kinds(&doc), [BlockKind::ListItem; 2]);
+        assert_eq!(&doc.source[doc.blocks[0].range.clone()], "x");
+        assert_eq!(&doc.source[doc.blocks[1].range.clone()], "**done**");
+    }
+
+    #[test]
+    fn list_item_range_includes_leading_bold() {
+        let doc = Doc::parse("- **Bold** and **more**.\n");
+        assert_eq!(&doc.source[doc.blocks[0].range.clone()], "**Bold** and **more**.");
+    }
+
+    #[test]
+    fn list_item_range_includes_leading_emphasis() {
+        let doc = Doc::parse("- *a*\n");
+        assert_eq!(&doc.source[doc.blocks[0].range.clone()], "*a*");
+    }
+
+    #[test]
+    fn list_item_with_heading_and_fence_is_whole() {
+        let doc = Doc::parse(
+            "1. **Satu** x\n\n   ### 3. Contoh\n\n   **Python:**\n   ```python\n   x=1\n   ```\n\ntail\n",
+        );
+        assert_eq!(kinds(&doc), [BlockKind::ListItem, BlockKind::Paragraph]);
+        let text = &doc.source[doc.blocks[0].range.clone()];
+        assert!(text.starts_with("**Satu**"), "{text:?}");
+        assert!(text.ends_with("```"), "{text:?}");
+        assert!(text.contains("### 3. Contoh"), "{text:?}");
+        assert!(text.contains("```python\n   x=1\n   ```"), "{text:?}");
     }
 
     #[test]

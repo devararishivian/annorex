@@ -437,6 +437,16 @@ mod tests {
     }
 
     #[test]
+    fn looks_good_on_item_quotes_whole_source() {
+        let source = "- **Bold** and **more**.\n";
+        let doc = crate::doc::Doc::parse(source);
+        let mut review = Review::default();
+        review.add(&doc.source, Kind::LooksGood, doc.blocks[0].range.clone());
+        let text = export_one("", &doc.source, &review);
+        assert!(text.contains("Looks good: \"**Bold** and **more**.\"\n"), "{text}");
+    }
+
+    #[test]
     fn multi_line_note_quotes_each_line() {
         let source = "alpha\n";
         let mut review = Review::default();
