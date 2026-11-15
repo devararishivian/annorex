@@ -520,6 +520,22 @@ mod tests {
         assert!(!fake.called().contains(&"new_layer".to_owned()));
     }
 
+    // An old and a new layer in one session: the oldest viewer stays and the other one closes.
+    #[test]
+    fn an_old_and_a_new_label_in_one_session_keep_the_oldest_viewer() {
+        let (old_id, new_id) =
+            ("block:01a1b000-0000-7000-8000-0000000000a1", "block:01a1b000-0000-7000-8000-0000000000b2");
+        let both = view(&[
+            ("layer:old", None, &[(old_id, &format!("annorex:{TARGET}"))]),
+            ("layer:new", None, &[(new_id, &pane_label(TARGET))]),
+        ]);
+        let fake = Fake::claude(vec![both]);
+        let opened = open(&fake).expect("open");
+        assert!(opened.focused_existing);
+        assert_eq!(opened.block_id, old_id);
+        assert!(!fake.called().contains(&"new_layer".to_owned()));
+    }
+
     // S7: a minimized layer comes back, raised and focused.
     #[test]
     fn a_minimized_layer_is_restored_with_focus() {

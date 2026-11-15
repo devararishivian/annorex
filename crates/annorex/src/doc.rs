@@ -385,7 +385,7 @@ struct OpenBlock {
     kind: BlockKind,
     /// The container depth at which the block closes.
     depth: usize,
-    /// The source range of the container that opened the block. A list item does not use it.
+    /// The source range of the container that opened the block. A list item uses only its start, for an empty block.
     range: Range<usize>,
     /// The `DocLine` index of the first line of the block.
     first_line: usize,
@@ -994,7 +994,7 @@ const LATEX_SYMBOLS: &[(&str, &str)] = &[
     ("ldots", "…"),
 ];
 
-/// Show a LaTeX text as plain text. Known commands become symbols. Braces go away.
+/// Show a LaTeX text as plain text. Known commands become symbols. Braces go away, but `\{` and `\}` stay.
 /// An unknown command keeps its name without the backslash. `\text` shows only its argument.
 /// `^` and `_` stay as they are.
 fn latex_text(src: &str) -> String {
@@ -1009,9 +1009,11 @@ fn latex_text(src: &str) -> String {
                     name.push(next);
                 }
                 if name.is_empty() {
-                    // A backslash before a symbol, such as `\$`: keep the symbol. At the end: nothing.
-                    if let Some(next) = chars.next_if(|next| !matches!(next, '{' | '}')) {
-                        out.push(next);
+                    // A backslash before a symbol, such as `\$` or `\{`: keep the symbol. `\\` is a space. At the end: nothing.
+                    match chars.next() {
+                        Some('\\') => out.push(' '),
+                        Some(next) => out.push(next),
+                        None => {}
                     }
                 } else if let Some((_, symbol)) = LATEX_SYMBOLS.iter().find(|(command, _)| *command == name) {
                     out.push_str(symbol);
@@ -1309,6 +1311,76 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains('→')), "{lines:?}");
         let widths: Vec<usize> = lines.iter().filter(|l| !l.is_empty()).map(|l| l.width()).collect();
         assert!(widths.windows(2).all(|w| w[0] == w[1]), "{lines:?}");
+    }
+
+    #[test]
+    fn escaped_braces_stay_in_math() {
+        assert_eq!(plains(&Doc::parse("$\\{x\\}$\n")), ["{x}"]);
+        assert_eq!(plains(&Doc::parse("$\\{\\frac{a}{b}\\}$\n")), ["{fracab}"]);
+        assert_eq!(plains(&Doc::parse("$x^{\\{n\\}}$\n")), ["x^{n}"]);
+    }
+
+    #[test]
+    fn double_backslash_in_math_is_a_space() {
+        assert_eq!(plains(&Doc::parse("$a\\\\b$\n")), ["a b"]);
+        assert_eq!(plains(&Doc::parse("$a \\\\ b$\n")), ["a b"]);
+    }
+
+    #[test]
+    fn nested_braces_in_math_go_away() {
+        assert_eq!(plains(&Doc::parse("$x^{a_{i}}$\n")), ["x^a_i"]);
+    }
+
+    fn item_sources(doc: &Doc) -> Vec<&str> {
+        doc.blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::ListItem)
+            .map(|b| &doc.source[b.range.clone()])
+            .collect()
+    }
+
+    #[test]
+    fn list_item_range_covers_a_start_with_code() {
+        let doc = Doc::parse("- `a` and b\n- c\n");
+        assert_eq!(item_sources(&doc), ["`a` and b", "c"]);
+    }
+
+    #[test]
+    fn list_item_range_covers_a_start_with_a_link() {
+        let doc = Doc::parse("- [go](http://a.b) now\n- c\n");
+        assert_eq!(item_sources(&doc), ["[go](http://a.b) now", "c"]);
+    }
+
+    #[test]
+    fn list_item_range_covers_an_end_with_bold() {
+        let doc = Doc::parse("- see **this**\n- c\n");
+        assert_eq!(item_sources(&doc), ["see **this**", "c"]);
+    }
+
+    #[test]
+    fn a_table_in_a_list_item_stays_in_the_item_range() {
+        let doc = Doc::parse("- item\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n\n- next\n");
+        let items = item_sources(&doc);
+        assert_eq!(items.len(), 2, "{items:?}");
+        assert!(items[0].starts_with("item") && items[0].ends_with("| 1 | 2 |"), "{items:?}");
+        assert_eq!(items[1], "next");
+        for block in &doc.blocks {
+            assert!(!doc.lines[block.lines.clone()].iter().any(DocLine::is_blank), "{block:?}");
+        }
+    }
+
+    #[test]
+    fn loose_ordered_list_keeps_blank_line() {
+        let doc = Doc::parse("1. a\n\n2. b\n");
+        assert_eq!(plains(&doc), ["1. a", "", "2. b"]);
+        assert_eq!(item_sources(&doc), ["a", "b"]);
+    }
+
+    #[test]
+    fn loose_task_list_keeps_blank_line() {
+        let doc = Doc::parse("- [x] a\n\n- [ ] b\n");
+        assert_eq!(plains(&doc), ["- [x] a", "", "- [ ] b"]);
+        assert_eq!(item_sources(&doc), ["a", "b"]);
     }
 
     #[test]
