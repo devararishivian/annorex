@@ -1788,6 +1788,39 @@ mod tests {
         assert_eq!(super::editor_top(area, 3, None), 7, "no range: the bottom of the area");
     }
 
+    /// A document of 40 short blocks, scrolled to the bottom, with `keys` typed on the last block.
+    fn last_block_with(keys: &str) -> (App, ratatui::buffer::Buffer) {
+        let text = (0..40).map(|i| format!("p{i}")).collect::<Vec<_>>().join("\n\n");
+        let (mut app, _) = drawn(&text, "");
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        for c in keys.chars() {
+            let code = if c == '\n' { KeyCode::Enter } else { KeyCode::Char(c) };
+            app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(120, 24)).expect("terminal");
+        terminal.draw(|frame| draw(frame, &mut app)).expect("draw");
+        let screen = terminal.backend().buffer().clone();
+        (app, screen)
+    }
+
+    #[test]
+    fn the_card_of_the_last_block_shows_at_the_bottom() {
+        let (app, screen) = last_block_with("o");
+        let (x, y) = find(&screen, "looks good");
+        assert!(matches!(app.hits.at(x, y + 1), Some(Hit::Card(_))), "the moved card is clickable");
+    }
+
+    #[test]
+    fn a_tall_card_of_the_last_block_shows_at_the_bottom() {
+        let comment = "a long comment that wraps over several rows of the card in the margin of the screen";
+        let (app, screen) = last_block_with(&format!("c{comment}\n"));
+        let (x, y) = find(&screen, "comment");
+        let body = (y + 1..24).find(|&row| app.hits.at(x, row) == Some(&Hit::Card(1)));
+        assert!(body.is_some(), "the card is in the hit map");
+        let (_, last) = find(&screen, "screen");
+        assert!(last > y + 1, "the body takes more than one row");
+    }
+
     #[test]
     fn the_strip_goes_above_the_last_block_at_the_bottom() {
         let text = (0..40).map(|i| format!("p{i}")).collect::<Vec<_>>().join("\n\n");

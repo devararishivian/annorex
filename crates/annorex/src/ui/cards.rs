@@ -106,21 +106,32 @@ fn body_of(annotation: &Annotation) -> &str {
 }
 
 /// Stack the cards in the rail. Each note gives its id, the row that it wants as an offset from
-/// the top of the rail, and its height. The cards keep their order. A card that overlaps the card
-/// above it goes down. A card that does not fit above the end of the rail is left out, and the
-/// cards after it too.
+/// the top of the rail, and its height. The cards keep their order and do not overlap. A card
+/// that overlaps the card above it goes down. A card that would pass the end of the rail goes up
+/// until it ends at the rail end or at the card below it. A card that then starts above the top
+/// of the rail does not fit. It is left out.
 pub(super) fn layout_cards(notes: &[(u64, u16, u16)], rail: Rect) -> Vec<(u64, Rect)> {
-    let mut out = Vec::new();
-    let mut free = rail.y;
+    // First pass: go down. Use i32 so that the move up in the second pass cannot wrap.
+    let mut free = i32::from(rail.y);
+    let mut placed: Vec<(u64, i32, u16)> = Vec::new();
     for &(id, wanted, height) in notes {
-        let y = rail.y.saturating_add(wanted).max(free);
-        if y.saturating_add(height) > rail.bottom() {
-            break;
-        }
-        out.push((id, Rect::new(rail.x, y, rail.width, height)));
-        free = y + height;
+        let y = (i32::from(rail.y) + i32::from(wanted)).max(free);
+        placed.push((id, y, height));
+        free = y + i32::from(height);
     }
-    out
+    // Second pass: go up from the last card, so that no card passes the end of the rail.
+    let mut limit = i32::from(rail.bottom());
+    for (_, y, height) in placed.iter_mut().rev() {
+        *y = (*y).min(limit - i32::from(*height));
+        limit = *y;
+    }
+    placed
+        .into_iter()
+        .filter(|&(_, y, _)| y >= i32::from(rail.y))
+        .filter_map(|(id, y, height)| {
+            Some((id, Rect::new(rail.x, u16::try_from(y).ok()?, rail.width, height)))
+        })
+        .collect()
 }
 
 /// Wrap `text` to `width` columns at the spaces. A word longer than the width breaks anywhere.
@@ -361,12 +372,31 @@ mod tests {
     }
 
     #[test]
-    fn cards_below_the_rail_end_are_left_out() {
+    fn cards_that_cannot_fit_after_the_move_are_left_out() {
         let rail = Rect::new(80, 5, 34, 10);
         let cards = layout_cards(&[(1, 0, 4), (2, 1, 4), (3, 2, 4)], rail);
         let ys: Vec<(u64, u16)> = cards.iter().map(|(id, rect)| (*id, rect.y)).collect();
-        assert_eq!(ys, vec![(1, 5), (2, 9)], "the third card starts below the rail end");
-        assert_eq!(cards.get(1).map(|(_, rect)| rect.bottom()), Some(13));
+        assert_eq!(ys, vec![(2, 7), (3, 11)], "the first card would start above the rail");
+        assert_eq!(cards.last().map(|(_, rect)| rect.bottom()), Some(15));
+    }
+
+    #[test]
+    fn last_card_moves_up_to_fit() {
+        let rail = Rect::new(80, 0, 34, 10);
+        let cards = layout_cards(&[(1, 6, 3), (2, 9, 3)], rail);
+        let rects: Vec<Rect> = cards.iter().map(|(_, rect)| *rect).collect();
+        assert_eq!(rects.len(), 2);
+        let (first, last) =
+            (rects.first().copied().unwrap_or_default(), rects.last().copied().unwrap_or_default());
+        assert_eq!(last.bottom(), 10);
+        assert_eq!(first.y, 4, "the first card moves up to make room");
+        assert!(first.bottom() <= last.y);
+    }
+
+    #[test]
+    fn a_card_taller_than_the_rail_is_left_out() {
+        let rail = Rect::new(80, 2, 34, 5);
+        assert_eq!(layout_cards(&[(1, 0, 8)], rail).len(), 0);
     }
 
     #[test]
