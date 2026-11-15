@@ -15,7 +15,7 @@ notes back to the agent.
 [license-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [platform-badge]: https://img.shields.io/badge/platform-macOS-lightgrey.svg
 
-![Annorex over a Claude Code reply in Rex, with notes beside the text that they quote](docs/assets/annorex-hero.png)
+![Annorex: mark up the reply of your coding agent, then send every note back in one message](docs/assets/annorex-banner.png)
 
 Annorex works with Claude Code, Pi, and OpenCode in Rex on macOS. It opens over the window of the agent. You select
 the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
@@ -25,24 +25,24 @@ the text that you want to change and write a note on it. One key sends all notes
 
 1. The agent finishes a reply in Rex.
 
-   ![Claude Code shows a reply with a summary, a table, a code example, and two open questions](docs/assets/annorex-flow-1-reply.png)
+   ![Claude Code shows a reply with lists, inline math, a table, a code example, and two open questions](docs/assets/annorex-flow-1-reply.png)
 
 2. Press `cmd+shift+a`. Annorex opens over the window of the agent. Select text with `v` and the cursor keys. The
    action bar shows the four note types.
 
-   ![Annorex shows a text selection in the reply and the action bar with the four note types](docs/assets/annorex-flow-2-select.png)
+   ![Annorex shows the inline math as text, a selection on it, and the action bar with the four note types](docs/assets/annorex-flow-2-select.png)
 
 3. Press `c`, write the comment in the note box, and press `enter`.
 
-   ![Annorex shows the note box under a list item, with a comment in it](docs/assets/annorex-flow-3-comment.png)
+   ![Annorex shows the note box on the last block, with a comment in it, and the cards of the other notes in the right margin](docs/assets/annorex-flow-3-comment.png)
 
 4. Press `T` to show the file tree. Open a file that the agent changed and write a note on it.
 
-   ![Annorex shows the file tree on the left and a file with a comment on the right](docs/assets/annorex-flow-4-files.png)
+   ![Annorex shows the file tree with the files that the agent changed, and a comment on a line of a file](docs/assets/annorex-flow-4-files.png)
 
 5. Press `S`. Annorex sends all notes in one message and closes. The agent works on the notes.
 
-   ![Claude Code shows its answer to the notes, with passing tests and the changed files](docs/assets/annorex-flow-5-result.png)
+   ![Claude Code shows the notes that it applied, the changed files, and the passing tests](docs/assets/annorex-flow-5-result.png)
 
 </details>
 
