@@ -1822,6 +1822,27 @@ mod tests {
     }
 
     #[test]
+    fn each_card_shows_its_own_note_when_an_early_card_is_left_out() {
+        // Ten notes, from the last block upward. The note `n{i}x` has the id `i + 1`.
+        let keys = (0..10).fold(String::new(), |keys, i| keys + &format!("cn{i}x\nk"));
+        let (app, screen) = last_block_with(&keys);
+        let rows: Vec<String> = (0..24)
+            .map(|y| (0..120).map(|x| screen.cell((x, y)).map_or(" ", |c| c.symbol())).collect())
+            .collect();
+        let mut shown = 0;
+        for i in 0..10_u64 {
+            let text = format!("n{i}x");
+            let found = rows.iter().enumerate().find_map(|(y, row)| row.find(&text).map(|x| (x, y)));
+            let Some((x, y)) = found else { continue };
+            shown += 1;
+            let (x, y) = (u16::try_from(x).expect("x"), u16::try_from(y).expect("y"));
+            assert_eq!(app.hits.at(x, y), Some(&Hit::Card(i + 1)), "the card with {text}");
+        }
+        assert!(shown >= 5, "cards show: {shown}");
+        assert!(shown < 10, "a card is left out: {shown}");
+    }
+
+    #[test]
     fn the_strip_goes_above_the_last_block_at_the_bottom() {
         let text = (0..40).map(|i| format!("p{i}")).collect::<Vec<_>>().join("\n\n");
         let (mut app, _) = drawn(&text, "");

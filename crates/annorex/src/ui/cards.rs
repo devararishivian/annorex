@@ -258,8 +258,12 @@ fn draw_cards(frame: &mut Frame, app: &mut App, rail: Rect) {
         .collect();
     let edit = app.config.keys.label(Action::Edit);
     let remove = app.config.keys.label(Action::Remove);
-    for ((id, rect), (shown, body)) in layout_cards(&wanted, cards).into_iter().zip(shown.iter().zip(&bodies))
-    {
+    for (id, rect) in layout_cards(&wanted, cards) {
+        // The layout can leave out cards at the start, so find the note of the card by its id.
+        let Some((shown, body)) = shown.iter().zip(&bodies).find(|(shown, _)| shown.annotation.id == id)
+        else {
+            continue;
+        };
         let annotation = &shown.annotation;
         let mut style = Style::new().fg(kind_color(annotation.kind));
         if shown.in_focus {
