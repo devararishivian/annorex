@@ -169,7 +169,10 @@ impl Doc {
         let line_starts = line_starts(&source);
         let (lines, blocks, tables) = {
             let mut builder = Builder::new(&source, &line_starts);
-            let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+            let options = Options::ENABLE_TABLES
+                | Options::ENABLE_STRIKETHROUGH
+                | Options::ENABLE_TASKLISTS
+                | Options::ENABLE_MATH;
             for (event, range) in Parser::new_ext(&source, options).into_offset_iter() {
                 builder.event(event, range);
             }
@@ -786,10 +789,14 @@ impl<'a> Builder<'a> {
                 self.push(&text, SpanStyle { code: true, ..self.text_style() }, &range);
             }
             Event::Html(text) => self.push_lines(&text, &range),
-            Event::InlineHtml(text)
-            | Event::InlineMath(text)
-            | Event::DisplayMath(text)
-            | Event::FootnoteReference(text) => self.push(&text, self.text_style(), &range),
+            Event::InlineMath(text) | Event::DisplayMath(text) => {
+                // The text is not the source, so the span is inexact: one stop for the whole `$...$`.
+                let shown = math_line(&text);
+                self.push(&shown, SpanStyle { emphasis: true, ..self.text_style() }, &range);
+            }
+            Event::InlineHtml(text) | Event::FootnoteReference(text) => {
+                self.push(&text, self.text_style(), &range);
+            }
             Event::SoftBreak => self.push(" ", self.text_style(), &range),
             Event::HardBreak => self.flush(),
             Event::Rule => {
@@ -836,6 +843,13 @@ impl<'a> Builder<'a> {
             Event::Text(text) | Event::InlineHtml(text) if !text.is_empty() => {
                 if let Some(cell) = table.cells.last_mut() {
                     cell.push(piece(text, range, None));
+                }
+            }
+            Event::InlineMath(text) | Event::DisplayMath(text) => {
+                if let Some(cell) = table.cells.last_mut() {
+                    let style = SpanStyle { emphasis: true, ..style };
+                    let source = Some(SpanSource { range: range.clone(), exact: false });
+                    cell.push(DocSpan { text: math_line(text), style, source });
                 }
             }
             Event::Code(text) if !text.is_empty() => {
@@ -950,6 +964,70 @@ impl<'a> Builder<'a> {
 fn code_inner(source: &str, range: &Range<usize>) -> Range<usize> {
     let ticks = source.get(range.clone()).map_or(0, |raw| raw.chars().take_while(|&c| c == '`').count());
     range.start + ticks..range.end.saturating_sub(ticks)
+}
+
+/// Common LaTeX commands and the symbol that shows for each.
+const LATEX_SYMBOLS: &[(&str, &str)] = &[
+    ("rightarrow", "→"),
+    ("to", "→"),
+    ("leftarrow", "←"),
+    ("Rightarrow", "⇒"),
+    ("Leftrightarrow", "⇔"),
+    ("leftrightarrow", "↔"),
+    ("times", "×"),
+    ("cdot", "·"),
+    ("leq", "≤"),
+    ("le", "≤"),
+    ("geq", "≥"),
+    ("ge", "≥"),
+    ("neq", "≠"),
+    ("approx", "≈"),
+    ("infty", "∞"),
+    ("pm", "±"),
+    ("sum", "Σ"),
+    ("pi", "π"),
+    ("alpha", "α"),
+    ("beta", "β"),
+    ("theta", "θ"),
+    ("lambda", "λ"),
+    ("mu", "μ"),
+    ("ldots", "…"),
+];
+
+/// Show a LaTeX text as plain text. Known commands become symbols. Braces go away.
+/// An unknown command keeps its name without the backslash. `\text` shows only its argument.
+/// `^` and `_` stay as they are.
+fn latex_text(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '{' | '}' => {}
+            '\\' => {
+                let mut name = String::new();
+                while let Some(next) = chars.next_if(char::is_ascii_alphabetic) {
+                    name.push(next);
+                }
+                if name.is_empty() {
+                    // A backslash before a symbol, such as `\$`: keep the symbol. At the end: nothing.
+                    if let Some(next) = chars.next_if(|next| !matches!(next, '{' | '}')) {
+                        out.push(next);
+                    }
+                } else if let Some((_, symbol)) = LATEX_SYMBOLS.iter().find(|(command, _)| *command == name) {
+                    out.push_str(symbol);
+                } else if name != "text" {
+                    out.push_str(&name);
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// The display of a math span on one line. Display math can hold line breaks.
+fn math_line(src: &str) -> String {
+    latex_text(src).split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -1192,6 +1270,75 @@ mod tests {
         assert_eq!(doc.stops(0), [4]);
         assert_eq!(doc.locate(4), (0, 0));
         assert_eq!(doc.char_end(4), 7);
+    }
+
+    #[test]
+    fn inline_math_shows_unicode() {
+        let doc = Doc::parse("katak $\\rightarrow$ dibalik dan $O(1)$\n");
+        assert_eq!(plains(&doc), ["katak → dibalik dan O(1)"]);
+    }
+
+    #[test]
+    fn math_span_keeps_source_offsets() {
+        let doc = Doc::parse("katak $\\rightarrow$ dibalik\n");
+        let open = doc.source.find('$').expect("dollar");
+        let close = doc.source.rfind('$').expect("dollar") + 1;
+        assert!(doc.stops(0).contains(&open));
+        assert_eq!(doc.stops(0).iter().filter(|s| (open..close).contains(s)).count(), 1);
+        assert_eq!(doc.char_end(open), close);
+    }
+
+    #[test]
+    fn money_stays_text() {
+        let doc = Doc::parse("Harga $5 dan $10 lalu\n");
+        assert_eq!(plains(&doc), ["Harga $5 dan $10 lalu"]);
+        let doc = Doc::parse("kode `$a$` di sini\n");
+        assert_eq!(plains(&doc), ["kode $a$ di sini"]);
+    }
+
+    #[test]
+    fn display_math_in_a_paragraph_is_one_line() {
+        let doc = Doc::parse("a $$ x\n= y $$ b\n");
+        assert_eq!(plains(&doc), ["a x = y b"]);
+    }
+
+    #[test]
+    fn math_in_a_table_cell_keeps_the_columns() {
+        let doc = Doc::parse("| a | b |\n|---|---|\n| $\\to$ | x |\n| yy | z |\n");
+        let lines = plains(&doc);
+        assert!(lines.iter().any(|l| l.contains('→')), "{lines:?}");
+        let widths: Vec<usize> = lines.iter().filter(|l| !l.is_empty()).map(|l| l.width()).collect();
+        assert!(widths.windows(2).all(|w| w[0] == w[1]), "{lines:?}");
+    }
+
+    #[test]
+    fn math_in_a_link_and_a_heading_works() {
+        let doc = Doc::parse("# T $\\alpha$\n\n[go $\\to$ x](http://a.b)\n");
+        let lines = plains(&doc);
+        assert!(lines.iter().any(|l| l.contains("T α")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("go → x")), "{lines:?}");
+    }
+
+    #[test]
+    fn odd_math_never_panics() {
+        for source in
+            ["$$\n", "$$$$\n", "a $x\\$ b\n", "$\\$\n", "$a{b$\n", "$}{$\n", "$é\\ü{😀}$\n", "$$\n\n$$\n"]
+        {
+            let _ = Doc::parse(source);
+        }
+    }
+
+    #[test]
+    fn latex_text_maps_symbols_and_strips_markup() {
+        assert_eq!(latex_text("\\rightarrow"), "→");
+        assert_eq!(latex_text("a \\le b \\leq c"), "a ≤ b ≤ c");
+        assert_eq!(latex_text("\\text{x}"), "x");
+        assert_eq!(latex_text("\\foo"), "foo");
+        assert_eq!(latex_text("n^2_i"), "n^2_i");
+        assert_eq!(latex_text("\\toto"), "toto");
+        assert_eq!(latex_text("a\\"), "a");
+        assert_eq!(latex_text(""), "");
+        assert_eq!(latex_text("{é}\\µ"), "éµ");
     }
 
     #[test]
