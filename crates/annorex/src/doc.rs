@@ -417,6 +417,8 @@ struct Builder<'a> {
     style: SpanStyle,
     /// The next number of each open list; `None` for a bullet list.
     lists: Vec<Option<u64>>,
+    /// For each open list: whether it is loose, and whether it has an item already.
+    loose: Vec<(bool, bool)>,
     item_marker: Option<String>,
     quote_depth: usize,
     table: Option<Table>,
@@ -438,6 +440,7 @@ impl<'a> Builder<'a> {
             pending: None,
             style: SpanStyle::default(),
             lists: Vec::new(),
+            loose: Vec::new(),
             item_marker: None,
             quote_depth: 0,
             table: None,
@@ -643,6 +646,13 @@ impl<'a> Builder<'a> {
             self.widen(&range);
             return;
         }
+        // A loose list keeps a blank line before its second and later items. The blank line comes
+        // first, so the block of the item starts after it.
+        if matches!(event, Event::Start(Tag::Item))
+            && self.loose.last().is_some_and(|&(loose, seen)| loose && seen)
+        {
+            self.blank();
+        }
         let end = match &event {
             Event::Start(tag) => {
                 self.start_block(tag, &range);
@@ -685,9 +695,13 @@ impl<'a> Builder<'a> {
                 Tag::List(start) => {
                     self.flush();
                     self.lists.push(start);
+                    self.loose.push((false, false));
                 }
                 Tag::Item => {
                     self.flush();
+                    if let Some(state) = self.loose.last_mut() {
+                        state.1 = true;
+                    }
                     let depth = self.lists.len().max(1);
                     let marker = match self.lists.last_mut() {
                         Some(Some(number)) => {
@@ -699,6 +713,14 @@ impl<'a> Builder<'a> {
                     };
                     self.item_marker = Some(format!("{}{marker}", "  ".repeat(depth - 1)));
                     self.begin(range.start);
+                }
+                Tag::Paragraph => {
+                    // A paragraph that starts directly in an item makes its list loose.
+                    if self.quote_depth == 0
+                        && let Some(state) = self.loose.last_mut()
+                    {
+                        state.0 = true;
+                    }
                 }
                 Tag::Emphasis => self.style.emphasis = true,
                 Tag::Strong => self.style.strong = true,
@@ -739,6 +761,7 @@ impl<'a> Builder<'a> {
                 TagEnd::List(_) => {
                     self.flush();
                     self.lists.pop();
+                    self.loose.pop();
                     if self.lists.is_empty() {
                         self.blank();
                     }
@@ -1047,6 +1070,22 @@ mod tests {
         assert_eq!(plains(&doc), ["1. a", "2. b", "  - c", "  - d"]);
         let numbers: Vec<usize> = doc.lines.iter().map(|line| line.line).collect();
         assert_eq!(numbers, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn loose_list_keeps_blank_line() {
+        let doc = Doc::parse("- Kata:\n  - a\n\n- Angka:\n  - c\n");
+        assert_eq!(plains(&doc), ["- Kata:", "  - a", "", "- Angka:", "  - c"]);
+        let starts: Vec<usize> =
+            doc.blocks.iter().filter(|b| b.kind == BlockKind::ListItem).map(|b| b.lines.start).collect();
+        assert_eq!(starts, [0, 1, 3, 4]);
+        assert!(doc.blocks.iter().all(|b| !doc.lines[b.lines.clone()].iter().any(DocLine::is_blank)));
+    }
+
+    #[test]
+    fn tight_list_has_no_blank_line() {
+        let doc = Doc::parse("- a\n- b\n");
+        assert_eq!(plains(&doc), ["- a", "- b"]);
     }
 
     #[test]
