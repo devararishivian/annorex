@@ -69,7 +69,7 @@ fn open(live: &Live, block: &str, wrapper: &Path) -> Result<Opened, String> {
 fn annorex_layers(rex: &Rex<SystemRunner>) -> Vec<String> {
     rex.view()
         .map(|view| {
-            view.locate(|block| block.label.starts_with("annorex"))
+            view.locate(|block| block.label.starts_with("Annorex review"))
                 .into_iter()
                 .map(|found| found.layer.layer_id.clone())
                 .collect()

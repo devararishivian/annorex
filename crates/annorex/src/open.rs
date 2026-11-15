@@ -12,8 +12,10 @@ use crate::rex::{
 /// The flavor of a new terminal block.
 pub const TERMINAL_FLAVOR: &str = "com.superlogical.terminal.shell";
 
-/// The label prefix of the viewer. The target agent block follows it.
-const LABEL_PREFIX: &str = "annorex:";
+/// The label prefix of the viewer. The target agent block follows it, so the id stays last.
+const LABEL_PREFIX: &str = "Annorex review · ";
+/// The label prefix of version 0.2.0. An open layer with it still counts as the one Annorex.
+const V0_2_PREFIX: &str = "annorex:";
 /// The label prefix of the file viewer of M3 to M5. An open layer with it still counts as the one Annorex.
 const OLD_FILES_PREFIX: &str = "annorex-files:";
 
@@ -45,7 +47,7 @@ impl View<'_> {
 
 /// The agent block of an Annorex label, or `None` for another label.
 fn parse_label(label: &str) -> Option<&str> {
-    label.strip_prefix(OLD_FILES_PREFIX).or_else(|| label.strip_prefix(LABEL_PREFIX))
+    [LABEL_PREFIX, V0_2_PREFIX, OLD_FILES_PREFIX].iter().find_map(|prefix| label.strip_prefix(prefix))
 }
 
 /// A label of Annorex has a block id after the prefix, so a label such as `annorex: notes` does not count.
@@ -423,7 +425,7 @@ mod tests {
         assert_eq!(request["focus"], true);
         let block = &request["layout"]["block"];
         assert_eq!(block["flavor"], TERMINAL_FLAVOR);
-        assert_eq!(block["label"], format!("annorex:{TARGET}"));
+        assert_eq!(block["label"], format!("Annorex review · {TARGET}"));
         assert_eq!(
             block["options"]["command"],
             json!(["/usr/local/bin/annorex", "last", "--target", TARGET, "--session", "session:s"])
@@ -495,6 +497,16 @@ mod tests {
         assert!(!fake.called().contains(&"new_layer".to_owned()));
         let fake = Fake::claude(vec![open_json]);
         assert!(open(&fake).expect("open").focused_existing);
+        assert!(!fake.called().contains(&"new_layer".to_owned()));
+    }
+
+    // An Annorex of v0.2.0 has the label `annorex:block:<id>`. It counts after the upgrade.
+    #[test]
+    fn a_layer_with_the_v0_2_label_counts_as_the_one_annorex() {
+        let old = view(&[("layer:a", None, &[("block:a", &format!("annorex:{TARGET}"))])]);
+        let fake = Fake::claude(vec![old]);
+        let opened = open(&fake).expect("open");
+        assert!(opened.focused_existing);
         assert!(!fake.called().contains(&"new_layer".to_owned()));
     }
 
@@ -657,10 +669,14 @@ mod tests {
 
     #[test]
     fn the_label_fits_the_rex_limit_and_the_old_files_label_is_still_read() {
-        assert_eq!(pane_label(TARGET).len(), 50);
+        assert_eq!(pane_label(TARGET), format!("Annorex review · {TARGET}"));
+        assert!(pane_label(TARGET).chars().count() <= 128);
+        assert!(pane_label(TARGET).ends_with(TARGET), "the id stays last");
         assert_eq!(parse_label(&pane_label(TARGET)), Some(TARGET));
+        assert_eq!(parse_label(&format!("annorex:{TARGET}")), Some(TARGET));
         assert_eq!(parse_label(&format!("annorex-files:{TARGET}")), Some(TARGET));
         assert_eq!(parse_label("claude"), None);
+        assert_eq!(parse_label("Annorex review · notes"), Some("notes"));
     }
 
     // S2: on quit, the viewer hands the focus to the agent. Without this, Rex picks a block of its own.
@@ -696,11 +712,13 @@ mod tests {
 
     #[test]
     fn a_label_that_only_starts_with_the_prefix_is_not_an_annorex() {
-        let user =
-            BlockInfo { block_id: "block:u".into(), label: "annorex: notes".into(), creator_name: None };
-        assert!(!is_annorex(&user));
-        let ours =
-            BlockInfo { block_id: "block:o".into(), label: format!("annorex:{TARGET}"), creator_name: None };
-        assert!(is_annorex(&ours));
+        for label in ["annorex: notes", "Annorex review · notes", "Annorex review", "my block:x"] {
+            let user = BlockInfo { block_id: "block:u".into(), label: label.into(), creator_name: None };
+            assert!(!is_annorex(&user), "{label}");
+        }
+        for label in [pane_label(TARGET), format!("annorex:{TARGET}"), format!("annorex-files:{TARGET}")] {
+            let ours = BlockInfo { block_id: "block:o".into(), label, creator_name: None };
+            assert!(is_annorex(&ours));
+        }
     }
 }
