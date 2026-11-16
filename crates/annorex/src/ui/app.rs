@@ -1257,7 +1257,7 @@ impl App {
     pub fn handle_paste(&mut self, text: &str) -> Effect {
         let Some(editor) = &mut self.editor else { return Effect::None };
         self.status = None;
-        editor.push_str(&sanitize(text));
+        editor.insert_str(&sanitize(text));
         Effect::SaveDraft
     }
 
@@ -2295,15 +2295,13 @@ impl App {
         } else {
             annotation.note.clone()
         };
-        self.editor = Some(Editor {
-            kind: annotation.kind,
-            range: annotation.range.clone(),
+        self.editor = Some(Editor::with_text(
+            annotation.kind,
+            annotation.range.clone(),
             text,
-            label: annotation.label.clone(),
-            scroll: None,
-            rows: 0,
-            general: false,
-        });
+            annotation.label.clone(),
+            false,
+        ));
         self.editing_id = Some(id);
         Effect::SaveDraft
     }

@@ -1,7 +1,7 @@
 # Third-party notices
 
 Annorex contains code from the projects below. Each vendored Rust file starts with a header that gives its origin and
-the changes for Annorex. A comment marks the adapted function in `wrap.rs` and the lint table in `Cargo.toml`. The
+the changes for Annorex. A comment marks the adapted functions in `wrap.rs` and `editor.rs` and the lint table in `Cargo.toml`. The
 test fixtures and `rustfmt.toml` have no header. This file lists them.
 
 ## plannotator-tui
@@ -20,6 +20,8 @@ test fixtures and `rustfmt.toml` have no header. This file lists them.
     - The test fixtures in `crates/annorex-hosts/tests/fixtures/` (from `crates/plannotator-tui-hosts/tests/`), except
       `claude-code-new-records.jsonl` and `pi-new-records.jsonl`
     - The function `wrap_table` in `crates/annorex/src/wrap.rs`: the column widths and the clip fallback
+    - The keys and the word rules of the note box in `crates/annorex/src/ui/editor.rs` (from
+      `crates/plannotator-tui/src/ui/compose.rs` at commit `e537abd`)
     - The lint table in the root `Cargo.toml` and the root `rustfmt.toml`
 - These files in `crates/annorex-hosts/` are Annorex code: `changes.rs`, `claude/changes.rs`, `pi_changes.rs`,
   `opencode_changes.rs`, `tests/display_name.rs`, `tests/fixtures/claude-code-new-records.jsonl`, and
