@@ -1031,7 +1031,8 @@ fn tab_cycles_tree_doc_rail() {
     press(&mut narrow, "j");
     let _ = render(&mut narrow, 80, 20);
     tab(&mut narrow);
-    assert!(render(&mut narrow, 80, 20).lines().last().unwrap_or_default().contains("j/k block"));
+    // The block footer: at 80 columns the note keys come first.
+    assert!(render(&mut narrow, 80, 20).lines().last().unwrap_or_default().contains("o c d s note"));
 }
 
 #[test]

@@ -159,14 +159,12 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
                 out
             }
             Mode::Block(_) => {
-                let mut out = vec![
-                    hint(Action::Down, format!("{up_down} block")),
-                    hint(Action::Comment, notes),
-                    plain("esc unselect"),
-                ];
+                let mut out = vec![hint(Action::Comment, notes)];
                 lists(&mut out);
-                // `esc unselect` and the send keys come right after the note keys, so a narrow footer
-                // keeps them.
+                // A narrow footer keeps the essential hints first: the note keys and the send keys. The
+                // moves and the other hints follow, in order of use.
+                out.insert(4.min(out.len()), hint(Action::Down, format!("{up_down} block")));
+                out.insert(5.min(out.len()), plain("esc unselect"));
                 out.insert(6.min(out.len()), hint(Action::Select, format!("{} text", k(Action::Select))));
                 out.insert(
                     7.min(out.len()),
@@ -187,13 +185,12 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
             }
             Mode::Text => {
                 let moves = [Action::Left, Action::Down, Action::Up, Action::Right].map(k).join("/");
-                let mut out = vec![
-                    hint(Action::Down, format!("{moves} move")),
-                    hint(Action::Select, format!("{} select", k(Action::Select))),
-                    hint(Action::Comment, notes),
-                    plain("esc unselect"),
-                ];
+                let mut out = vec![hint(Action::Comment, notes)];
                 lists(&mut out);
+                // The essential hints first, as in block mode.
+                out.insert(4.min(out.len()), hint(Action::Down, format!("{moves} move")));
+                out.insert(5.min(out.len()), hint(Action::Select, format!("{} select", k(Action::Select))));
+                out.insert(6.min(out.len()), plain("esc unselect"));
                 out
             }
         },

@@ -25,4 +25,4 @@ Annorex 9.9.9 is available. Run: annorex update
  so it wraps on a narrow pane.
    - check the logs
    - check the metrics
-block 1/49    j/k block · o c d s note · esc unselect · S send · ? help · q quit
+block 1/49            o c d s note · S send · P paste · Y copy · ? help · q quit

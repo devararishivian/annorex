@@ -448,7 +448,7 @@ fn footer_drops_hints_from_the_end_but_keeps_help() {
     let wide = footer_of(&mut app, 200);
     assert!(wide.contains("ctrl+p find"), "{wide}");
     let narrow = footer_of(&mut app, 60);
-    assert!(narrow.ends_with("? help · q quit") && narrow.contains("j/k block"), "{narrow}");
+    assert!(narrow.ends_with("? help · q quit") && narrow.contains("S send"), "{narrow}");
     assert!(!narrow.contains("ctrl+p find"), "the last hints go first: {narrow}");
     assert!(narrow.chars().count() <= 60, "{narrow}");
 }

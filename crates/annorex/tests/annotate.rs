@@ -656,6 +656,21 @@ fn the_footer_shows_the_send_keys() {
 }
 
 #[test]
+fn a_narrow_footer_keeps_the_essential_hints() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    let line = footer(&mut app, 80);
+    for hint in ["note", "S send", "P paste", "Y copy", "? help", "q quit"] {
+        assert!(line.contains(hint), "block mode at 80 columns needs `{hint}`: {line}");
+    }
+    press(&mut app, "v");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    let line = footer(&mut app, 80);
+    for hint in ["note", "S send", "P paste", "Y copy", "? help", "q quit"] {
+        assert!(line.contains(hint), "text mode at 80 columns needs `{hint}`: {line}");
+    }
+}
+
+#[test]
 fn a_narrow_footer_keeps_quit_and_help() {
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
     let line = footer(&mut app, 60);
@@ -1692,14 +1707,6 @@ fn l_on_a_looks_good_note_adds_a_comment() {
     press(&mut app, "o");
     press(&mut app, "L");
     assert_eq!(app.editor().map(|editor| editor.kind), Some(Kind::Comment));
-}
-
-#[test]
-fn the_80_column_footer_keeps_esc_unselect_and_s_send() {
-    let mut app = app("alpha beta\n");
-    let screen = render(&mut app, 80, 12);
-    let footer = screen.lines().last().expect("footer");
-    assert!(footer.contains("esc unselect") && footer.contains("S send"), "{footer}");
 }
 
 // Drafts: work in progress stays, what a send took goes.
