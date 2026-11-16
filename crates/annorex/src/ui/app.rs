@@ -131,6 +131,8 @@ pub(crate) enum Confirm {
     Quit,
     /// Close the file on the screen, which has unsent notes? `y` or `n`.
     CloseFile,
+    /// Paste the notes without Enter? `y` or `n`.
+    Paste,
 }
 
 /// Where the keys go.
@@ -1412,10 +1414,10 @@ impl App {
                 Some(Action::Label) => return self.begin_label(),
                 Some(Action::Edit) => return self.note_here(false),
                 Some(Action::Remove) => return self.note_here(true),
-                Some(Action::Send) => return self.request_send(DeliveryMode::Send),
-                Some(Action::Paste) => return self.request_send(DeliveryMode::PasteOnly),
+                Some(action @ (Action::Send | Action::Paste | Action::Copy)) => {
+                    return self.send_key(action).unwrap_or(Effect::None);
+                }
                 Some(Action::SendWithNote) => return self.begin_note(),
-                Some(Action::Copy) => return Effect::Copy,
                 Some(Action::Discard)
                     if self.review().is_some_and(|review| !review.is_empty())
                         || self.save_error.is_some() =>
@@ -1524,7 +1526,11 @@ impl App {
     /// The keys that work the same in the tree, the rail, and the reply list. `None` when the key is
     /// not one of them.
     fn common_key(&mut self, action: Option<Action>) -> Option<Effect> {
-        match action? {
+        let action = action?;
+        if let Some(effect) = self.send_key(action) {
+            return Some(effect);
+        }
+        match action {
             Action::Quit => return Some(self.request_quit()),
             Action::Help => self.help_open = true,
             Action::Reload => {
@@ -1791,6 +1797,14 @@ impl App {
                 }
                 Effect::None
             }
+            Confirm::Paste => {
+                self.confirm = None;
+                if key.code == KeyCode::Char('y') {
+                    self.request_send(DeliveryMode::PasteOnly)
+                } else {
+                    Effect::None
+                }
+            }
         }
     }
 
@@ -1858,7 +1872,25 @@ impl App {
             .count()
     }
 
-    /// `S` and `P`: send or paste the export, when there is something to send.
+    /// The send keys: `S` sends, `P` asks and then pastes without Enter, and `Y` copies. The document,
+    /// the tree, and the rail use them. `None` for each other action.
+    fn send_key(&mut self, action: Action) -> Option<Effect> {
+        Some(match action {
+            Action::Send => self.request_send(DeliveryMode::Send),
+            Action::Paste if self.export().is_empty() => {
+                self.status = Some(self.nothing_to_send());
+                Effect::None
+            }
+            Action::Paste => {
+                self.confirm = Some(Confirm::Paste);
+                Effect::None
+            }
+            Action::Copy => Effect::Copy,
+            _ => return None,
+        })
+    }
+
+    /// Send or paste the export, when there is something to send.
     pub(super) fn request_send(&mut self, mode: DeliveryMode) -> Effect {
         if self.export().is_empty() {
             self.status = Some(self.nothing_to_send());

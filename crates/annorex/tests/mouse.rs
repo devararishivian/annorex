@@ -438,15 +438,26 @@ fn click_on_a_stale_card_does_nothing() {
 
 #[test]
 fn click_on_a_footer_hint_does_the_action() {
+    // At 120 columns the send keys leave no room for `p list`.
     let mut app = viewer(THREE);
-    let screen = frame(&mut app, WIDE);
+    let screen = frame(&mut app, (200, 20));
     click(&mut app, find(&screen, "p list"));
-    let screen = frame(&mut app, WIDE);
+    let screen = frame(&mut app, (200, 20));
     assert!(rows(&screen).iter().any(|row| row.contains("Replies")), "the reply list opened");
     let mut app = viewer(THREE);
     let screen = frame(&mut app, WIDE);
     click(&mut app, find(&screen, "? help"));
     assert!(app.help_open);
+}
+
+#[test]
+fn a_click_on_the_paste_hint_asks_first() {
+    let mut app = viewer(THREE);
+    press(&mut app, "cnote\n");
+    let screen = frame(&mut app, (200, 20));
+    assert_eq!(click(&mut app, find(&screen, "P paste")), Effect::None);
+    let screen = frame(&mut app, (200, 20));
+    assert!(footer(&screen).contains("Paste the notes into the agent prompt"), "{}", footer(&screen));
 }
 
 #[test]

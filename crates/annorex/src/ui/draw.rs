@@ -92,8 +92,16 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
             Some(_) => true,
             None => app.shown_id().is_none() && app.start_view() == StartView::Files,
         };
+    // `S send`, `P paste`, and `Y copy` stay together in each footer that has them.
+    let send_keys = || {
+        [
+            hint(Action::Send, format!("{} send", k(Action::Send))),
+            hint(Action::Paste, format!("{} paste", k(Action::Paste))),
+            hint(Action::Copy, format!("{} copy", k(Action::Copy))),
+        ]
+    };
     let lists = |out: &mut Vec<Hint>| {
-        out.push(hint(Action::Send, format!("{} send", k(Action::Send))));
+        out.extend(send_keys());
         out.push(hint(Action::Annotations, format!("{} notes", k(Action::Annotations))));
         let list = hint(Action::Replies, format!("{} list", k(Action::Replies)));
         let tree = hint(Action::Tree, format!("{} tree", k(Action::Tree)));
@@ -120,21 +128,30 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
         Focus::Box => {
             vec![hint(Action::Down, format!("{up_down} move")), plain("enter open"), plain("esc close")]
         }
-        Focus::Tree => vec![
-            hint(Action::Down, format!("{up_down} move")),
-            plain("enter open"),
-            hint(Action::Left, format!("{}/{} close/open", k(Action::Left), k(Action::Right))),
-            hint(Action::Find, format!("{} filter", k(Action::Find))),
-            plain("esc back"),
-            hint(Action::Tree, format!("{} hide", k(Action::Tree))),
-        ],
-        Focus::Rail => vec![
-            hint(Action::Down, format!("{up_down} note")),
-            plain("enter go"),
-            hint(Action::Edit, format!("{} edit", k(Action::Edit))),
-            hint(Action::Remove, format!("{} remove", k(Action::Remove))),
-            plain("esc back"),
-        ],
+        Focus::Tree => {
+            let mut out = vec![
+                hint(Action::Down, format!("{up_down} move")),
+                plain("enter open"),
+                hint(Action::Left, format!("{}/{} close/open", k(Action::Left), k(Action::Right))),
+                hint(Action::Find, format!("{} filter", k(Action::Find))),
+                plain("esc back"),
+            ];
+            // The send keys come after `esc back`, so a narrow footer keeps the way back first.
+            out.extend(send_keys());
+            out.push(hint(Action::Tree, format!("{} hide", k(Action::Tree))));
+            out
+        }
+        Focus::Rail => {
+            let mut out = vec![
+                hint(Action::Down, format!("{up_down} note")),
+                plain("enter go"),
+                hint(Action::Edit, format!("{} edit", k(Action::Edit))),
+                hint(Action::Remove, format!("{} remove", k(Action::Remove))),
+                plain("esc back"),
+            ];
+            out.extend(send_keys());
+            out
+        }
         Focus::Doc => match app.mode {
             Mode::Browse => {
                 let mut out = vec![hint(Action::Down, format!("{up_down} choose a block"))];
@@ -148,22 +165,26 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
                     plain("esc unselect"),
                 ];
                 lists(&mut out);
-                // `esc unselect` and `S send` come right after the note keys, so a narrow footer keeps them.
-                out.insert(4.min(out.len()), hint(Action::Select, format!("{} text", k(Action::Select))));
+                // `esc unselect` and the send keys come right after the note keys, so a narrow footer
+                // keeps them.
+                out.insert(6.min(out.len()), hint(Action::Select, format!("{} text", k(Action::Select))));
                 out.insert(
-                    5.min(out.len()),
+                    7.min(out.len()),
                     hint(Action::Edit, format!("{}/{} edit", k(Action::Edit), k(Action::Remove))),
                 );
                 // The least important hint: a narrow footer leaves it out first.
                 out.push(plain("enter actions"));
                 out
             }
-            Mode::Text if app.selection.is_some() => vec![
-                hint(Action::Comment, notes),
-                hint(Action::Select, format!("{} end", k(Action::Select))),
-                plain("esc unselect"),
-                hint(Action::Send, format!("{} send", k(Action::Send))),
-            ],
+            Mode::Text if app.selection.is_some() => {
+                let mut out = vec![
+                    hint(Action::Comment, notes),
+                    hint(Action::Select, format!("{} end", k(Action::Select))),
+                    plain("esc unselect"),
+                ];
+                out.extend(send_keys());
+                out
+            }
             Mode::Text => {
                 let moves = [Action::Left, Action::Down, Action::Up, Action::Right].map(k).join("/");
                 let mut out = vec![
@@ -512,6 +533,9 @@ fn prompt_text(app: &App, what: Confirm) -> String {
         Confirm::CloseFile => {
             let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
             format!("Close {path}? It has unsent notes. y/n")
+        }
+        Confirm::Paste => {
+            "Paste the notes into the agent prompt, without Enter? Annorex closes after. y/n".to_owned()
         }
         Confirm::Quit if app.unsent_file_count() > 1 => {
             let count = app.unsent_file_count();

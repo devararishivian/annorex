@@ -214,7 +214,7 @@ impl Action {
             Action::FindPrev => "previous match",
             Action::Send => "send the notes",
             Action::SendWithNote => "general note, then send",
-            Action::Paste => "paste without Enter",
+            Action::Paste => "paste without Enter, then close",
             Action::Copy => "copy the notes",
             Action::Discard => "discard the notes",
             Action::Edit => "edit a note",

@@ -252,12 +252,27 @@ fn footer(screen: &str) -> &str {
 }
 
 #[test]
+fn send_keys_work_in_the_file_tree() {
+    use annorex::deliver::DeliveryMode;
+    let (_dir, mut app) = last_app();
+    press(&mut app, "jcnote\n");
+    press(&mut app, "T");
+    let screen = render(&mut app, 120, 20);
+    assert!(footer(&screen).contains("close/open"), "the tree has the focus: {}", footer(&screen));
+    assert!(footer(&screen).contains("S send"), "{}", footer(&screen));
+    assert_eq!(
+        press_key(&mut app, KeyCode::Char('S'), KeyModifiers::SHIFT),
+        Effect::Send(DeliveryMode::Send)
+    );
+}
+
+#[test]
 fn the_last_reply_view_starts_without_the_tree_and_shows_the_reply_keys() {
     let (_dir, mut app) = last_app();
     let screen = render(&mut app, 120, 20);
     assert!(screen.contains("The reply text.") && !screen.contains("Tree"), "no tree at the start: {screen}");
     let footer = footer(&screen);
-    assert!(footer.contains("S send · a notes · p list · T tree · ? help"), "{footer}");
+    assert!(footer.contains("S send · P paste · Y copy · a notes · p list · T tree · ? help"), "{footer}");
     assert!(!footer.contains("find"), "the find key is a file key: {footer}");
 }
 
@@ -368,17 +383,26 @@ fn new_reply_while_the_start_box_is_open_keeps_the_selection_valid() {
 #[test]
 fn the_footer_follows_the_document_on_the_screen() {
     let (_dir, mut app) = last_app();
-    assert!(footer(&render(&mut app, 120, 20)).contains("S send · a notes · p list · T tree · ? help"));
+    assert!(
+        footer(&render(&mut app, 120, 20))
+            .contains("S send · P paste · Y copy · a notes · p list · T tree · ? help")
+    );
     app.open_file(loaded("a.md", "# Title\n\nalpha text\n"));
     let screen = render(&mut app, 120, 20);
     let footer_row = footer(&screen);
-    assert!(footer_row.contains("S send · a notes · T tree · ctrl+p find · p list · ? help"), "{footer_row}");
+    assert!(
+        footer_row.contains("S send · P paste · Y copy · a notes · T tree · ctrl+p find · p list · ? help"),
+        "{footer_row}"
+    );
     // The files view with a reply on the screen shows the reply keys.
     let (_dir, app) = tree_app(&Config::default());
     let mut app = app.with_start_view(StartView::Files);
     app.set_replies(vec![Reply { id: "r1".to_owned(), text: "# Reply\n".to_owned(), at: None }]);
     let screen = render(&mut app, 120, 20);
-    assert!(footer(&screen).contains("S send · a notes · p list · T tree · ? help"), "{screen}");
+    assert!(
+        footer(&screen).contains("S send · P paste · Y copy · a notes · p list · T tree · ? help"),
+        "{screen}"
+    );
 }
 
 #[test]
@@ -394,7 +418,10 @@ fn the_files_view_starts_on_the_tree_and_shows_the_file_keys() {
     let screen = render(&mut app, 120, 20);
     assert!(screen.contains("Tree") && screen.contains("alpha text"), "{screen}");
     let footer = footer(&screen);
-    assert!(footer.contains("S send · a notes · T tree · ctrl+p find · p list · ? help"), "{footer}");
+    assert!(
+        footer.contains("S send · P paste · Y copy · a notes · T tree · ctrl+p find · p list · ? help"),
+        "{footer}"
+    );
 }
 
 #[test]

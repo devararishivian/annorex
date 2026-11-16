@@ -529,11 +529,103 @@ fn send_keys_ask_the_caller() {
         press_key(&mut app, KeyCode::Char('S'), KeyModifiers::SHIFT),
         Effect::Send(DeliveryMode::Send)
     );
+    // `P` asks first. The question is tested below.
+    assert_eq!(press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT), Effect::None);
+    press_key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
+    assert_eq!(press_key(&mut app, KeyCode::Char('Y'), KeyModifiers::SHIFT), Effect::Copy);
+}
+
+const PASTE_QUESTION: &str = "Paste the notes into the agent prompt";
+
+#[test]
+fn paste_asks_first() {
+    use annorex::deliver::DeliveryMode;
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    assert_eq!(press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT), Effect::None);
+    assert!(render(&mut app, 120, 12).contains(PASTE_QUESTION));
     assert_eq!(
-        press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT),
+        press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE),
         Effect::Send(DeliveryMode::PasteOnly)
     );
+}
+
+#[test]
+fn paste_question_no_keeps_the_notes() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    let before = app.export();
+    press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT);
+    assert_eq!(press_key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE), Effect::None);
+    assert_eq!(app.export(), before);
+    assert!(!render(&mut app, 120, 12).contains(PASTE_QUESTION));
+}
+
+#[test]
+fn paste_with_nothing_to_send_does_not_ask() {
+    let mut app = app("alpha beta\n");
+    assert_eq!(press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT), Effect::None);
+    assert!(app.status().is_some_and(|text| text.contains("Nothing to send")), "{:?}", app.status());
+    assert!(!render(&mut app, 120, 12).contains(PASTE_QUESTION));
+}
+
+#[test]
+fn send_keys_type_letters_in_the_note_box() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press(&mut app, "c");
+    for c in ['P', 'Y', 'S'] {
+        assert_eq!(press_key(&mut app, KeyCode::Char(c), KeyModifiers::SHIFT), Effect::SaveDraft);
+    }
+    assert_eq!(app.editor().expect("editor").text, "PYS");
+}
+
+#[test]
+fn send_keys_work_in_the_card_rail() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    render(&mut app, 160, 30);
+    press(&mut app, "a");
+    let screen = render(&mut app, 160, 30);
+    assert!(screen.contains("esc back"), "the rail has the focus: {screen}");
     assert_eq!(press_key(&mut app, KeyCode::Char('Y'), KeyModifiers::SHIFT), Effect::Copy);
+    assert_eq!(press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT), Effect::None);
+    assert!(render(&mut app, 160, 30).contains(PASTE_QUESTION));
+}
+
+#[test]
+fn send_keys_do_nothing_in_the_list_of_documents() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press(&mut app, "p");
+    assert_eq!(press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT), Effect::None);
+    assert_eq!(press_key(&mut app, KeyCode::Char('Y'), KeyModifiers::SHIFT), Effect::None);
+    assert!(!render(&mut app, 120, 20).contains(PASTE_QUESTION));
+}
+
+/// The footer: the last row of the screen.
+fn footer(app: &mut App, width: u16) -> String {
+    render(app, width, 30).lines().last().expect("footer").to_owned()
+}
+
+#[test]
+fn the_footer_shows_the_send_keys() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    let has_all = |line: &str| ["S send", "P paste", "Y copy"].iter().all(|hint| line.contains(hint));
+    // Block mode: the note above left the first block focused.
+    let line = footer(&mut app, 200);
+    assert!(has_all(&line), "block: {line}");
+    // Text mode.
+    press(&mut app, "v");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    let line = footer(&mut app, 200);
+    assert!(has_all(&line), "text: {line}");
+    // The rail.
+    press(&mut app, "a");
+    let line = footer(&mut app, 200);
+    assert!(line.contains("esc back") && has_all(&line), "rail: {line}");
+}
+
+#[test]
+fn a_narrow_footer_keeps_quit_and_help() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    let line = footer(&mut app, 60);
+    assert!(line.contains("q quit") && line.contains("? help"), "{line}");
 }
 
 #[test]

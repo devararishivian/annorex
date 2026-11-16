@@ -57,18 +57,15 @@ pub fn send_review(
 }
 
 /// Show the result in the app. On `Sent`, `Pasted`, and `Held` the notes count as sent at `now`.
-/// Returns true when the draft must be saved.
+/// A send and a paste close Annorex after the drafts are saved. A held Enter keeps it open, so that
+/// its message shows. Returns true when the draft must be saved.
 pub fn apply_result(app: &mut App, result: SendResult, now: &str) -> bool {
     match result {
         SendResult::Sent | SendResult::Pasted => {
             let word = if result == SendResult::Sent { "Sent" } else { "Pasted" };
             app.finish_send(now);
             app.set_status(format!("{word}. {PROMPT_LIMIT}"));
-            app.quit_if_pending();
-            if result == SendResult::Sent {
-                // A sent review is done: Annorex closes after the drafts are saved.
-                app.close_after_send();
-            }
+            app.close_after_send();
             true
         }
         SendResult::Held(message) => {
@@ -279,5 +276,40 @@ mod tests {
         assert_eq!(after.review, before.review, "the annotations did not change");
         assert!(after.sent_at.is_none() && after.review.annotations.iter().all(|a| a.sent_at.is_none()));
         assert!(fake.writes.borrow().is_empty());
+    }
+
+    /// The viewer with one note on the reply.
+    fn noted_app() -> App {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        use crate::agent::Agent;
+        use crate::config::Config;
+        use crate::replies::Reply;
+        use crate::safety::Safety;
+        use crate::ui::{AgentState, Screen};
+
+        let state = AgentState { agent: Some(Agent::ClaudeCode), safety: Safety::Clear { state: None } };
+        let reply = Reply { id: "r1".to_owned(), text: "alpha beta\n".to_owned(), at: None };
+        let mut app = App::new(state, Screen::Viewer, vec![reply], &Config::default());
+        for c in "jcnote\n".chars() {
+            let code = if c == '\n' { KeyCode::Enter } else { KeyCode::Char(c) };
+            app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        }
+        app
+    }
+
+    #[test]
+    fn a_paste_closes_annorex() {
+        let mut app = noted_app();
+        assert!(apply_result(&mut app, SendResult::Pasted, "2026-11-16T12:00:00Z"), "the drafts are saved");
+        assert!(app.should_exit(), "Annorex closes after a paste");
+    }
+
+    #[test]
+    fn a_held_enter_keeps_annorex_open() {
+        let mut app = noted_app();
+        let held = SendResult::Held("Pasted, but Enter was held.".to_owned());
+        assert!(apply_result(&mut app, held, "2026-11-16T12:00:00Z"));
+        assert!(!app.should_exit(), "the message of the held Enter must show");
     }
 }
