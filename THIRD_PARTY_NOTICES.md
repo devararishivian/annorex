@@ -8,7 +8,8 @@ the changes for Annorex. A comment marks the adapted functions in `wrap.rs` and 
 
 - Project: plannotator-tui
 - URL: <https://github.com/plannotator/plannotator-tui>
-- Commit: `83b0cd91e287df391d5b27029140ff72c32c085d`
+- Commit: `83b0cd91e287df391d5b27029140ff72c32c085d`, for all parts except the keys of the note box. The keys of the
+  note box come from the later commit `e537abdefa7f404c62bb51f927cbe426fbdf500c`. The license did not change.
 - License: MIT
 - Files in Annorex that come from plannotator-tui:
     - `crates/annorex-hosts/src/lib.rs`, `claude/mod.rs`, `claude/entries.rs`, `claude/ladder.rs`,
