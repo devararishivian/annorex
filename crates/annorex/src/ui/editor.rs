@@ -133,8 +133,9 @@ impl Editor {
             KeyCode::Char('e' | 'E') if ctrl => self.cursor = self.line_end(),
             KeyCode::Char('u' | 'U') if ctrl => self.delete_to(self.line_start()),
             KeyCode::Char('k' | 'K') if ctrl => self.delete_to(self.line_end()),
-            // Many terminals send ctrl+h for ctrl+backspace.
-            KeyCode::Char('w' | 'W' | 'h' | 'H') if ctrl => self.delete_to(self.previous_word_start()),
+            KeyCode::Char('w' | 'W') if ctrl => self.delete_to(self.previous_word_start()),
+            // Some terminals send ctrl+h for Backspace, so it deletes one character.
+            KeyCode::Char('h' | 'H') if ctrl => self.delete_to(self.before(self.cursor)),
             KeyCode::Backspace if ctrl || alt => self.delete_to(self.previous_word_start()),
             KeyCode::Char('d' | 'D') if alt => self.delete_to(self.next_word_end()),
             KeyCode::Delete if ctrl => self.delete_to(self.next_word_end()),
@@ -430,9 +431,7 @@ mod tests {
         assert_eq!(editor.cursor, 5);
         key(&mut editor, KeyCode::Char('d'), ALT);
         assert_eq!(state(&editor), ("foo  ", 5));
-        for (code, modifiers) in
-            [(KeyCode::Backspace, ALT), (KeyCode::Backspace, CTRL), (KeyCode::Char('h'), CTRL)]
-        {
+        for (code, modifiers) in [(KeyCode::Backspace, ALT), (KeyCode::Backspace, CTRL)] {
             let mut editor = typed("one two");
             key(&mut editor, code, modifiers);
             assert_eq!(state(&editor), ("one ", 4), "{code:?} {modifiers:?}");
@@ -440,6 +439,14 @@ mod tests {
         let mut editor = at("one two", 0);
         key(&mut editor, KeyCode::Delete, CTRL);
         assert_eq!(state(&editor), (" two", 0));
+    }
+
+    #[test]
+    fn ctrl_h_deletes_one_character_like_backspace() {
+        // Some terminals send ctrl+h for Backspace. It must not delete a word.
+        let mut editor = typed("one two");
+        key(&mut editor, KeyCode::Char('h'), CTRL);
+        assert_eq!(state(&editor), ("one tw", 6));
     }
 
     #[test]

@@ -545,7 +545,7 @@ Annorex reads `$XDG_CONFIG_HOME/annorex/config.toml`, or `~/.config/annorex/conf
 enter_delay_ms = 300       # 50 to 5000: the wait between the paste and Enter
 labels = ["nit"]           # read, but the note box does not use labels
 changes_turns = 1          # 1 to 20: how many of your prompts the tree looks back for changed files
-# (default 1)
+                           # (default 1)
 
 [keys]
 comment = "y"              # an action name and a key

@@ -625,10 +625,13 @@ fn send_keys_work_in_the_card_rail() {
 
 #[test]
 fn send_keys_do_nothing_in_the_list_of_documents() {
-    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    let mut app = three_replies();
+    press(&mut app, "cnote\n");
     press(&mut app, "p");
-    assert_eq!(press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT), Effect::None);
-    assert_eq!(press_key(&mut app, KeyCode::Char('Y'), KeyModifiers::SHIFT), Effect::None);
+    assert!(render(&mut app, 120, 20).contains("Replies"), "the list of documents is open");
+    for c in ['S', 'P', 'Y'] {
+        assert_eq!(press_key(&mut app, KeyCode::Char(c), KeyModifiers::SHIFT), Effect::None, "{c}");
+    }
     assert!(!render(&mut app, 120, 20).contains(PASTE_QUESTION));
 }
 

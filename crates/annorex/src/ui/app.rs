@@ -1695,6 +1695,8 @@ impl App {
                 match action {
                     Some(Action::Down) => self.replies_move(1),
                     Some(Action::Up) => self.replies_move(-1),
+                    // The box takes the send keys, so that they do nothing here.
+                    Some(Action::Send | Action::Paste | Action::Copy) => {}
                     _ => return self.common_key(action).unwrap_or(Effect::None),
                 }
             }

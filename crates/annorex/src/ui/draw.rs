@@ -9,7 +9,7 @@ use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::app::{App, BoxView, Confirm, Docked, Focus, ReplySource, Screen, StartView, match_ranges};
 use super::bar::{draw_action_bar, shown_rows};
@@ -1468,7 +1468,12 @@ fn draw_editor(frame: &mut Frame, app: &mut App, area: Rect) {
             }
             // The caret is the reversed cell of the character after it, or a space at the end of the row.
             let at = editor.cursor.clamp(row.start, row.end);
-            let after = editor.text.get(at..row.end).and_then(|tail| tail.chars().next());
+            // A tab or a zero-width character has no cell of its own, so the caret is a space before it.
+            let after = editor
+                .text
+                .get(at..row.end)
+                .and_then(|tail| tail.chars().next())
+                .filter(|c| !c.is_control() && c.width().unwrap_or(0) > 0);
             let next = after.map_or(at, |c| at + c.len_utf8());
             Line::from(vec![
                 Span::raw(text(row.start..at)),

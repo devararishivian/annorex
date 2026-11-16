@@ -466,6 +466,25 @@ fn the_caret_shows_where_it_is() {
     assert!(!rows(&screen).iter().any(|row| row.contains('▏')), "no bar glyph");
 }
 
+/// The number of reversed cells in the row `y`.
+fn reversed_in_row(buffer: &Buffer, y: u16) -> usize {
+    (buffer.area.x..buffer.area.right()).filter(|&x| reversed(buffer, (x, y))).count()
+}
+
+#[test]
+fn the_caret_shows_before_a_tab_and_before_a_combining_mark() {
+    for text in ["a\tb", "e\u{301}x"] {
+        let mut app = viewer(THREE);
+        press(&mut app, "c");
+        app.handle_paste(text);
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        let screen = frame(&mut app, WIDE);
+        let (_, y) = find(&screen, "Comment");
+        assert_eq!(reversed_in_row(&screen, y + 1), 1, "one caret cell for {text:?}");
+    }
+}
+
 #[test]
 fn an_empty_note_shows_the_caret_and_the_hint() {
     let mut app = viewer(THREE);
