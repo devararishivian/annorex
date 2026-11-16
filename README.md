@@ -121,7 +121,8 @@ From version 0.2.0, Annorex tells you about a newer release. The viewer shows on
 Annorex checks at most once each 24 hours, in the background. If the network fails, it shows nothing. The only request
 is `GET https://api.github.com/repos/devararishivian/annorex/releases/latest`.
 
-Run `annorex update --check` to look for a newer release without an upgrade. Run `annorex update` to upgrade. The command
+Run `annorex update --check` to look for a newer release without an upgrade. Run `annorex update` to upgrade. The
+command
 depends on how you installed Annorex:
 
 - Homebrew: it runs `brew upgrade annorex`.
@@ -148,6 +149,10 @@ To turn off the check, use one of these ways:
    table.
 5. Press `o` to mark the block as good or `c` to comment. Press `d` to mark it for removal or `s` to replace it.
 6. For `c` and `s`, type the note in the note box and press `enter`. `o` and `d` save at once and need no text.
+
+In the note box, the arrow keys, `home`, `end`, `ctrl+a`, and `ctrl+e` move the caret. `ctrl+left` and `ctrl+right` move
+by word. `ctrl+w` deletes the word before the caret. `ctrl+u` and `ctrl+k` delete to the start or the end of the line.
+A click in the text moves the caret. The text goes in at the caret.
 
 To annotate a part of a block, press `v` and move the cursor to select text. This is text mode. Press `v` again to end
 the selection and show the action bar. The action bar has the four note types. You can also drag the mouse over text.
@@ -184,9 +189,10 @@ If the send fails, Annorex stays open, keeps your notes, and shows the reason in
 the paste, Annorex does not press Enter. Annorex then stays open and marks the notes as sent. Answer the dialog, then
 press Enter in the agent pane.
 
-Press `P` to paste the notes without Enter. Press `Y` to copy the notes. Annorex saves your notes after each change.
-When you close Annorex, it keeps the notes that you did not send. After `P` or a held Enter, the notes stay, marked as
-sent, until you remove them with `x`.
+Press `P` to paste the notes without Enter. Annorex asks first, then pastes and closes. Press `Y` to copy the notes.
+`S`, `P`, and `Y` work in the document, the file tree, and the list of notes, but not while you write a note. Annorex
+saves your notes after each change. When you close Annorex, it keeps the notes that you did not send. After `P` or a
+held Enter, the notes stay, marked as sent, until you remove them with `x`.
 
 ## Keys
 
@@ -205,7 +211,7 @@ Press `?` in Annorex to see all keys. This table gives the main keys.
 | `e` / `x`           | Edit or delete the note at the focus                                      |
 | `S`                 | Send the notes to the agent                                               |
 | `M`                 | Write a general note, then send                                           |
-| `P`                 | Paste the notes into the agent input box, without Enter                   |
+| `P`                 | Paste the notes into the agent input box, without Enter (asks first)      |
 | `Y`                 | Copy the notes                                                            |
 | `X`                 | Discard the notes of the document on the screen (asks first)              |
 | `a`                 | Move the focus to the list of notes                                       |

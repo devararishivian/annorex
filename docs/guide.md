@@ -144,11 +144,11 @@ unless you run `annorex update`.
 Run `annorex update --check` to look for a newer release and print the result. Run `annorex update` to upgrade. The
 command depends on the install channel:
 
-| Install channel  | What `annorex update` does                           |
-|------------------|------------------------------------------------------|
-| Homebrew         | Runs `brew upgrade annorex`                          |
-| Shell installer  | Runs the latest installer of the release again       |
-| `cargo install`  | Prints the `cargo install` command. You must run it. |
+| Install channel | What `annorex update` does                           |
+|-----------------|------------------------------------------------------|
+| Homebrew        | Runs `brew upgrade annorex`                          |
+| Shell installer | Runs the latest installer of the release again       |
+| `cargo install` | Prints the `cargo install` command. You must run it. |
 
 The next time Annorex opens after an upgrade, it replaces the `annorex.lua` of Rex with the new module. It does this
 only for a file that Annorex wrote. Then it asks Rex to reload the configuration. If the reload fails, the next open
@@ -277,7 +277,7 @@ and an open note box close it too.
 | `a`           | Move the focus to the list of notes                              |
 | `S`           | Send the notes to the agent                                      |
 | `M`           | Write a general note, then send                                  |
-| `P`           | Paste the notes into the agent input box, without Enter          |
+| `P`           | Paste the notes without Enter (asks first), then close           |
 | `Y`           | Copy the notes                                                   |
 | `X`           | Discard the notes of the document on the screen (asks first)     |
 | `/`           | Find text (the case is ignored)                                  |
@@ -299,8 +299,26 @@ the line, for example `Comment · line 20`. An empty box shows a dim hint. It ha
 `enter` saves the note. A new line needs `shift+enter` when the terminal supports it. Otherwise, use `ctrl+j`. The
 footer shows the key that works. `alt+enter` also adds a new line. `esc` cancels.
 
-The box shows at most 8 rows of text. It follows the end of the text. Press `PgUp` or `PgDn`, or use the mouse wheel
-over the box, to scroll. A new character goes back to the end. A comment needs text. The notes `looks good` and
+The box has a caret. The text goes in at the caret, and a paste from the terminal goes in there too. These keys move
+the caret or delete text:
+
+| Key                                                                     | Function                                       |
+|-------------------------------------------------------------------------|------------------------------------------------|
+| `left` / `right`                                                        | Move by one character                          |
+| `up` / `down`                                                           | Move by one row on the screen                  |
+| `home` / `end`, `ctrl+a` / `ctrl+e`                                     | Go to the start or the end of the line         |
+| `ctrl+left` / `ctrl+right`, `alt+left` / `alt+right`, `alt+b` / `alt+f` | Move by one word                               |
+| `backspace` / `delete`                                                  | Delete the character before or after the caret |
+| `ctrl+w`, `alt+backspace`, `ctrl+backspace`                             | Delete the word before the caret               |
+| `alt+d`, `ctrl+delete`                                                  | Delete the word after the caret                |
+| `ctrl+u` / `ctrl+k`                                                     | Delete to the start or the end of the line     |
+
+The `alt` keys need the Rex setting "Option key" to send Alt. "Automatic" sends Alt on a U.S. keyboard layout. A click
+in the text moves the caret. The keys of the note box come before the keys of the viewer, and the configuration file
+does not change them.
+
+The box shows at most 8 rows of text. It follows the caret. Press `PgUp` or `PgDn`, or use the mouse wheel over the
+box, to scroll. The next key goes back to the caret. A comment needs text. The notes `looks good` and
 `remove` have no text, so they save at once without the box. `e` on them shows `Looks good has no text.` or
 `Remove has no text.` A draft of an older version can have text on these notes. Annorex keeps that text in the export.
 
@@ -329,8 +347,8 @@ The header shows the view, the agent and its state, and the position. It adds `u
 `unsent in 2 files` when notes are not sent. On the right, it has the send button `[ Send N → agent ▸ ]`. With no
 notes, the button is dim: `[ Send ▸ ]`. It is dim while the agent shows a dialog too. While the agent works, the
 button adds `queued` for Claude Code or `steers` for Pi and OpenCode. After a send, it shows `[ Sent HH:MM ]`. The
-footer shows the keys of the current mode. Annorex leaves out the hints that do not fit, from the end. `? help` stays
-while it fits.
+footer shows the keys of the current mode. The note keys and `S send`, `P paste`, and `Y copy` come first. Annorex
+leaves out the hints that do not fit, from the end. `? help` and `q quit` stay while they fit.
 
 Notes show in place. The note colors are the 16 ANSI colors. The text under a note keeps its color. Looks good has a
 green underline. A comment has a yellow underline. Remove is red and crossed out. Replace is magenta and crossed out. A
@@ -344,21 +362,21 @@ to 20 columns. If even these widths do not fit, Annorex clips the lines of the t
 
 Each mouse action has a key. The help screen does not list the mouse actions.
 
-| Where                      | Action                   | Result                                                                                                                 |
-|----------------------------|--------------------------|------------------------------------------------------------------------------------------------------------------------|
-| List, document, tree, rail | Wheel                    | Scroll the part under the pointer by 3 lines. The focus does not change                                                |
-| Block                      | Click                    | Focus the block (block mode)                                                                                           |
-| Document text              | Drag                     | Select characters (text mode). At the top or the bottom row, the document scrolls. The action bar shows at the release |
-| Document text              | Double click             | Select the word and show the action bar                                                                                |
-| Action bar item            | Click                    | Add that note. Looks good and remove save at once. The others open the note box                                        |
-| Card                       | Click                    | Focus the note and its block. The card shows `edit` and `remove` buttons. Looks good and remove have `remove` only     |
-| Header send button         | Click                    | The same as `S`, with the same dialog test and messages                                                                |
-| Tree row                   | Click                    | Open the file, or open or close the directory                                                                          |
-| Row of a list or picker    | Click                    | Open that reply, session, or file                                                                                      |
-| Numbered list of notes     | Click                    | Choose that note                                                                                                       |
-| Footer hint                | Click                    | Do that action                                                                                                         |
-| Note box                   | Click `save` or `cancel` | Save or cancel. A click outside the box does nothing. The wheel over the box scrolls it                                |
-| Help screen                | Click or wheel           | Close the help screen                                                                                                  |
+| Where                      | Action         | Result                                                                                                                 |
+|----------------------------|----------------|------------------------------------------------------------------------------------------------------------------------|
+| List, document, tree, rail | Wheel          | Scroll the part under the pointer by 3 lines. The focus does not change                                                |
+| Block                      | Click          | Focus the block (block mode)                                                                                           |
+| Document text              | Drag           | Select characters (text mode). At the top or the bottom row, the document scrolls. The action bar shows at the release |
+| Document text              | Double click   | Select the word and show the action bar                                                                                |
+| Action bar item            | Click          | Add that note. Looks good and remove save at once. The others open the note box                                        |
+| Card                       | Click          | Focus the note and its block. The card shows `edit` and `remove` buttons. Looks good and remove have `remove` only     |
+| Header send button         | Click          | The same as `S`, with the same dialog test and messages                                                                |
+| Tree row                   | Click          | Open the file, or open or close the directory                                                                          |
+| Row of a list or picker    | Click          | Open that reply, session, or file                                                                                      |
+| Numbered list of notes     | Click          | Choose that note                                                                                                       |
+| Footer hint                | Click          | Do that action                                                                                                         |
+| Note box                   | Click          | Move the caret. Click `save` or `cancel` to save or cancel. A click outside the box does nothing. The wheel scrolls it |
+| Help screen                | Click or wheel | Close the help screen                                                                                                  |
 
 A question in the footer (`y/n`) and the find input take no mouse event. There is no right click and no hover action.
 Annorex has no key that copies the selected text. `Y` copies the notes with their quoted text.
@@ -380,8 +398,9 @@ Press any key to close it. The action name in the configuration file is `help`. 
    `s` to replace it. Type the note. Press `enter`.
 3. Press `S` or click the send button in the header. The button shows `[ Send N → agent ▸ ]`, with N the number of
    notes. After the agent got the message, Annorex deletes the notes that the send took from their drafts and closes.
-   After a paste with `P`, or when Enter was held, Annorex stays open and keeps the notes as sent. If the send fails,
-   Annorex stays open and keeps the drafts. The footer shows the reason.
+   `P` asks first. After the paste, Annorex closes and keeps the notes as sent. When Enter was held, Annorex stays
+   open and keeps the notes as sent. If the send fails, Annorex stays open and keeps the drafts. The footer shows the
+   reason. `S`, `P`, and `Y` work in the document, the file tree, and the list of notes, but not in the note box.
 
 The export is Markdown. Without a general note, it starts with `# Annotations on last reply`. For an older reply, the
 name is `earlier reply (HH:MM)` in your local time. If you wrote a general note with `M`, the export starts with the
@@ -526,7 +545,7 @@ Annorex reads `$XDG_CONFIG_HOME/annorex/config.toml`, or `~/.config/annorex/conf
 enter_delay_ms = 300       # 50 to 5000: the wait between the paste and Enter
 labels = ["nit"]           # read, but the note box does not use labels
 changes_turns = 1          # 1 to 20: how many of your prompts the tree looks back for changed files
-                           # (default 1)
+# (default 1)
 
 [keys]
 comment = "y"              # an action name and a key

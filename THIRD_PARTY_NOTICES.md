@@ -1,8 +1,8 @@
 # Third-party notices
 
 Annorex contains code from the projects below. Each vendored Rust file starts with a header that gives its origin and
-the changes for Annorex. A comment marks the adapted functions in `wrap.rs` and `editor.rs` and the lint table in `Cargo.toml`. The
-test fixtures and `rustfmt.toml` have no header. This file lists them.
+the changes for Annorex. A comment marks the adapted functions in `wrap.rs` and `editor.rs` and the lint table in
+`Cargo.toml`. The test fixtures and `rustfmt.toml` have no header. This file lists them.
 
 ## plannotator-tui
 
