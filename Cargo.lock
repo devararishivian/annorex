@@ -19,7 +19,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "annorex"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "annorex-hosts",
  "clap",
@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "annorex-hosts"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "rusqlite",
  "serde_json",
