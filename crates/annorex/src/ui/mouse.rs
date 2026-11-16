@@ -113,10 +113,17 @@ impl App {
         if !matches!(hit, Some(Hit::Bar | Hit::Action(_))) {
             self.bar_open = false;
         }
-        if self.editor.is_some() {
+        if let Some(editor) = self.editor.as_mut() {
             return match hit {
                 Some(Hit::EditorSave) => self.editor_done(super::editor::EditorResult::Save),
                 Some(Hit::EditorCancel) => self.editor_done(super::editor::EditorResult::Cancel),
+                // A click on the text places the caret.
+                _ if editor.area.contains(ratatui::layout::Position::new(column, row)) => {
+                    let (row, column) = (row - editor.area.y, column - editor.area.x);
+                    let width = editor.width;
+                    editor.place(editor.top + usize::from(row), usize::from(column), width);
+                    Effect::None
+                }
                 // A click outside the editor does nothing, so no text is lost.
                 _ => Effect::None,
             };

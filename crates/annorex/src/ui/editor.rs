@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 use unicode_width::UnicodeWidthChar;
 
 use crate::draft::Editing;
@@ -34,7 +35,7 @@ pub struct Editor {
     pub text: String,
     /// A label that an old annotation or draft has. The box does not show it or change it.
     pub label: Option<String>,
-    /// The first row shown. `None` follows the end of the text.
+    /// The first row shown, after `PgUp`, `PgDn`, or the wheel. `None` follows the caret.
     pub scroll: Option<usize>,
     /// The number of rows of the text in the last frame. The scroll keys use it.
     pub(crate) rows: usize,
@@ -44,6 +45,10 @@ pub struct Editor {
     pub(crate) cursor: usize,
     /// The wrap width of the last frame, `0` before the first frame. Up and Down use it.
     pub(crate) width: usize,
+    /// The first row that the last frame showed.
+    pub(crate) top: usize,
+    /// The rows of the text in the last frame, on the screen. A click in it places the caret.
+    pub(crate) area: Rect,
 }
 
 impl Editor {
@@ -70,7 +75,19 @@ impl Editor {
         general: bool,
     ) -> Self {
         let cursor = text.len();
-        Self { kind, range, text, label, scroll: None, rows: 0, general, cursor, width: 0 }
+        Self {
+            kind,
+            range,
+            text,
+            label,
+            scroll: None,
+            rows: 0,
+            general,
+            cursor,
+            width: 0,
+            top: 0,
+            area: Rect::ZERO,
+        }
     }
 
     /// The state that a draft keeps.
@@ -267,12 +284,29 @@ impl Editor {
         }
     }
 
-    /// Scroll `rows` rows down or up. At the end, the box follows the end of the text again.
+    /// Scroll `rows` rows down or up. The next edit or caret move follows the caret again.
     pub fn scroll_rows(&mut self, down: bool, rows: usize) {
         let last = self.rows.saturating_sub(MAX_ROWS);
-        let top = self.scroll.unwrap_or(last).min(last);
+        let top = self.scroll.unwrap_or(self.top).min(last);
         let top = if down { top.saturating_add(rows) } else { top.saturating_sub(rows) };
-        self.scroll = if top >= last { None } else { Some(top) };
+        self.scroll = Some(top.min(last));
+    }
+
+    /// The first row to show of `count` rows. A scroll keeps its row. Else the box moves the least
+    /// distance from the last frame that shows `caret_row`.
+    pub(crate) fn first_row(&self, count: usize, caret_row: usize) -> usize {
+        let last = count.saturating_sub(MAX_ROWS);
+        if let Some(top) = self.scroll {
+            return top.min(last);
+        }
+        let top = self.top.min(last);
+        if caret_row < top {
+            caret_row
+        } else if caret_row >= top + MAX_ROWS {
+            caret_row + 1 - MAX_ROWS
+        } else {
+            top
+        }
     }
 }
 

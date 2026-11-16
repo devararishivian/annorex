@@ -450,6 +450,54 @@ fn click_on_a_footer_hint_does_the_action() {
     assert!(app.help_open);
 }
 
+fn reversed(buffer: &Buffer, at: (u16, u16)) -> bool {
+    buffer.cell(at).is_some_and(|cell| cell.modifier.contains(ratatui::style::Modifier::REVERSED))
+}
+
+#[test]
+fn the_caret_shows_where_it_is() {
+    let mut app = viewer(THREE);
+    press(&mut app, "cabc");
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    let screen = frame(&mut app, WIDE);
+    let (x, y) = find(&screen, "abc");
+    assert!(reversed(&screen, (x + 2, y)), "the caret is on `c`");
+    assert!(!reversed(&screen, (x + 1, y)) && !reversed(&screen, (x + 3, y)));
+    assert!(!rows(&screen).iter().any(|row| row.contains('▏')), "no bar glyph");
+}
+
+#[test]
+fn an_empty_note_shows_the_caret_and_the_hint() {
+    let mut app = viewer(THREE);
+    press(&mut app, "c");
+    let screen = frame(&mut app, WIDE);
+    let (x, y) = find(&screen, "Write your comment");
+    assert!(reversed(&screen, (x - 1, y)), "the caret comes before the hint");
+}
+
+#[test]
+fn a_click_in_the_note_places_the_caret() {
+    let mut app = viewer(THREE);
+    press(&mut app, "chello world");
+    let screen = frame(&mut app, WIDE);
+    let (x, y) = find(&screen, "hello world");
+    assert_eq!(click(&mut app, (x + 6, y)), Effect::None);
+    press(&mut app, "X");
+    assert_eq!(app.editor().expect("editor").text, "hello Xworld");
+}
+
+#[test]
+fn a_click_right_of_the_text_moves_the_caret_to_the_end_of_the_row() {
+    let mut app = viewer(THREE);
+    press(&mut app, "cab");
+    app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+    let screen = frame(&mut app, WIDE);
+    let (x, y) = find(&screen, "ab");
+    click(&mut app, (x + 5, y));
+    press(&mut app, "c");
+    assert_eq!(app.editor().expect("editor").text, "abc");
+}
+
 #[test]
 fn a_click_on_the_paste_hint_asks_first() {
     let mut app = viewer(THREE);

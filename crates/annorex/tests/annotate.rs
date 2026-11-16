@@ -538,6 +538,40 @@ fn send_keys_ask_the_caller() {
 const PASTE_QUESTION: &str = "Paste the notes into the agent prompt";
 
 #[test]
+fn the_box_follows_the_caret() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "c");
+    for line in 0..20 {
+        if line > 0 {
+            press_key(&mut app, KeyCode::Char('j'), KeyModifiers::CONTROL);
+        }
+        press(&mut app, &format!("l{line}"));
+    }
+    // The first frame gives the editor its width, so Up can move by display row.
+    render(&mut app, 80, 30);
+    for _ in 0..15 {
+        press_key(&mut app, KeyCode::Up, KeyModifiers::NONE);
+    }
+    press(&mut app, "z");
+    let screen = render(&mut app, 80, 30);
+    assert!(screen.contains("l4z"), "the row of the caret shows: {screen}");
+    // `PgUp` scrolls away. The next key brings the caret back.
+    press_key(&mut app, KeyCode::PageDown, KeyModifiers::NONE);
+    render(&mut app, 80, 30);
+    press(&mut app, "y");
+    assert!(render(&mut app, 80, 30).contains("l4zy"));
+}
+
+#[test]
+fn ctrl_a_moves_the_caret_while_typing() {
+    let mut app = app("alpha beta\n");
+    press(&mut app, "cab");
+    press_key(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+    press(&mut app, "x");
+    assert_eq!(app.editor().expect("editor").text, "xab");
+}
+
+#[test]
 fn paste_asks_first() {
     use annorex::deliver::DeliveryMode;
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
@@ -1203,7 +1237,7 @@ fn a_resize_keeps_the_focused_block_and_the_editor_text() {
     let screen = render(&mut app, 60, 20);
     assert_eq!(app.focused_block(), Some(2));
     assert_eq!(app.editor().expect("editor").text, "half a note");
-    assert!(screen.contains("half a note▏"), "{screen}");
+    assert!(screen.contains("half a note"), "{screen}");
     let (top, _) = editor_rows(&screen);
     assert_eq!(top, row_of(&screen, "paragraph 3") + 1, "{screen}");
 }

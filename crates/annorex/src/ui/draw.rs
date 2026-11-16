@@ -9,7 +9,7 @@ use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, BoxView, Confirm, Docked, Focus, ReplySource, Screen, StartView, match_ranges};
 use super::bar::{draw_action_bar, shown_rows};
@@ -1452,28 +1452,54 @@ fn draw_editor(frame: &mut Frame, app: &mut App, area: Rect) {
     if area.width < 4 || area.height < 5 {
         return;
     }
-    let width = usize::from(area.width - 2);
-    let rows = wrap_rows(&format!("{}▏", editor.text), width);
-    let last = rows.len().saturating_sub(MAX_ROWS);
-    let top = editor.scroll.map_or(last, |scroll| scroll.min(last));
-    if let Some(open) = app.editor.as_mut() {
-        open.rows = rows.len();
-    }
+    // One column stays free, so a caret at the end of a full row fits.
+    let width = usize::from(area.width - 3);
+    let rows = super::editor::rows(&editor.text, width);
+    let (caret_row, _) = editor.caret(width);
+    let top = editor.first_row(rows.len(), caret_row);
     let dim = Style::new().add_modifier(Modifier::DIM);
-    let mut lines: Vec<Line> =
-        rows.iter().skip(top).take(MAX_ROWS).map(|row| Line::raw(row.clone())).collect();
+    let caret = Style::new().add_modifier(Modifier::REVERSED);
+    let mut lines: Vec<Line> = rows
+        .iter()
+        .enumerate()
+        .skip(top)
+        .take(MAX_ROWS)
+        .map(|(index, row)| {
+            let text = |range: std::ops::Range<usize>| editor.text.get(range).unwrap_or_default().to_owned();
+            if index != caret_row {
+                return Line::raw(text(row.clone()));
+            }
+            // The caret is the reversed cell of the character after it, or a space at the end of the row.
+            let at = editor.cursor.clamp(row.start, row.end);
+            let after = editor.text.get(at..row.end).and_then(|tail| tail.chars().next());
+            let next = after.map_or(at, |c| at + c.len_utf8());
+            Line::from(vec![
+                Span::raw(text(row.start..at)),
+                Span::styled(after.map_or_else(|| " ".to_owned(), String::from), caret),
+                Span::raw(text(next..row.end)),
+            ])
+        })
+        .collect();
     if editor.text.is_empty() {
         let hint = match (editor.general, editor.kind) {
             (true, _) => "Write your note",
             (false, Kind::Replace) => "Write the new text",
             (false, _) => "Write your comment",
         };
-        lines = vec![Line::from(vec![Span::raw("▏"), Span::styled(hint, dim)])];
+        lines = vec![Line::from(vec![Span::styled(" ", caret), Span::styled(hint, dim)])];
     }
-    let height = u16::try_from(lines.len() + 2).unwrap_or(u16::MAX).min(area.height);
+    let shown = lines.len();
+    let height = u16::try_from(shown + 2).unwrap_or(u16::MAX).min(area.height);
     let anchor = if editor.general { None } else { shown_rows(app, &editor.range) };
     let y = editor_top(area, height, anchor);
     let rect = Rect::new(area.x, y, area.width, height);
+    if let Some(open) = app.editor.as_mut() {
+        open.rows = rows.len();
+        open.width = width;
+        open.top = top;
+        let text_rows = u16::try_from(shown).unwrap_or(u16::MAX).min(height.saturating_sub(2));
+        open.area = Rect::new(rect.x + 1, rect.y + 1, rect.width - 2, text_rows);
+    }
     let prefix = if app.editing_id.is_some() { "Edit " } else { "" };
     let title = if editor.general {
         " Note ".to_owned()
@@ -1491,27 +1517,6 @@ fn draw_editor(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::new().borders(Borders::ALL).title(title);
     frame.render_widget(Paragraph::new(lines).block(block), rect);
     draw_editor_buttons(frame, app, rect);
-}
-
-/// Split `text` into rows of at most `width` columns. A new line starts a row. A long line breaks at
-/// the column, so the rows are exact and the scroll can count them.
-fn wrap_rows(text: &str, width: usize) -> Vec<String> {
-    let mut rows = Vec::new();
-    for line in text.split('\n') {
-        let mut row = String::new();
-        let mut used = 0;
-        for c in line.chars() {
-            let w = c.width().unwrap_or(0);
-            if used + w > width && !row.is_empty() {
-                rows.push(std::mem::take(&mut row));
-                used = 0;
-            }
-            row.push(c);
-            used += w;
-        }
-        rows.push(row);
-    }
-    rows
 }
 
 /// The first row of the editor box of `height` rows. `anchor` is the first and the last row of the
