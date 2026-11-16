@@ -95,5 +95,5 @@ Annorex has two parts:
   Homebrew `bin` directory. The Lua module finds the binary in both places.
 - Source formula (`packaging/homebrew/annorex.rb`, built). It builds Annorex from the source archive of a tag with
   `cargo`, with the update check turned off. CI checks it with `brew style`.
-- Install methods: the shell installer, the Homebrew tap formula `devararishivian/tap/annorex`, and `cargo install` from the
-  source.
+- Install methods: the shell installer, the Homebrew tap formula `devararishivian/tap/annorex`, and `cargo install` from
+  the source.
