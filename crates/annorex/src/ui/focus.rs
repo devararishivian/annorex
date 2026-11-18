@@ -98,10 +98,19 @@ impl View<'_> {
         top.clamp(low, high)
     }
 
+    /// The last top row of the view: the first `DocLine` start at or after the row that leaves the
+    /// screen full. When the last `DocLine` is taller than the screen, its start. This is the rule of
+    /// [`View::top_for`].
+    fn max_top(&self) -> usize {
+        let end_top = self.rows.len().saturating_sub(self.height);
+        let top = self.start_at_or_after(end_top);
+        if top >= self.rows.len() { self.start_at_or_before(end_top) } else { top }
+    }
+
     /// The top row after a scroll by `amount` rows. The view starts at the first row of a `DocLine`,
     /// and it does not go past the screen that shows the last row.
     fn scroll_top(&self, forward: bool, amount: usize) -> usize {
-        let max_top = self.start_at_or_before(self.rows.len().saturating_sub(self.height));
+        let max_top = self.max_top();
         if forward {
             self.start_at_or_before((self.top + amount).min(max_top)).max(self.top)
         } else {
@@ -113,7 +122,7 @@ impl View<'_> {
     /// it can: a `DocLine` taller than `amount` rows does not stop it.
     fn wheel_top(&self, forward: bool, amount: usize) -> usize {
         let next = self.scroll_top(forward, amount);
-        let max_top = self.start_at_or_before(self.rows.len().saturating_sub(self.height));
+        let max_top = self.max_top();
         if forward && next == self.top && self.top < max_top {
             self.start_at_or_after(self.top + 1).min(max_top)
         } else {
@@ -123,7 +132,7 @@ impl View<'_> {
 
     /// The top row after a move when no block has the focus: the keys only scroll the view.
     fn browse_top(&self, how: Move) -> usize {
-        let max_top = self.start_at_or_before(self.rows.len().saturating_sub(self.height));
+        let max_top = self.max_top();
         match how {
             Move::First => 0,
             Move::Last => max_top,
@@ -408,5 +417,41 @@ impl App {
             self.mode = Mode::Block(self.doc.block_near(self.cursor).unwrap_or(0));
             self.block_move(Move::Show);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, reason = "tests assert by panicking")]
+
+    use super::*;
+
+    /// Rows for `DocLines` with the given heights.
+    fn rows_of(heights: &[usize]) -> Vec<VisualLine> {
+        heights
+            .iter()
+            .enumerate()
+            .flat_map(|(line, &height)| {
+                (0..height).map(move |n| VisualLine { doc_line: line, spans: Vec::new(), first: n == 0 })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn max_top_is_the_next_doc_line_start() {
+        // 1 + 1 + 6 + 1 = 9 rows, height 4: row 5 is inside the tall line (rows 2..8).
+        let rows = rows_of(&[1, 1, 6, 1]);
+        let view = View { rows: &rows, top: 0, height: 4 };
+        assert_eq!(view.max_top(), 8, "the start of the next DocLine");
+    }
+
+    #[test]
+    fn max_top_of_a_last_line_taller_than_the_screen_is_its_start() {
+        let rows = rows_of(&[1, 1, 8]);
+        let view = View { rows: &rows, top: 0, height: 4 };
+        assert_eq!(view.max_top(), 2);
+        let at_end = View { rows: &rows, top: 2, height: 4 };
+        assert_eq!(at_end.wheel_top(true, 3), 2, "no loop");
+        assert_eq!(at_end.scroll_top(true, 3), 2);
     }
 }

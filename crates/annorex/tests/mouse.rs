@@ -800,3 +800,45 @@ fn the_empty_space_right_of_the_cards_does_nothing_and_the_wheel_scrolls() {
     wheel_down(&mut app, (size.0 - 3, 10));
     assert!(app.doc_scrolled(), "the wheel in the empty space scrolled the document");
 }
+
+/// 30 short paragraphs, a table row that wraps to many rows, and a last paragraph.
+fn reply_with_a_tall_table_row() -> String {
+    let cell = "word ".repeat(400);
+    format!("{}| head |\n| --- |\n| {} |\n\nthe end\n", paragraphs(30), cell.trim())
+}
+
+#[test]
+fn the_wheel_reaches_the_end_after_a_tall_row() {
+    let text = reply_with_a_tall_table_row();
+    let mut app = viewer(&text);
+    let mut screen = frame(&mut app, NARROW);
+    let mut before = rows(&screen);
+    for _ in 0..200 {
+        wheel_down(&mut app, (30, 5));
+        screen = frame(&mut app, NARROW);
+        let now = rows(&screen);
+        if now == before {
+            break;
+        }
+        before = now;
+    }
+    assert!(
+        rows(&screen).iter().any(|r| r.contains("the end")),
+        "the end is shown:\n{}",
+        rows(&screen).join("\n")
+    );
+}
+
+#[test]
+fn g_reaches_the_end_after_a_tall_row() {
+    let text = reply_with_a_tall_table_row();
+    let mut app = viewer_raw(&text);
+    frame(&mut app, NARROW);
+    press(&mut app, "G");
+    let screen = frame(&mut app, NARROW);
+    assert!(
+        rows(&screen).iter().any(|r| r.contains("the end")),
+        "the end is shown:\n{}",
+        rows(&screen).join("\n")
+    );
+}
