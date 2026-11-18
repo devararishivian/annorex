@@ -454,4 +454,12 @@ mod tests {
         assert_eq!(at_end.wheel_top(true, 3), 2, "no loop");
         assert_eq!(at_end.scroll_top(true, 3), 2);
     }
+
+    #[test]
+    fn max_top_after_a_tall_row_that_fits_on_the_screen() {
+        // 2 + 3 + 2 = 7 rows, height 4: row 3 is inside the middle line (rows 2..5).
+        let rows = rows_of(&[2, 3, 2]);
+        let view = View { rows: &rows, top: 0, height: 4 };
+        assert_eq!(view.max_top(), 5, "the old rule gave 2");
+    }
 }
