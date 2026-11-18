@@ -347,8 +347,10 @@ The header shows the view, the agent and its state, and the position. It adds `u
 `unsent in 2 files` when notes are not sent. On the right, it has the send button `[ Send N → agent ▸ ]`. With no
 notes, the button is dim: `[ Send ▸ ]`. It is dim while the agent shows a dialog too. While the agent works, the
 button adds `queued` for Claude Code or `steers` for Pi and OpenCode. After a send, it shows `[ Sent HH:MM ]`. The
-footer shows the keys of the current mode. The note keys and `S send`, `P paste`, and `Y copy` come first. Annorex
-leaves out the hints that do not fit, from the end. `? help` and `q quit` stay while they fit.
+footer shows the keys of the current mode. The note keys and `S send`, `P paste`, and `Y copy` come first. The hints
+flow onto up to three rows. The footer has one row when the window has fewer than 16 rows. It also has one row while
+a question, the find input, or the note box is open. Annorex leaves out the hints that do not fit, from the end.
+`? help` and `q quit` stay while they fit.
 
 Notes show in place. The note colors are the 16 ANSI colors. The text under a note keeps its color. Looks good has a
 green underline. A comment has a yellow underline. Remove is red and crossed out. Replace is magenta and crossed out. A
@@ -472,6 +474,7 @@ These keys are for files:
 | Key       | Function                                                                    |
 |-----------|-----------------------------------------------------------------------------|
 | `T`       | Hide or show the file tree (over a narrow window: open or close it)         |
+| `.`       | Show or hide hidden files (in the tree)                                     |
 | `ctrl+p`  | Open the fuzzy find of files                                                |
 | `p`       | Open or close the list of replies and open files (`●` marks unsent notes)   |
 | `[` / `]` | Show the previous or the next document (replies first, then the open files) |
@@ -482,8 +485,10 @@ In the tree, `j` and `k` move, and `l` and `h` open and close a directory. `ente
 `/` starts a filter. In the fuzzy find, type to filter by path, move with the arrows or with `ctrl+n` and `ctrl+p`, and
 press `enter` to open the file. A `●` marks a file with a saved draft that has unsent notes.
 
-The tree obeys `.gitignore`, also outside a git repository. It skips hidden files and the `.git` directory. It does not
-follow links. Annorex refuses a file that is outside the work directory, also through a link.
+The tree lists files that `.gitignore`, `.git/info/exclude`, and `.ignore` would hide. Names that start with a dot show
+only after you press `.` in the tree. Press `.` again to hide them. These folders never show: `.cache`, `.direnv`,
+`.git`, `.hg`, `.jj`, `.svn`, `.venv`, `__pycache__`, `build`, `dist`, `node_modules`, `out`, `target`, `vendor`, and
+`venv`. The fuzzy find uses the same rules. The tree does not follow links. Annorex refuses a file that is outside the work directory, also through a link.
 
 Annorex reads the size and the time of each open file every 2 seconds. When a file changes on disk, a banner shows
 `<path> changed on disk. Press r to read it again.` The list marks the file with `≠`. Press `r`. The text is new, and
@@ -605,6 +610,7 @@ The `[keys]` table takes these action names.
 | `next_file`      | `]`         | Next file                        |
 | `close_file`     | `W`         | Close the file                   |
 | `tree`           | `T`         | File tree                        |
+| `hidden`         | `.`         | Show or hide hidden files        |
 | `find_file`      | `ctrl+p`    | Find a file                      |
 | `help`           | `?`         | This help                        |
 | `quit`           | `q`         | Quit (not while you type a note) |

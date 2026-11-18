@@ -217,6 +217,7 @@ Press `?` in Annorex to see all keys. This table gives the main keys.
 | `a`                 | Move the focus to the list of notes                                       |
 | `p`                 | Open or close the list of replies and open files                          |
 | `T`                 | Hide or show the file tree                                                |
+| `.`                 | Show or hide hidden files in the tree                                     |
 | `tab`               | Move the focus between the tree, the document, and the card rail          |
 | `ctrl+p`            | Find a file by name                                                       |
 | `[` / `]`           | Show the previous or the next open file                                   |

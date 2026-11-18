@@ -9,7 +9,7 @@ the changes for Annorex. A comment marks the adapted functions in `wrap.rs` and 
 - Project: plannotator-tui
 - URL: <https://github.com/plannotator/plannotator-tui>
 - Commit: `83b0cd91e287df391d5b27029140ff72c32c085d`, for all parts except the keys of the note box. The keys of the
-  note box come from the later commit `e537abdefa7f404c62bb51f927cbe426fbdf500c`. The license did not change.
+  note box, the skipped folders, and the hanging indent come from the later commit `e537abdefa7f404c62bb51f927cbe426fbdf500c`. The license did not change.
 - License: MIT
 - Files in Annorex that come from plannotator-tui:
     - `crates/annorex-hosts/src/lib.rs`, `claude/mod.rs`, `claude/entries.rs`, `claude/ladder.rs`,
@@ -23,6 +23,10 @@ the changes for Annorex. A comment marks the adapted functions in `wrap.rs` and 
     - The function `wrap_table` in `crates/annorex/src/wrap.rs`: the column widths and the clip fallback
     - The keys and the word rules of the note box in `crates/annorex/src/ui/editor.rs` (from
       `crates/plannotator-tui/src/ui/compose.rs` at commit `e537abd`)
+    - The list of skipped folders (`SKIPPED_DIRS`) and the toggle for hidden files in `crates/annorex/src/files.rs`
+      and the tree (from `crates/plannotator-tui/src/tree.rs` at commit `e537abd`)
+    - The hanging indent of wrapped list items and quotes, with its half-width rule, in `crates/annorex/src/wrap.rs`
+      (from `crates/plannotator-tui/src/wrap/hang.rs` at commit `e537abd`)
     - The lint table in the root `Cargo.toml` and the root `rustfmt.toml`
 - These files in `crates/annorex-hosts/` are Annorex code: `changes.rs`, `claude/changes.rs`, `pi_changes.rs`,
   `opencode_changes.rs`, `tests/display_name.rs`, `tests/fixtures/claude-code-new-records.jsonl`, and
