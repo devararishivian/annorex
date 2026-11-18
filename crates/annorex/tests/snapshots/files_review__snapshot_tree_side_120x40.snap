@@ -21,7 +21,6 @@ Annorex · files · Claude Code (idle) · no file open                          
                            │
                            │
                            │
-                           │
                            │ Open a file from the tree (enter), or find one (ctrl+p).
                            │
                            │
@@ -41,4 +40,5 @@ Annorex · files · Claude Code (idle) · no file open                          
                            │
                            │
                            │
+                                                                                                                  T hide
    j/k move · enter open · h/l close/open · / filter · esc back · . hidden · S send · P paste · Y copy · ? help · q quit

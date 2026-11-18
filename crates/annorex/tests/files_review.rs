@@ -251,6 +251,11 @@ fn footer(screen: &str) -> &str {
     screen.lines().last().unwrap_or_default()
 }
 
+/// True when `text` is in one of the three rows that the footer can have.
+fn in_footer(screen: &str, text: &str) -> bool {
+    screen.lines().rev().take(3).any(|row| row.contains(text))
+}
+
 #[test]
 fn send_keys_work_in_the_file_tree() {
     use annorex::deliver::DeliveryMode;
@@ -410,8 +415,9 @@ fn the_files_view_starts_on_the_tree_and_shows_the_file_keys() {
     // `files` with no path: the tree is on the left and has the focus.
     let (_dir, mut app) = tree_app(&Config::default());
     app.open_tree();
-    let screen = render(&mut app, 140, 20);
-    assert!(screen.contains("Tree") && footer(&screen).contains("T hide"), "{screen}");
+    let screen = render(&mut app, 120, 20);
+    // `T hide` flows onto a footer row above the bottom row.
+    assert!(screen.contains("Tree") && in_footer(&screen, "T hide"), "{screen}");
     // `files` with a path: the file has the focus, and the tree stays on the left.
     let (_dir, mut app) = tree_app(&Config::default());
     app.open_file(loaded("a.md", "# Title\n\nalpha text\n"));
@@ -454,9 +460,9 @@ fn the_banner_in_the_last_reply_view_sends_the_user_to_the_tree() {
         "{screen}"
     );
     press(&mut app, "T");
-    let screen = render(&mut app, 140, 20);
+    let screen = render(&mut app, 120, 20);
     assert!(screen.contains("Tree") && !screen.contains("The agent changed"), "{screen}");
-    assert!(footer(&screen).contains("T hide"), "the tree has the focus: {screen}");
+    assert!(in_footer(&screen, "T hide"), "the tree has the focus: {screen}");
 }
 
 #[test]

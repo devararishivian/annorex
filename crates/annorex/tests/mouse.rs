@@ -900,3 +900,30 @@ fn a_drag_over_a_wrapped_list_item_quotes_the_text_without_the_marker() {
     let end = text.find(&word).expect("the word is in the source") + 3;
     assert_eq!(app.review().expect("review").annotations[0].quote, text[2..end]);
 }
+
+#[test]
+fn a_hint_on_an_upper_footer_row_is_on_the_screen_and_takes_a_click() {
+    // At 80 columns the block mode hints do not fit in one row. They flow onto the rows above.
+    let mut app = viewer(THREE);
+    let screen = frame(&mut app, NARROW);
+    let bottom = NARROW.1 - 1;
+    let (_, y) = find(&screen, "enter actions");
+    assert!(y < bottom, "`enter actions` is above the bottom row:\n{}", rows(&screen).join("\n"));
+    assert!(footer(&screen).ends_with("q quit"), "the bottom row ends with `q quit`: {}", footer(&screen));
+    // `enter actions` has no action. `p list`, on an upper row too, opens the reply list.
+    let (x, y) = find(&screen, "p list");
+    assert!(y < bottom, "`p list` is above the bottom row:\n{}", rows(&screen).join("\n"));
+    click(&mut app, (x, y));
+    let screen = frame(&mut app, NARROW);
+    assert!(rows(&screen).iter().any(|row| row.contains("Replies")), "the reply list opened");
+}
+
+#[test]
+fn the_footer_has_one_row_below_16_rows() {
+    let mut app = viewer(THREE);
+    let screen = frame(&mut app, (80, 15));
+    assert!(find_from(&screen, "enter actions", 0).is_none(), "{}", rows(&screen).join("\n"));
+    let above = &rows(&screen)[13];
+    assert!(!above.contains(" · "), "the row above the footer has no hints: {above}");
+    assert!(footer(&screen).ends_with("q quit"), "{}", footer(&screen));
+}

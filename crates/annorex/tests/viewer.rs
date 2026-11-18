@@ -584,3 +584,23 @@ fn snapshot_update_notice_80x24() {
     assert!(screen.contains("Annorex 9.9.9 is available. Run: annorex update"), "{screen}");
     insta::assert_snapshot!(screen);
 }
+
+#[test]
+fn the_last_block_stays_on_the_screen_above_a_taller_footer() {
+    let mut app = viewer();
+    press(&mut app, "G");
+    // The find input has a footer of one row. The block mode hints at 80 columns need more rows.
+    press(&mut app, "/");
+    let screen = render(&mut app, 80, 24);
+    assert!(screen.lines().take(23).any(|row| row.contains("Last line of the reply.")), "{screen}");
+    press(&mut app, "\u{1b}");
+    let screen = render(&mut app, 80, 24);
+    let lines: Vec<&str> = screen.lines().collect();
+    let footer_top = lines.iter().rposition(|row| !row.contains(" · ")).expect("a body row") + 1;
+    assert!(footer_top < 23, "the footer has more than one row:\n{screen}");
+    assert!(
+        lines[..footer_top].iter().any(|row| row.contains("Last line of the reply.")),
+        "the focused block is on the screen above the footer:\n{screen}"
+    );
+    assert!(lines[23].contains("block") && lines[23].ends_with("q quit"), "{screen}");
+}

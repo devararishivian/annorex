@@ -21,7 +21,7 @@ use crate::agent::Agent;
 use crate::doc::{Doc, DocKind, DocSpan, SpanStyle};
 use crate::files::TREE_LIMIT;
 use crate::keys::Action;
-use crate::layout::{Layout, RAIL_WIDTH, compute};
+use crate::layout::{Layout, RAIL_WIDTH, SINGLE_BELOW_HEIGHT, compute};
 use crate::replies::Candidate;
 use crate::review::{Kind, Review};
 use crate::safety::Safety;
@@ -29,6 +29,9 @@ use crate::wrap::{VisualLine, fit, gutter_width};
 
 /// One hint of the footer: the action that a click does, when there is one, and the text.
 pub(super) type Hint = (Option<Action>, String);
+
+/// The most rows of the footer.
+const FOOTER_ROWS: u16 = 3;
 
 /// The text between two hints of the footer.
 const HINT_GAP: &str = " · ";
@@ -208,7 +211,21 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
 pub fn draw(frame: &mut Frame, app: &mut App) {
     app.hits.clear();
     let area = frame.area();
-    let layout = compute(area, app.has_root(), app.tree_open, 1);
+    // The footer comes first: its hints decide how many rows it needs.
+    let viewer = matches!(app.screen, Screen::Viewer);
+    let asking = viewer && (app.confirm.is_some() || app.find_input.is_some());
+    // A question and the find input take the keys, so the footer shows no hints with them.
+    let hints = if asking { Vec::new() } else { footer_hints(app) };
+    let tree_shown = match compute(area, app.has_root(), app.tree_open, 1) {
+        Layout::Wide { tree, .. } => tree.is_some(),
+        Layout::Single { .. } => app.focus == Focus::Tree,
+        Layout::TooSmall => false,
+    };
+    let left = footer_left(app, tree_shown);
+    let one_row = !viewer || asking || app.editor.is_some() || area.height < SINGLE_BELOW_HEIGHT;
+    let left_width = left.as_ref().map_or(0, |(text, _)| text_width(text));
+    let rows = flow_hints(area.width, left_width, hints, if one_row { 1 } else { FOOTER_ROWS });
+    let layout = compute(area, app.has_root(), app.tree_open, u16::try_from(rows.len()).unwrap_or(1));
     let Some((header, footer)) = layout.header_footer() else {
         app.docked = Docked::default();
         draw_too_small(frame, area);
@@ -226,7 +243,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             );
             let paragraph = Paragraph::new(format!("Annorex: {message}")).wrap(Wrap { trim: true });
             frame.render_widget(paragraph, body);
-            draw_footer(frame, app, footer, None, footer_hints(app));
+            draw_footer(frame, app, footer, left, rows);
         }
         Screen::Picker(candidates) => {
             draw_header(
@@ -241,10 +258,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             let inner = block.inner(rect);
             frame.render_widget(block, rect);
             draw_picker(frame, app, inner, &candidates, app.picker_index);
-            draw_footer(frame, app, footer, None, footer_hints(app));
+            draw_footer(frame, app, footer, left, rows);
         }
         Screen::Viewer => {
             draw_viewer(frame, app, layout, header, footer);
+            draw_footer(frame, app, footer, left, rows);
             if app.help_open {
                 draw_help(frame, area, app);
             }
@@ -447,10 +465,83 @@ fn send_button(app: &App) -> (String, Style) {
     (format!("[ Send {count}{effect}{agent} ▸ ]"), style)
 }
 
-/// The footer: the status or a message on the left, the hints on the right. The hints that do not fit
-/// are left out from the end, but the help hint stays while it fits. Each hint with an action is in the
-/// hit map.
+/// The hints of the footer in rows, top to bottom. `left` is the width of the left text. The bottom row
+/// holds the left text, then the hints that fit in order, then `? help` and `q quit` at the right end.
+/// `? help` and `q quit` stay while they fit. Each hint that does not fit goes to the row above, in
+/// order. When that row is full, the next hints go to the row above it. The footer has at most
+/// `max_rows` rows, and the hints that do not fit in them are left out.
+fn flow_hints(width: u16, left: u16, hints: Vec<Hint>, max_rows: u16) -> Vec<Vec<Hint>> {
+    let used = if left == 0 { 0 } else { left + 2 };
+    let gap = text_width(HINT_GAP);
+    let (keep, rest): (Vec<Hint>, Vec<Hint>) =
+        hints.into_iter().partition(|(action, _)| matches!(action, Some(Action::Help | Action::Quit)));
+    let mut room = width.saturating_sub(used);
+    // `q quit` first, then `? help`: both stay while they fit. They show last, with `q quit` at the end.
+    let mut kept: Vec<Hint> = Vec::new();
+    let mut keep_hints = keep;
+    keep_hints.sort_by_key(|(action, _)| u8::from(*action == Some(Action::Help)));
+    for hint in keep_hints {
+        let hint_width = text_width(&hint.1) + if kept.is_empty() { 0 } else { gap };
+        if hint_width <= room {
+            room -= hint_width;
+            kept.push(hint);
+        }
+    }
+    kept.sort_by_key(|(action, _)| u8::from(*action == Some(Action::Quit)));
+    let mut rest = rest.into_iter().peekable();
+    let mut bottom: Vec<Hint> = Vec::new();
+    while let Some(hint) = rest.next_if(|(_, text)| text_width(text) + gap <= room) {
+        room -= text_width(&hint.1) + gap;
+        bottom.push(hint);
+    }
+    bottom.extend(kept);
+    let mut rows = vec![bottom];
+    let mut row: Vec<Hint> = Vec::new();
+    let mut room = width;
+    for hint in rest {
+        let hint_width = text_width(&hint.1);
+        if !row.is_empty() && hint_width + gap > room {
+            rows.push(std::mem::take(&mut row));
+            room = width;
+        }
+        // A hint wider than the pane ends the footer too.
+        if rows.len() >= usize::from(max_rows) || hint_width > room {
+            break;
+        }
+        room -= hint_width + if row.is_empty() { 0 } else { gap };
+        row.push(hint);
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows.reverse();
+    rows
+}
+
+/// The footer: the status or a message on the left of the bottom row, and the rows of hints from
+/// [`flow_hints`], right-aligned. The rows fill the footer from the bottom. Each hint with an action is
+/// in the hit map at its row.
 fn draw_footer(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    left: Option<(String, Style)>,
+    rows: Vec<Vec<Hint>>,
+) {
+    let count = u16::try_from(rows.len()).unwrap_or(u16::MAX);
+    let top = area.bottom().saturating_sub(count);
+    let mut left = left;
+    for (y, hints) in (top..).zip(rows) {
+        if y < area.y {
+            continue;
+        }
+        let row_left = if y + 1 == area.bottom() { left.take() } else { None };
+        draw_hint_row(frame, app, Rect::new(area.x, y, area.width, 1), row_left, hints);
+    }
+}
+
+/// One row of the footer: the left text, then the hints at the right end.
+fn draw_hint_row(
     frame: &mut Frame,
     app: &mut App,
     area: Rect,
@@ -458,41 +549,15 @@ fn draw_footer(
     hints: Vec<Hint>,
 ) {
     let (left, left_style) = left.unwrap_or_default();
-    let used = if left.is_empty() { 0 } else { text_width(&left) + 2 };
     let gap = text_width(HINT_GAP);
-    let (keep, rest): (Vec<Hint>, Vec<Hint>) =
-        hints.into_iter().partition(|(action, _)| matches!(action, Some(Action::Help | Action::Quit)));
-    let mut room = area.width.saturating_sub(used);
-    let mut chosen: Vec<Hint> = Vec::new();
-    // `q quit` first, then `? help`: both stay while they fit. They show last, with `q quit` at the end.
-    let mut kept: Vec<Hint> = Vec::new();
-    let mut keep_hints = keep;
-    keep_hints.sort_by_key(|(action, _)| u8::from(*action == Some(Action::Help)));
-    for hint in keep_hints {
-        let width = text_width(&hint.1) + if kept.is_empty() { 0 } else { gap };
-        if width <= room {
-            room -= width;
-            kept.push(hint);
-        }
-    }
-    kept.sort_by_key(|(action, _)| u8::from(*action == Some(Action::Quit)));
-    for hint in rest {
-        let width = text_width(&hint.1) + gap;
-        if width > room {
-            break;
-        }
-        room -= width;
-        chosen.push(hint);
-    }
-    chosen.extend(kept);
-    let hints_width: u16 = chosen.iter().map(|(_, text)| text_width(text)).sum::<u16>()
-        + gap * u16::try_from(chosen.len().saturating_sub(1)).unwrap_or(0);
+    let hints_width: u16 = hints.iter().map(|(_, text)| text_width(text)).sum::<u16>()
+        + gap * u16::try_from(hints.len().saturating_sub(1)).unwrap_or(0);
     let left = fit(&left, area.width.saturating_sub(hints_width + u16::from(hints_width > 0) * 2));
     let dim = Style::new().add_modifier(Modifier::DIM);
     let filler = usize::from(area.width.saturating_sub(text_width(&left) + hints_width));
     let mut spans = vec![Span::styled(left, left_style), Span::raw(" ".repeat(filler))];
-    let mut x = area.right() - hints_width;
-    for (index, (action, text)) in chosen.into_iter().enumerate() {
+    let mut x = area.right().saturating_sub(hints_width);
+    for (index, (action, text)) in hints.into_iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(HINT_GAP, dim));
             x += gap;
@@ -734,16 +799,22 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
             BoxView::Finder => draw_finder(frame, app, rect),
         }
     }
-    let tree_shown = tree.is_some() || (narrow && app.focus == Focus::Tree);
+}
+
+/// The left text of the footer: the question, the find input, the message, or the status of the
+/// document. `tree_shown` is true when the tree is on the screen. The screens Error and Picker have no
+/// left text.
+fn footer_left(app: &App, tree_shown: bool) -> Option<(String, Style)> {
+    if !matches!(app.screen, Screen::Viewer) {
+        return None;
+    }
     let bold = Style::new().add_modifier(Modifier::BOLD);
-    // A question and the find input take the keys, so the footer shows no hints with them.
     let question = app
         .confirm
         .map(|what| prompt_text(app, what))
         .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")));
     if let Some(question) = question {
-        draw_footer(frame, app, footer, Some((question, bold)), Vec::new());
-        return;
+        return Some((question, bold));
     }
     let message = app
         .status
@@ -753,12 +824,10 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
             (tree_shown && app.tree.is_truncated())
                 .then(|| format!("The tree shows the first {} entries.", thousands(TREE_LIMIT)))
         });
-    let left = match message {
+    Some(match message {
         Some(message) => (message, bold),
         None => (doc_status(app), Style::new().add_modifier(Modifier::DIM)),
-    };
-    let hints = footer_hints(app);
-    draw_footer(frame, app, footer, Some(left), hints);
+    })
 }
 
 /// The empty state of the files view while no document is on the screen.
@@ -1611,6 +1680,85 @@ fn age(now: SystemTime, then: SystemTime) -> String {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
+
+    #[allow(clippy::indexing_slicing, reason = "tests assert by panicking")]
+    mod flow {
+        use super::super::{HINT_GAP, Hint, flow_hints, text_width};
+        use crate::keys::Action;
+
+        /// `count` plain hints of eight columns, then `? help` and `q quit`.
+        fn hints(count: usize) -> Vec<Hint> {
+            let mut out: Vec<Hint> = (0..count).map(|n| (None, format!("hint {n:>3}"))).collect();
+            out.push((Some(Action::Help), "? help".to_owned()));
+            out.push((Some(Action::Quit), "q quit".to_owned()));
+            out
+        }
+
+        fn row_width(row: &[Hint]) -> u16 {
+            let gaps = u16::try_from(row.len().saturating_sub(1)).unwrap_or(0) * text_width(HINT_GAP);
+            row.iter().map(|(_, text)| text_width(text)).sum::<u16>() + gaps
+        }
+
+        fn texts(row: &[Hint]) -> Vec<&str> {
+            row.iter().map(|(_, text)| text.as_str()).collect()
+        }
+
+        #[test]
+        fn hints_that_fit_give_one_row() {
+            let rows = flow_hints(80, 10, hints(3), 3);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(texts(&rows[0]), ["hint   0", "hint   1", "hint   2", "? help", "q quit"]);
+        }
+
+        #[test]
+        fn hints_for_twice_the_width_give_two_rows() {
+            // Each hint takes eight columns and a gap of three: five of them and the two kept hints
+            // need about twice 40 columns.
+            let rows = flow_hints(40, 0, hints(5), 3);
+            assert_eq!(rows.len(), 2, "{rows:?}");
+            let bottom = rows.last().expect("bottom row");
+            assert_eq!(bottom.last().map(|(_, text)| text.as_str()), Some("q quit"));
+            assert_eq!(texts(bottom), ["hint   0", "hint   1", "? help", "q quit"]);
+            assert_eq!(texts(&rows[0]), ["hint   2", "hint   3", "hint   4"]);
+            assert!(rows.iter().all(|row| row_width(row) <= 40));
+        }
+
+        #[test]
+        fn hints_for_five_times_the_width_give_three_rows_and_leave_out_the_rest() {
+            let rows = flow_hints(40, 0, hints(20), 3);
+            assert_eq!(rows.len(), 3, "{rows:?}");
+            assert!(rows.iter().all(|row| row_width(row) <= 40));
+            // The bottom row first, then the rows above it: the hints stay in order.
+            let shown: Vec<&str> = rows.iter().rev().flat_map(|row| texts(row)).collect();
+            assert_eq!(
+                shown,
+                [
+                    "hint   0", "hint   1", "? help", "q quit", "hint   2", "hint   3", "hint   4",
+                    "hint   5", "hint   6", "hint   7"
+                ]
+            );
+        }
+
+        #[test]
+        fn one_row_at_most_leaves_out_the_hints_as_before() {
+            let rows = flow_hints(40, 0, hints(20), 1);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(texts(&rows[0]), ["hint   0", "hint   1", "? help", "q quit"]);
+        }
+
+        #[test]
+        fn the_left_text_takes_room_from_the_bottom_row_only() {
+            let rows = flow_hints(40, 9, hints(3), 3);
+            assert_eq!(rows.len(), 2, "{rows:?}");
+            assert_eq!(texts(&rows[1]), ["hint   0", "? help", "q quit"]);
+            assert_eq!(texts(&rows[0]), ["hint   1", "hint   2"]);
+        }
+
+        #[test]
+        fn no_hints_give_one_empty_row() {
+            assert_eq!(flow_hints(40, 30, Vec::new(), 3), vec![Vec::<Hint>::new()]);
+        }
+    }
 
     #[test]
     #[allow(clippy::single_range_in_vec_init)]
