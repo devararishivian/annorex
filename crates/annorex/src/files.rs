@@ -3,6 +3,7 @@
 //! Annorex only reads these files. It never writes, renames, or deletes them.
 
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
@@ -89,34 +90,38 @@ pub fn scan(root: &Path, show_hidden: bool) -> Scan {
     scan_with(root, TREE_LIMIT, show_hidden)
 }
 
-/// The tree under `root`, up to `limit` entries. The walk lists the files that a `.gitignore`
-/// file ignores, because the agent often writes there. It reads no ignore file. It never lists or
-/// enters a folder of [`SKIPPED_DIRS`]. Names that start with a dot show only when `show_hidden`
-/// is true. It never follows a link.
+/// The tree under `root`, up to `limit` entries. The walk goes breadth first, so a cut at the
+/// limit drops the deepest entries first. It reads no ignore file, because the agent often writes
+/// to ignored files. It never lists or enters a folder of [`SKIPPED_DIRS`]. Names that start with
+/// a dot show only when `show_hidden` is true. It lists a link but never follows it.
 pub fn scan_with(root: &Path, limit: usize, show_hidden: bool) -> Scan {
-    let walk = ignore::WalkBuilder::new(root)
-        .standard_filters(false)
-        .hidden(!show_hidden)
-        .follow_links(false)
-        .filter_entry(|entry| {
-            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
-            // The root itself has depth 0 and always stays.
-            entry.depth() == 0 || !is_dir || !SKIPPED_DIRS.iter().any(|name| entry.file_name() == *name)
-        })
-        .build();
     let mut entries = Vec::new();
     let mut truncated = false;
-    for item in walk.filter_map(Result::ok) {
-        let Ok(relative) = item.path().strip_prefix(root) else { continue };
-        if relative.as_os_str().is_empty() {
-            continue;
+    let mut queue = VecDeque::from([PathBuf::new()]);
+    'walk: while let Some(folder) = queue.pop_front() {
+        let Ok(items) = std::fs::read_dir(root.join(&folder)) else { continue };
+        let mut children: Vec<Entry> = items
+            .filter_map(Result::ok)
+            .filter_map(|item| {
+                let name = item.file_name();
+                // The type of the entry itself: a link is not a folder.
+                let is_dir = item.file_type().ok()?.is_dir();
+                let hidden = name.as_encoded_bytes().starts_with(b".");
+                let skipped = is_dir && SKIPPED_DIRS.iter().any(|skip| name == *skip);
+                (!skipped && (show_hidden || !hidden)).then(|| Entry { path: folder.join(name), is_dir })
+            })
+            .collect();
+        children.sort_by(compare);
+        for child in children {
+            if entries.len() == limit {
+                truncated = true;
+                break 'walk;
+            }
+            if child.is_dir {
+                queue.push_back(child.path.clone());
+            }
+            entries.push(child);
         }
-        if entries.len() == limit {
-            truncated = true;
-            break;
-        }
-        let is_dir = item.file_type().is_some_and(|kind| kind.is_dir());
-        entries.push(Entry { path: relative.to_path_buf(), is_dir });
     }
     entries.sort_by(compare);
     Scan { entries, truncated }
@@ -277,6 +282,35 @@ mod tests {
         assert_eq!(limited.entries.len(), 3);
         assert!(limited.truncated);
         assert!(!scan_with(root, 6, false).truncated);
+    }
+
+    #[test]
+    fn a_cut_at_the_limit_drops_the_deepest_entries_first() {
+        let dir = tempfile::tempdir().expect("dir");
+        let root = dir.path();
+        for index in 0..20 {
+            write(root, &format!("aaa/deep/f{index:02}.txt"), "x");
+        }
+        write(root, "src/main.rs", "fn main() {}\n");
+        let limited = scan_with(root, 5, false);
+        assert!(limited.truncated);
+        let names = names(&limited);
+        assert_eq!(names.len(), 5, "{names:?}");
+        assert!(names.contains(&"src/main.rs".to_owned()), "{names:?}");
+        assert!(names.contains(&"aaa/deep".to_owned()), "{names:?}");
+    }
+
+    #[test]
+    fn scan_lists_a_file_with_a_skipped_name_and_does_not_enter_links() {
+        let dir = tempfile::tempdir().expect("dir");
+        let root = dir.path();
+        write(root, "build", "make\n");
+        write(root, "real/inner.txt", "x");
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).expect("link");
+        let names = names(&scan(root, false));
+        assert!(names.contains(&"build".to_owned()), "{names:?}");
+        assert!(names.contains(&"link".to_owned()), "{names:?}");
+        assert!(!names.iter().any(|name| name.starts_with("link/")), "{names:?}");
     }
 
     #[test]
