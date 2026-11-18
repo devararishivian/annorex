@@ -317,7 +317,9 @@ impl App {
             }
             previous = Some(c);
         }
-        // The quote bars and the list marker or indent have no source: they give the first text.
+        // A cell without source inside the row (table padding or a border) keeps the offset of the
+        // text on its left. The quote bars and the list marker or indent come before any text: they
+        // give the first text of the row.
         let first = glyphs.iter().find_map(|(_, offset)| *offset);
         let mut x = 0;
         let mut found = None;

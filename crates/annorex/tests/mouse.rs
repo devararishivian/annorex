@@ -927,3 +927,24 @@ fn the_footer_has_one_row_below_16_rows() {
     assert!(!above.contains(" · "), "the row above the footer has no hints: {above}");
     assert!(footer(&screen).ends_with("q quit"), "{}", footer(&screen));
 }
+
+#[test]
+fn a_click_on_table_padding_goes_to_the_end_of_the_cell_on_its_left() {
+    let text = "| long header name | b |\n|---|---|\n| alpha | beta |\n";
+    let mut app = viewer(text);
+    let screen = frame(&mut app, WIDE);
+    let (x, y) = find(&screen, "alpha");
+    let (border, _) = find_from(&screen, "\u{2502} beta", x).expect("the border after alpha");
+    let end = text.find("alpha").expect("alpha is in the source") + 4;
+    // The cells after `alpha` are table padding and a border, with no source.
+    for column in [x + 7, border, border + 1] {
+        drag(&mut app, (x, y), (column, y));
+        assert_eq!(app.mode(), Mode::Text);
+        assert_eq!(
+            app.cursor(),
+            end,
+            "column {column} gives the end of `alpha`:\n{}",
+            rows(&screen).join("\n")
+        );
+    }
+}
