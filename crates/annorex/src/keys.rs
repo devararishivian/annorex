@@ -357,7 +357,7 @@ pub fn parse_key(text: &str) -> Result<KeyChord, String> {
 }
 
 /// Actions whose default key came after the first release of the `[keys]` table.
-const LATE: [Action; 1] = [Action::Help];
+const LATE: [Action; 2] = [Action::Help, Action::Hidden];
 
 /// The keys of the viewer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -533,6 +533,15 @@ mod tests {
         let map = KeyMap::with_overrides(&overrides).expect("loads");
         assert_eq!(map.action(key(KeyCode::Char('?'), KeyModifiers::NONE)), Some(Action::Find));
         assert_eq!(map.label(Action::Help), "unbound");
+    }
+
+    #[test]
+    fn an_override_can_take_the_dot_key_of_hidden() {
+        // `.` had no action before `hidden` came. A config that gave `.` to `find_next` must still load.
+        let overrides = BTreeMap::from([("find_next".to_owned(), ".".to_owned())]);
+        let map = KeyMap::with_overrides(&overrides).expect("loads");
+        assert_eq!(map.action(key(KeyCode::Char('.'), KeyModifiers::NONE)), Some(Action::FindNext));
+        assert_eq!(map.label(Action::Hidden), "unbound");
     }
 
     #[test]
