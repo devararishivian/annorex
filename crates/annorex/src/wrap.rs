@@ -250,8 +250,8 @@ pub fn wrap_doc(doc: &Doc, width: u16) -> Vec<VisualLine> {
 }
 
 /// The rows of one line. The prefix of the line is its first spans without a source: the quote
-/// bars and the list marker. The rows after the first start with `continuation` of the prefix, so
-/// the text of a list item or a quote lines up under the text of its first row.
+/// bars, the list marker, or the list indent. The rows after the first start with `continuation`
+/// of the prefix, so the text of a list item or a quote lines up under the text of its first row.
 // Adapted from plannotator-tui (MIT) at e537abd: the hanging indent and its half-width rule.
 fn wrap_hanging(spans: &[DocSpan], width: usize) -> Vec<Vec<DocSpan>> {
     let lead = spans.iter().take_while(|span| span.source.is_none()).count();
