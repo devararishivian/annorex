@@ -488,7 +488,8 @@ press `enter` to open the file. A `●` marks a file with a saved draft that has
 The tree lists files that `.gitignore`, `.git/info/exclude`, and `.ignore` would hide. Names that start with a dot show
 only after you press `.` in the tree. Press `.` again to hide them. These folders never show: `.cache`, `.direnv`,
 `.git`, `.hg`, `.jj`, `.svn`, `.venv`, `__pycache__`, `build`, `dist`, `node_modules`, `out`, `target`, `vendor`, and
-`venv`. The fuzzy find uses the same rules. The tree does not follow links. Annorex refuses a file that is outside the work directory, also through a link.
+`venv`. The fuzzy find uses the same rules. The tree does not follow links. Annorex refuses a file that is outside the
+work directory, also through a link.
 
 Annorex reads the size and the time of each open file every 2 seconds. When a file changes on disk, a banner shows
 `<path> changed on disk. Press r to read it again.` The list marks the file with `≠`. Press `r`. The text is new, and
@@ -523,8 +524,8 @@ A path can name a directory. Then the tree opens there. If an Annorex is already
 `ctrl+p` or `T`.
 
 Limits: Annorex does not open a file larger than 1 MiB or a file with a NUL byte in its first 8192 bytes. The tree
-shows the first 20,000 entries and says so when there are more. If you open more than 50 files, Annorex asks you to
-close one first.
+shows 20,000 entries at most and says so when there are more. It reads the folders level by level from the root, so
+the deepest entries are the first to go. If you open more than 50 files, Annorex asks you to close one first.
 
 ## Drafts
 
