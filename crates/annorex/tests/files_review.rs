@@ -230,7 +230,7 @@ fn tree_app(config: &Config) -> (tempfile::TempDir, App) {
     std::fs::write(dir.path().join("src/lib.rs"), "pub fn lib() {}\n").expect("lib");
     let mut app = App::new(state(), Screen::Viewer, Vec::new(), config).with_root(dir.path().to_path_buf());
     app.set_time_zone(jiff::tz::TimeZone::UTC);
-    app.set_scan(annorex::files::scan(dir.path()));
+    app.set_scan(annorex::files::scan(dir.path(), false));
     (dir, app)
 }
 
@@ -410,7 +410,7 @@ fn the_files_view_starts_on_the_tree_and_shows_the_file_keys() {
     // `files` with no path: the tree is on the left and has the focus.
     let (_dir, mut app) = tree_app(&Config::default());
     app.open_tree();
-    let screen = render(&mut app, 120, 20);
+    let screen = render(&mut app, 140, 20);
     assert!(screen.contains("Tree") && footer(&screen).contains("T hide"), "{screen}");
     // `files` with a path: the file has the focus, and the tree stays on the left.
     let (_dir, mut app) = tree_app(&Config::default());
@@ -454,7 +454,7 @@ fn the_banner_in_the_last_reply_view_sends_the_user_to_the_tree() {
         "{screen}"
     );
     press(&mut app, "T");
-    let screen = render(&mut app, 120, 20);
+    let screen = render(&mut app, 140, 20);
     assert!(screen.contains("Tree") && !screen.contains("The agent changed"), "{screen}");
     assert!(footer(&screen).contains("T hide"), "the tree has the focus: {screen}");
 }
@@ -491,7 +491,7 @@ fn tree_lists_expands_and_opens() {
 #[test]
 fn tree_shows_truncated_notice() {
     let (dir, mut app) = tree_app(&Config::default());
-    app.set_scan(annorex::files::scan_with(dir.path(), 2));
+    app.set_scan(annorex::files::scan_with(dir.path(), 2, false));
     press(&mut app, "T");
     let screen = render(&mut app, 120, 20);
     let footer = screen.lines().last().expect("footer");
@@ -782,7 +782,7 @@ fn finder_opened_before_the_scan_fills_when_the_scan_ends() {
         App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(dir.path().to_path_buf());
     ctrl(&mut app, 'p');
     assert!(render(&mut app, 80, 12).contains("Scanning…"), "the finder says that the scan is running");
-    app.set_scan(annorex::files::scan(dir.path()));
+    app.set_scan(annorex::files::scan(dir.path(), false));
     let screen = render(&mut app, 80, 12);
     assert!(screen.contains("README.md") && !screen.contains("Scanning…"), "{screen}");
 }
@@ -813,7 +813,7 @@ fn a_directory_on_the_command_line_opens_the_tree_there() {
     let mut app =
         App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(dir.path().to_path_buf());
     app.reveal_dir(std::path::Path::new("src"));
-    app.set_scan(annorex::files::scan(dir.path()));
+    app.set_scan(annorex::files::scan(dir.path(), false));
     let screen = render(&mut app, 120, 20);
     assert!(screen.contains("Tree") && screen.contains("main.rs"), "the directory is open: {screen}");
     press(&mut app, "\n"); // the cursor is on the directory: Enter closes it
@@ -1119,7 +1119,7 @@ fn folder_rows_show_note_counts() {
     std::fs::write(dir.path().join("top.md"), "top\n").expect("top");
     let mut app =
         App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(dir.path().to_path_buf());
-    app.set_scan(annorex::files::scan(dir.path()));
+    app.set_scan(annorex::files::scan(dir.path(), false));
     for (name, keys) in [("docs/a.md", "jcx\njcy\n"), ("docs/b.md", "jcz\n"), ("top.md", "jcw\n")] {
         app.open_file(annorex::files::load(dir.path(), std::path::Path::new(name)).expect("load"));
         press(&mut app, keys);
@@ -1296,4 +1296,51 @@ fn restored_editor_drops_when_its_text_is_gone() {
     app.restore("file:a.txt", draft);
     assert!(app.editor().is_none(), "the editor closes when the draft has no quote");
     assert!(render(&mut app, 100, 12).contains("gone after the new read"));
+}
+
+/// Wait for the scan that a key started.
+fn wait_for_scan(app: &mut App) {
+    for _ in 0..500 {
+        if app.poll_scan() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the scan did not end");
+}
+
+#[test]
+fn the_dot_key_shows_and_hides_the_hidden_files_in_the_tree() {
+    let (dir, mut app) = tree_app(&Config::default());
+    std::fs::create_dir(dir.path().join(".pi")).expect(".pi");
+    std::fs::write(dir.path().join(".pi/notes.md"), "# Notes\n").expect("notes");
+    app.open_tree();
+    assert!(!render(&mut app, 120, 20).contains(".pi/"));
+    press(&mut app, ".");
+    assert_eq!(app.status(), Some("hidden files shown"));
+    wait_for_scan(&mut app);
+    let screen = render(&mut app, 120, 20);
+    assert!(screen.contains(".pi/"), "{screen}");
+    press(&mut app, ".");
+    assert_eq!(app.status(), Some("hidden files hidden"));
+    wait_for_scan(&mut app);
+    assert!(!render(&mut app, 120, 20).contains(".pi/"));
+}
+
+#[test]
+fn the_tree_footer_names_the_dot_key_and_a_rebound_key_flips_the_setting() {
+    let (_dir, mut app) = tree_app(&Config::default());
+    app.open_tree();
+    let screen = render(&mut app, 120, 20);
+    assert!(footer(&screen).contains("esc back · . hidden"), "{}", footer(&screen));
+    let dir = tempfile::tempdir().expect("dir");
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[keys]\nhidden = \"H\"\n").expect("config");
+    let config = Config::load(&file).expect("config");
+    let (_work, mut app) = tree_app(&config);
+    app.open_tree();
+    press(&mut app, ".");
+    assert_eq!(app.status(), None, "the old key does nothing");
+    press(&mut app, "H");
+    assert_eq!(app.status(), Some("hidden files shown"));
 }

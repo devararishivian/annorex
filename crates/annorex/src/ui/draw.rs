@@ -135,8 +135,9 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
                 hint(Action::Left, format!("{}/{} close/open", k(Action::Left), k(Action::Right))),
                 hint(Action::Find, format!("{} filter", k(Action::Find))),
                 plain("esc back"),
+                hint(Action::Hidden, format!("{} hidden", k(Action::Hidden))),
             ];
-            // The send keys come after `esc back`, so a narrow footer keeps the way back first.
+            // The send keys come after `esc back` and `. hidden`, so a narrow footer keeps the way back first.
             out.extend(send_keys());
             out.push(hint(Action::Tree, format!("{} hide", k(Action::Tree))));
             out
@@ -304,7 +305,7 @@ const HELP_SEND: &[Action] =
 const HELP_LISTS: &[Action] =
     &[Action::Replies, Action::Annotations, Action::Edit, Action::Remove, Action::Reload];
 const HELP_FILES: &[Action] =
-    &[Action::Tree, Action::FindFile, Action::PrevFile, Action::NextFile, Action::CloseFile];
+    &[Action::Tree, Action::Hidden, Action::FindFile, Action::PrevFile, Action::NextFile, Action::CloseFile];
 const HELP_OTHER: &[Action] = &[Action::Find, Action::FindNext, Action::FindPrev, Action::Help, Action::Quit];
 
 /// The lines of one help column: a bold title, then one line for each key.

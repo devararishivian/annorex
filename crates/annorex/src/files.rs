@@ -64,21 +64,45 @@ pub enum FileError {
     Io { path: PathBuf, source: std::io::Error },
 }
 
-/// The tree under `root`, up to [`TREE_LIMIT`] entries.
-pub fn scan(root: &Path) -> Scan {
-    scan_with(root, TREE_LIMIT)
+// Adapted from plannotator-tui (MIT) @ e537abd, crates/plannotator-tui/src/tree.rs: the list of folders.
+/// Folders of builds, caches, and version control. The tree never lists them and never enters them.
+pub const SKIPPED_DIRS: [&str; 15] = [
+    ".cache",
+    ".direnv",
+    ".git",
+    ".hg",
+    ".jj",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
+    "vendor",
+    "venv",
+];
+
+/// The tree under `root`, up to [`TREE_LIMIT`] entries. See [`scan_with`] for the rules.
+pub fn scan(root: &Path, show_hidden: bool) -> Scan {
+    scan_with(root, TREE_LIMIT, show_hidden)
 }
 
-/// The tree under `root`, up to `limit` entries. The walk obeys `.gitignore` also outside a git
-/// repository, skips hidden files and `.git`, reads no ignore file above `root`, and never follows
-/// a link.
-pub fn scan_with(root: &Path, limit: usize) -> Scan {
+/// The tree under `root`, up to `limit` entries. The walk lists the files that a `.gitignore`
+/// file ignores, because the agent often writes there. It reads no ignore file. It never lists or
+/// enters a folder of [`SKIPPED_DIRS`]. Names that start with a dot show only when `show_hidden`
+/// is true. It never follows a link.
+pub fn scan_with(root: &Path, limit: usize, show_hidden: bool) -> Scan {
     let walk = ignore::WalkBuilder::new(root)
-        .require_git(false)
-        .parents(false)
-        .git_global(false)
+        .standard_filters(false)
+        .hidden(!show_hidden)
         .follow_links(false)
-        .hidden(true)
+        .filter_entry(|entry| {
+            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+            // The root itself has depth 0 and always stays.
+            entry.depth() == 0 || !is_dir || !SKIPPED_DIRS.iter().any(|name| entry.file_name() == *name)
+        })
         .build();
     let mut entries = Vec::new();
     let mut truncated = false;
@@ -183,26 +207,58 @@ mod tests {
     }
 
     #[test]
-    fn scan_obeys_gitignore_without_a_git_repository() {
+    fn scan_lists_ignored_files_and_skips_build_folders() {
         let dir = tempfile::tempdir().expect("dir");
         let root = dir.path();
-        write(root, ".gitignore", "target/\n*.log\n");
+        write(root, ".gitignore", "target/\n*.log\nplans/\n");
         write(root, "src/main.rs", "fn main() {}\n");
         write(root, "target/debug/x", "x");
+        write(root, "node_modules/p/index.js", "x");
         write(root, "a.log", "log");
+        write(root, "plans/x.md", "# plan\n");
         write(root, ".git/config", "[core]");
         write(root, "notes.md", "# notes\n");
-        let scan = scan(root);
+        let scan = scan(root, false);
         let names = names(&scan);
+        for wanted in ["src/main.rs", "notes.md", "a.log", "plans/x.md"] {
+            assert!(names.contains(&wanted.to_owned()), "{wanted} in {names:?}");
+        }
         assert!(
-            names.contains(&"src/main.rs".to_owned()) && names.contains(&"notes.md".to_owned()),
-            "{names:?}"
-        );
-        assert!(
-            !names.iter().any(|n| n.starts_with("target") || n.contains(".log") || n.starts_with(".git")),
+            !names
+                .iter()
+                .any(|n| n.starts_with("target") || n.starts_with("node_modules") || n.starts_with(".git")),
             "{names:?}"
         );
         assert!(!scan.truncated);
+    }
+
+    #[test]
+    fn scan_lists_a_file_of_git_info_exclude() {
+        let dir = tempfile::tempdir().expect("dir");
+        let root = dir.path();
+        write(root, ".git/info/exclude", "secret.md\n");
+        write(root, "secret.md", "# secret\n");
+        assert!(names(&scan(root, false)).contains(&"secret.md".to_owned()));
+        assert!(names(&scan(root, true)).contains(&"secret.md".to_owned()));
+    }
+
+    #[test]
+    fn scan_shows_dot_entries_only_when_asked() {
+        let dir = tempfile::tempdir().expect("dir");
+        let root = dir.path();
+        for name in [".github/workflows/ci.yml", ".env", ".git/config", ".venv/x", "a.md"] {
+            write(root, name, "x");
+        }
+        let hidden = names(&scan(root, false));
+        assert_eq!(hidden, ["a.md"], "{hidden:?}");
+        let shown = names(&scan(root, true));
+        for wanted in [".github/workflows/ci.yml", ".env", ".github"] {
+            assert!(shown.contains(&wanted.to_owned()), "{wanted} in {shown:?}");
+        }
+        assert!(
+            !shown.iter().any(|n| n.starts_with(".git/") || n == ".git" || n.starts_with(".venv")),
+            "{shown:?}"
+        );
     }
 
     #[test]
@@ -213,14 +269,14 @@ mod tests {
             write(root, name, "x");
         }
         assert_eq!(
-            names(&scan(root)),
+            names(&scan(root, false)),
             ["y", "y/inner.txt", "z", "z/inner.txt", "a.txt", "b.txt"],
             "directories first, each before its content"
         );
-        let limited = scan_with(root, 3);
+        let limited = scan_with(root, 3, false);
         assert_eq!(limited.entries.len(), 3);
         assert!(limited.truncated);
-        assert!(!scan_with(root, 6).truncated);
+        assert!(!scan_with(root, 6, false).truncated);
     }
 
     #[test]

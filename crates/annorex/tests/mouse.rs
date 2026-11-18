@@ -313,7 +313,7 @@ fn files_app(root: &Path) -> App {
     let mut app =
         App::new(state(), Screen::Viewer, Vec::new(), &Config::default()).with_root(root.to_path_buf());
     app.set_time_zone(jiff::tz::TimeZone::UTC);
-    app.set_scan(annorex::files::scan(root));
+    app.set_scan(annorex::files::scan(root, false));
     app
 }
 

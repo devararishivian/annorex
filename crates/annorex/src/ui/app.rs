@@ -309,6 +309,8 @@ pub struct App {
     /// The files that are new in the changed list since the user looked at the tree.
     new_changed: usize,
     scan_rx: Option<std::sync::mpsc::Receiver<Scan>>,
+    /// True when the tree lists the names that start with a dot.
+    show_hidden: bool,
     /// The ids of the newest reply, from the thread of `news::reply_looker`.
     replies_rx: Option<std::sync::mpsc::Receiver<String>>,
     /// Keeps the thread of `replies_rx` alive.
@@ -388,6 +390,7 @@ impl App {
             changes_seen: false,
             new_changed: 0,
             scan_rx: None,
+            show_hidden: false,
             replies_rx: None,
             replies_token: None,
             new_reply: false,
@@ -495,11 +498,12 @@ impl App {
     /// Scan the work directory on a thread. [`App::poll_scan`] takes the result.
     pub fn start_scan(&mut self) {
         let Some(root) = self.root.clone() else { return };
+        let show_hidden = self.show_hidden;
         let (sender, receiver) = std::sync::mpsc::channel();
         self.scan_rx = Some(receiver);
         std::thread::spawn(move || {
             // The viewer can end before the scan: then nobody reads the result.
-            let _ = sender.send(crate::files::scan(&root));
+            let _ = sender.send(crate::files::scan(&root, show_hidden));
         });
     }
 
@@ -1596,6 +1600,14 @@ impl App {
         Effect::None
     }
 
+    /// Show or hide the names that start with a dot, and scan again.
+    fn toggle_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+        self.start_scan();
+        let text = if self.show_hidden { "hidden files shown" } else { "hidden files hidden" };
+        self.status = Some(text.to_owned());
+    }
+
     fn tree_key(&mut self, key: KeyEvent) -> Effect {
         if self.tree.filter().is_some() {
             return self.tree_filter_key(key);
@@ -1614,6 +1626,7 @@ impl App {
                     Some(Action::Left) => self.tree.collapse(),
                     Some(Action::Right) => self.tree.expand(),
                     Some(Action::Find) => self.tree.start_filter(),
+                    Some(Action::Hidden) => self.toggle_hidden(),
                     Some(Action::Down) => self.tree.move_by(1),
                     Some(Action::Up) => self.tree.move_by(-1),
                     _ => return self.common_key(action).unwrap_or(Effect::None),

@@ -46,6 +46,7 @@ pub enum Action {
     NextFile,
     CloseFile,
     Tree,
+    Hidden,
     FindFile,
     Help,
     Quit,
@@ -53,7 +54,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in the order of the documentation.
-    pub const ALL: [Action; 39] = [
+    pub const ALL: [Action; 40] = [
         Action::Left,
         Action::Right,
         Action::Down,
@@ -90,6 +91,7 @@ impl Action {
         Action::NextFile,
         Action::CloseFile,
         Action::Tree,
+        Action::Hidden,
         Action::FindFile,
         Action::Help,
         Action::Quit,
@@ -134,6 +136,7 @@ impl Action {
             Action::NextFile => "next_file",
             Action::CloseFile => "close_file",
             Action::Tree => "tree",
+            Action::Hidden => "hidden",
             Action::FindFile => "find_file",
             Action::Help => "help",
             Action::Quit => "quit",
@@ -179,6 +182,7 @@ impl Action {
             Action::NextFile => "]",
             Action::CloseFile => "W",
             Action::Tree => "T",
+            Action::Hidden => ".",
             Action::FindFile => "ctrl+p",
             Action::Help => "?",
             Action::Quit => "q",
@@ -224,6 +228,7 @@ impl Action {
             Action::NextFile => "next file",
             Action::CloseFile => "close the file",
             Action::Tree => "file tree",
+            Action::Hidden => "show or hide hidden files",
             Action::FindFile => "find a file",
             Action::Help => "this help",
             Action::Quit => "quit (not while typing)",
