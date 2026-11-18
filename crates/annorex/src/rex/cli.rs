@@ -32,6 +32,11 @@ pub(crate) const RELOAD_DELAY: Duration = Duration::from_secs(1);
 /// How long one Rex call can take. A call that takes longer fails with [`RexError::Timeout`].
 pub(crate) const REX_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The `--timeout` that every block and API call passes to `rex`. It is shorter than
+/// [`REX_TIMEOUT`], so `rex` reports its own timeout first. That error names the server, and it
+/// comes before Annorex kills `rex`.
+pub(crate) const REX_CALL_TIMEOUT: &str = "8s";
+
 impl SystemRunner {
     /// Run the command. Kill it and give an error of kind `TimedOut` when it runs longer than
     /// `timeout`.
@@ -245,6 +250,8 @@ impl<R: Runner> Rex<R> {
     ) -> Result<serde_json::Value, RexError> {
         let command: Vec<OsString> = [
             self.bin.as_os_str(),
+            "--timeout".as_ref(),
+            REX_CALL_TIMEOUT.as_ref(),
             "block".as_ref(),
             "call".as_ref(),
             "-s".as_ref(),
@@ -265,6 +272,8 @@ impl<R: Runner> Rex<R> {
     pub fn api_call(&self, method: &str, args: &serde_json::Value) -> Result<serde_json::Value, RexError> {
         let command: Vec<OsString> = [
             self.bin.as_os_str(),
+            "--timeout".as_ref(),
+            REX_CALL_TIMEOUT.as_ref(),
             "api".as_ref(),
             "call".as_ref(),
             "-s".as_ref(),
@@ -500,7 +509,19 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(
             strings(&calls[0].0),
-            ["/opt/rex/bin/rex", "block", "call", "-s", "session:s1", "-b", "block:b1", "modes", "-"]
+            [
+                "/opt/rex/bin/rex",
+                "--timeout",
+                "8s",
+                "block",
+                "call",
+                "-s",
+                "session:s1",
+                "-b",
+                "block:b1",
+                "modes",
+                "-"
+            ]
         );
         let stdin: serde_json::Value =
             serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
@@ -515,7 +536,7 @@ mod tests {
         let calls = rex.runner.calls.borrow();
         let argv_bytes: usize = calls[0].0.iter().map(|arg| arg.len()).sum();
         assert!(argv_bytes < 200, "the payload must not be in argv");
-        assert_eq!(strings(&calls[0].0)[7], "write");
+        assert_eq!(strings(&calls[0].0)[9], "write");
         let stdin: serde_json::Value =
             serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
         assert_eq!(stdin["data"].as_str().map(str::len), Some(300_000));
@@ -646,7 +667,17 @@ mod tests {
         let calls = rex.runner.calls.borrow();
         assert_eq!(
             strings(&calls[0].0),
-            ["/opt/rex/bin/rex", "api", "call", "-s", "session:s1", "session.describe_block", "-"]
+            [
+                "/opt/rex/bin/rex",
+                "--timeout",
+                "8s",
+                "api",
+                "call",
+                "-s",
+                "session:s1",
+                "session.describe_block",
+                "-"
+            ]
         );
         let stdin: serde_json::Value =
             serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
@@ -672,7 +703,7 @@ mod tests {
         assert!(layer.layer_id.starts_with("layer:"));
         assert_eq!(layer.block_ids.len(), 1);
         let calls = rex.runner.calls.borrow();
-        assert_eq!(strings(&calls[0].0)[5], "session.new_layer");
+        assert_eq!(strings(&calls[0].0)[7], "session.new_layer");
         let stdin: serde_json::Value =
             serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
         assert_eq!(stdin, request);
@@ -689,7 +720,7 @@ mod tests {
             .iter()
             .map(|call| serde_json::from_slice(call.1.as_deref().expect("stdin")).expect("json"))
             .collect();
-        assert_eq!(strings(&calls[0].0)[5], "session.set_layer_state");
+        assert_eq!(strings(&calls[0].0)[7], "session.set_layer_state");
         assert_eq!(
             bodies[0],
             serde_json::json!({ "layer_id": "layer:l1", "state": "normal", "focus": true })
@@ -698,7 +729,7 @@ mod tests {
             bodies[1],
             serde_json::json!({ "layer_id": "layer:l1", "state": "minimized", "focus": false })
         );
-        assert_eq!(strings(&calls[2].0)[5], "session.close_layer");
+        assert_eq!(strings(&calls[2].0)[7], "session.close_layer");
         assert_eq!(bodies[2], serde_json::json!({ "layer_id": "layer:l1" }));
     }
 
@@ -710,7 +741,7 @@ mod tests {
         let calls = rex.runner.calls.borrow();
         assert_eq!(
             strings(&calls[0].0),
-            ["/opt/rex/bin/rex", "api", "call", "-s", "session:s1", "session.view", "-"]
+            ["/opt/rex/bin/rex", "--timeout", "8s", "api", "call", "-s", "session:s1", "session.view", "-"]
         );
         let stdin: serde_json::Value =
             serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
@@ -737,7 +768,7 @@ mod tests {
         assert_eq!(other.bin, rex.bin);
         other.api_call("session.view", &serde_json::json!({})).expect("call");
         let calls = rex.runner.calls.borrow();
-        assert_eq!(strings(&calls[0].0)[4], "session:s2");
+        assert_eq!(strings(&calls[0].0)[6], "session:s2");
         assert_eq!(rex.session(), "session:s1");
     }
 
@@ -749,7 +780,7 @@ mod tests {
         });
         rex.focus_block("block:f").expect("focus");
         let calls = rex.runner.calls.borrow();
-        assert_eq!(strings(&calls[0].0)[5], "session.focus_block");
+        assert_eq!(strings(&calls[0].0)[7], "session.focus_block");
         let focus: serde_json::Value =
             serde_json::from_slice(calls[0].1.as_deref().expect("stdin")).expect("json");
         assert_eq!(focus, serde_json::json!({"block_id": "block:f"}));
@@ -761,7 +792,7 @@ mod tests {
             rex(FakeRunner { stdout: br#"{"columns":80,"rows":24}"#.to_vec(), ..FakeRunner::default() });
         let size = rex.size("block:b1").expect("size");
         assert_eq!((size.columns, size.rows), (80, 24));
-        assert_eq!(strings(&rex.runner.calls.borrow()[0].0)[7], "size");
+        assert_eq!(strings(&rex.runner.calls.borrow()[0].0)[9], "size");
     }
 
     #[test]

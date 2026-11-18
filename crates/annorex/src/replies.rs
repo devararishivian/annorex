@@ -455,7 +455,7 @@ mod tests {
         fn run(&self, argv: &[OsString], _stdin: Option<&[u8]>) -> std::io::Result<Output> {
             let words: Vec<String> = argv.iter().map(|a| a.to_string_lossy().into_owned()).collect();
             self.calls.borrow_mut().push(words.join(" "));
-            let session = words[4].as_str();
+            let session = words[6].as_str();
             let process = |argv0: &str, cwd: &str| {
                 format!(r#"{{"foreground":{{"pid":1,"name":"node","argv0":"{argv0}","cwd":"{cwd}"}}}}"#)
             };
@@ -472,15 +472,15 @@ mod tests {
                 )
             };
             let stdout = match words.as_slice() {
-                [_, _, _, _, _, method, _] if method == "session.list" => {
+                [_, _, _, _, _, _, _, method, _] if method == "session.list" => {
                     r#"{"sessions":[{"session_id":"session:a","label":"a"},{"session_id":"session:b","label":"b"}]}"#
                         .to_owned()
                 }
-                [_, _, _, _, _, method, _] if method == "session.view" => match session {
+                [_, _, _, _, _, _, _, method, _] if method == "session.view" => match session {
                     "session:a" => view(&["block:pi1", "block:shell"]),
                     _ => view(&["block:pi2", "block:pi-other-dir", "block:gone"]),
                 },
-                [_, _, _, _, _, _, block, method, _] if method == "process" => match block.as_str() {
+                [_, _, _, _, _, _, _, _, block, method, _] if method == "process" => match block.as_str() {
                     "block:pi1" => process("pi", "/Users/dev/app"),
                     "block:pi2" => process(self.pi2_argv0, "/Users/dev/app"),
                     "block:pi-other-dir" => process("pi", "/Users/dev/other"),
