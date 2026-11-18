@@ -208,7 +208,7 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
 pub fn draw(frame: &mut Frame, app: &mut App) {
     app.hits.clear();
     let area = frame.area();
-    let layout = compute(area, app.has_root(), app.tree_open);
+    let layout = compute(area, app.has_root(), app.tree_open, 1);
     let Some((header, footer)) = layout.header_footer() else {
         app.docked = Docked::default();
         draw_too_small(frame, area);

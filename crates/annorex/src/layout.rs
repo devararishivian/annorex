@@ -50,14 +50,17 @@ impl Layout {
 }
 
 /// The layout for `area`. `has_tree` is true when the view has files. `tree_open` is false after the
-/// user hid the tree.
-pub fn compute(area: Rect, has_tree: bool, tree_open: bool) -> Layout {
+/// user hid the tree. The footer is `footer_rows` high, at least one row, and the body is smaller by the
+/// same number of rows.
+pub fn compute(area: Rect, has_tree: bool, tree_open: bool, footer_rows: u16) -> Layout {
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         return Layout::TooSmall;
     }
+    // The body keeps at least one row.
+    let footer_rows = footer_rows.clamp(1, area.height - 2);
     let header = Rect::new(area.x, area.y, area.width, 1);
-    let footer = Rect::new(area.x, area.bottom() - 1, area.width, 1);
-    let body = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
+    let footer = Rect::new(area.x, area.bottom() - footer_rows, area.width, footer_rows);
+    let body = Rect::new(area.x, area.y + 1, area.width, area.height - 1 - footer_rows);
     if area.width < SIDE_FROM_WIDTH || area.height < SINGLE_BELOW_HEIGHT {
         return Layout::Single { header, doc: body, footer };
     }
@@ -83,7 +86,7 @@ mod tests {
 
     #[test]
     fn tree_doc_and_rail_at_120_columns() {
-        match compute(area(120, 40), true, true) {
+        match compute(area(120, 40), true, true, 1) {
             Layout::Wide { header, tree, doc, rail, footer } => {
                 assert_eq!(header, Rect::new(0, 0, 120, 1));
                 assert_eq!(footer, Rect::new(0, 39, 120, 1));
@@ -99,7 +102,7 @@ mod tests {
     fn the_document_fills_the_room_left_of_the_rail() {
         for width in [120u16, 200, 240] {
             for has_tree in [true, false] {
-                match compute(area(width, 40), has_tree, true) {
+                match compute(area(width, 40), has_tree, true, 1) {
                     Layout::Wide { tree, doc, rail, .. } => {
                         let left = tree.map_or(0, Rect::right);
                         assert_eq!(doc.width, width - left - RAIL_WIDTH);
@@ -114,7 +117,7 @@ mod tests {
 
     #[test]
     fn there_is_no_cap_without_a_rail() {
-        match compute(area(119, 40), false, true) {
+        match compute(area(119, 40), false, true, 1) {
             Layout::Wide { doc, rail, .. } => {
                 assert_eq!(rail, None);
                 assert_eq!(doc, Rect::new(0, 1, 119, 38));
@@ -126,7 +129,7 @@ mod tests {
     #[test]
     fn tree_and_doc_from_100_to_119_columns() {
         for width in [100, 119] {
-            match compute(area(width, 30), true, true) {
+            match compute(area(width, 30), true, true, 1) {
                 Layout::Wide { tree, doc, rail, .. } => {
                     assert_eq!(tree, Some(Rect::new(0, 1, 28, 28)));
                     assert_eq!(rail, None);
@@ -140,7 +143,7 @@ mod tests {
     #[test]
     fn a_hidden_tree_or_no_files_gives_the_document_the_space() {
         for (has_tree, tree_open) in [(true, false), (false, true)] {
-            match compute(area(120, 40), has_tree, tree_open) {
+            match compute(area(120, 40), has_tree, tree_open, 1) {
                 Layout::Wide { tree, doc, .. } => {
                     assert_eq!(tree, None);
                     assert_eq!(doc, Rect::new(0, 1, 86, 38));
@@ -152,23 +155,44 @@ mod tests {
 
     #[test]
     fn one_column_below_100_columns_or_16_rows() {
-        match compute(area(99, 30), true, true) {
+        match compute(area(99, 30), true, true, 1) {
             Layout::Single { doc, .. } => assert_eq!(doc, Rect::new(0, 1, 99, 28)),
             other => panic!("expected Single, got {other:?}"),
         }
-        assert!(matches!(compute(area(200, 15), true, true), Layout::Single { .. }));
-        assert!(matches!(compute(area(200, 16), true, true), Layout::Wide { .. }));
+        assert!(matches!(compute(area(200, 15), true, true, 1), Layout::Single { .. }));
+        assert!(matches!(compute(area(200, 16), true, true, 1), Layout::Wide { .. }));
+    }
+
+    #[test]
+    fn three_footer_rows_take_three_rows_from_the_body() {
+        match compute(area(120, 40), true, true, 3) {
+            Layout::Wide { header, tree, doc, rail, footer } => {
+                assert_eq!(header, Rect::new(0, 0, 120, 1));
+                assert_eq!(footer, Rect::new(0, 37, 120, 3));
+                assert_eq!(tree, Some(Rect::new(0, 1, 28, 36)));
+                assert_eq!(rail, Some(Rect::new(86, 1, 34, 36)));
+                assert_eq!(doc, Rect::new(28, 1, 58, 36));
+            }
+            other => panic!("expected Wide, got {other:?}"),
+        }
+        match compute(area(80, 24), true, true, 2) {
+            Layout::Single { doc, footer, .. } => {
+                assert_eq!(footer, Rect::new(0, 22, 80, 2));
+                assert_eq!(doc, Rect::new(0, 1, 80, 21));
+            }
+            other => panic!("expected Single, got {other:?}"),
+        }
     }
 
     #[test]
     fn too_small_at_39_columns_or_9_rows() {
-        assert_eq!(compute(area(39, 30), true, true), Layout::TooSmall);
-        assert_eq!(compute(area(80, 9), true, true), Layout::TooSmall);
-        assert_eq!(compute(area(0, 0), true, true), Layout::TooSmall);
+        assert_eq!(compute(area(39, 30), true, true, 1), Layout::TooSmall);
+        assert_eq!(compute(area(80, 9), true, true, 1), Layout::TooSmall);
+        assert_eq!(compute(area(0, 0), true, true, 1), Layout::TooSmall);
     }
 
     #[test]
     fn exactly_40_by_10_is_not_too_small() {
-        assert!(matches!(compute(area(40, 10), true, true), Layout::Single { .. }));
+        assert!(matches!(compute(area(40, 10), true, true, 1), Layout::Single { .. }));
     }
 }
