@@ -842,3 +842,61 @@ fn g_reaches_the_end_after_a_tall_row() {
         rows(&screen).join("\n")
     );
 }
+
+/// A list item that wraps at the narrow size. Each word is different, so a word gives its offset.
+fn wrapped_item() -> String {
+    let words: Vec<String> = (1..=40).map(|n| format!("w{n:02}")).collect();
+    format!("- {}\n", words.join(" "))
+}
+
+/// The cell of the list marker, and the cell of the first word of the second row of the item.
+fn item_cells(screen: &Buffer) -> ((u16, u16), (u16, u16)) {
+    let marker = find(screen, "- w01");
+    let y = marker.1 + 1;
+    let row: Vec<char> = rows(screen)[usize::from(y)].chars().collect();
+    let x = (usize::from(marker.0)..row.len()).find(|&column| row[column] == 'w');
+    let x = u16::try_from(x.expect("the second row has a word")).expect("column");
+    (marker, (x, y))
+}
+
+/// The word of three characters at a cell.
+fn word_at(screen: &Buffer, (x, y): (u16, u16)) -> String {
+    rows(screen)[usize::from(y)].chars().skip(usize::from(x)).take(3).collect()
+}
+
+/// Press at `from`, drag to `to`, and release there.
+fn drag(app: &mut App, from: (u16, u16), to: (u16, u16)) {
+    app.handle_mouse(event(MouseEventKind::Down(MouseButton::Left), from));
+    app.handle_mouse(event(MouseEventKind::Drag(MouseButton::Left), to));
+    app.handle_mouse(event(MouseEventKind::Up(MouseButton::Left), to));
+}
+
+#[test]
+fn a_wrapped_list_row_maps_its_text_and_its_indent_to_the_source() {
+    let text = wrapped_item();
+    let mut app = viewer(&text);
+    let screen = frame(&mut app, NARROW);
+    let (marker, (x, y)) = item_cells(&screen);
+    assert_eq!(x, marker.0 + 2, "the second row hangs under the text:\n{}", rows(&screen).join("\n"));
+    let word = word_at(&screen, (x, y));
+    let offset = text.find(&word).expect("the word is in the source");
+    drag(&mut app, (marker.0 + 2, marker.1), (x, y));
+    assert_eq!(app.mode(), Mode::Text);
+    assert_eq!(app.cursor(), offset, "the cursor is on `{word}`");
+    // The indent has no source: a cell of it gives the start of the row text.
+    drag(&mut app, (marker.0 + 2, marker.1), (marker.0, y));
+    assert_eq!(app.cursor(), offset, "the cursor is at the start of the row text");
+}
+
+#[test]
+fn a_drag_over_a_wrapped_list_item_quotes_the_text_without_the_marker() {
+    let text = wrapped_item();
+    let mut app = viewer(&text);
+    let screen = frame(&mut app, NARROW);
+    let (marker, (x, y)) = item_cells(&screen);
+    let word = word_at(&screen, (x, y));
+    drag(&mut app, marker, (x + 2, y));
+    press(&mut app, "cx\n");
+    let end = text.find(&word).expect("the word is in the source") + 3;
+    assert_eq!(app.review().expect("review").annotations[0].quote, text[2..end]);
+}

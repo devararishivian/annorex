@@ -12,13 +12,13 @@ Claude Code (idle) · reply 1/3          [ Send ▸ ]
  S┌ Replies ───────────────────────────────────┐
   │▸  1 11-09 10:30 # Migration plan           │
  1│   2 11-09 10:30 ## Earlier answer          │
- i│   3 11-09 10:30 Oldest reply: short.       │
- n│                                            │
+  │   3 11-09 10:30 Oldest reply: short.       │
+  │                                            │
  2└────────────────────────────────────────────┘
- its tests. This item is long, so it wraps on a
- narrow pane.
+    its tests. This item is long, so it wraps on
+    a narrow pane.
  3. Step 3: update the module number 3 and run
- its tests. This item is long, so it wraps on a
- narrow pane.
+    its tests. This item is long, so it wraps on
+    a narrow pane.
  4. Step 4: update the module number 4 and run
         j/k move · enter open · esc close · ? help

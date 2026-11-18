@@ -1010,11 +1010,16 @@ fn group_matches(
     // A wrap that dropped its space needs one here. A wrap that kept it does not.
     let mut joined = String::new();
     let mut spans = Vec::with_capacity(group.len());
+    // A wrapped row starts with the blank prefix of the hanging indent. It is not text of the line, so
+    // the search skips it. It is never wider than the prefix of the first row.
+    let lead = |row: &VisualLine| row.offsets().iter().take_while(|offset| offset.is_none()).count();
+    let hang = group.first().map_or(0, |row| lead(row));
     let mut begin = 0;
-    for row in &group {
-        let text = row.plain();
+    for (part, row) in group.iter().enumerate() {
+        let skip = if part == 0 { 0 } else { lead(row).min(hang) };
+        let text: String = row.plain().chars().skip(skip).collect();
         let length = text.chars().count();
-        spans.push((begin, begin + length));
+        spans.push((begin, begin + length, skip));
         joined.push_str(&text);
         begin += length;
         if !text.ends_with(' ') {
@@ -1029,7 +1034,7 @@ fn group_matches(
     let mut next = 0;
     let per_row = spans
         .into_iter()
-        .map(|(from, to)| {
+        .map(|(from, to, skip)| {
             while matches.get(next).is_some_and(|range| range.end <= from) {
                 next += 1;
             }
@@ -1037,7 +1042,7 @@ fn group_matches(
             for range in matches.iter().skip(next).take_while(|range| range.start < to) {
                 #[cfg(test)]
                 MATCH_VISITS.with(|visits| visits.set(visits.get() + 1));
-                row.push(range.start.max(from) - from..range.end.min(to) - from);
+                row.push(range.start.max(from) - from + skip..range.end.min(to) - from + skip);
             }
             row
         })
@@ -1657,6 +1662,26 @@ mod tests {
     use crate::replies::Reply;
     use crate::review::Kind;
     use crate::safety::Safety;
+
+    #[test]
+    fn a_search_finds_a_phrase_over_the_wrap_of_a_hanging_row() {
+        let doc = crate::doc::Doc::parse("- alpha beta gamma delta\n");
+        let rows = crate::wrap::wrap_doc(&doc, 14);
+        let plain: Vec<String> = rows.iter().map(crate::wrap::VisualLine::plain).collect();
+        assert_eq!(plain, ["- alpha beta ", "  gamma delta"]);
+        let (start, per_row) = super::group_matches(&rows, 1, "beta gamma");
+        assert_eq!(start, 0);
+        let spans = |rows: &[Vec<std::ops::Range<usize>>]| -> Vec<Vec<(usize, usize)>> {
+            rows.iter().map(|row| row.iter().map(|range| (range.start, range.end)).collect()).collect()
+        };
+        assert_eq!(spans(&per_row), [vec![(8, 13)], vec![(2, 7)]]);
+        let (_, per_row) = super::group_matches(&rows, 0, "beta ");
+        assert_eq!(
+            spans(&per_row),
+            [vec![(8, 13)], vec![]],
+            "a match at the end of a row does not reach the indent"
+        );
+    }
 
     #[test]
     fn a_search_on_a_long_line_scans_the_line_once_for_each_frame() {

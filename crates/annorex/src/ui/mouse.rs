@@ -317,12 +317,14 @@ impl App {
             }
             previous = Some(c);
         }
+        // The quote bars and the list marker or indent have no source: they give the first text.
+        let first = glyphs.iter().find_map(|(_, offset)| *offset);
         let mut x = 0;
         let mut found = None;
         for (text, offset) in &glyphs {
             let size = text.width();
             if size > 0 && column < x + size {
-                found = *offset;
+                found = offset.or(first);
                 break;
             }
             x += size;

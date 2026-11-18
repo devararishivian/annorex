@@ -240,13 +240,37 @@ pub fn wrap_doc(doc: &Doc, width: u16) -> Vec<VisualLine> {
         if line.is_blank() {
             out.push(VisualLine { doc_line, spans: Vec::new(), first: true });
         } else {
-            for (part, spans) in wrap_spans(&line.spans, width).into_iter().enumerate() {
+            for (part, spans) in wrap_hanging(&line.spans, width).into_iter().enumerate() {
                 out.push(VisualLine { doc_line, spans, first: part == 0 });
             }
         }
         doc_line += 1;
     }
     out
+}
+
+/// The rows of one line. The prefix of the line is its first spans without a source: the quote
+/// bars and the list marker. The rows after the first start with `continuation` of the prefix, so
+/// the text of a list item or a quote lines up under the text of its first row.
+// Adapted from plannotator-tui (MIT) at e537abd: the hanging indent and its half-width rule.
+fn wrap_hanging(spans: &[DocSpan], width: usize) -> Vec<Vec<DocSpan>> {
+    let lead = spans.iter().take_while(|span| span.source.is_none()).count();
+    let (prefix, body) = spans.split_at(lead);
+    let indent = spans_width(prefix);
+    // A narrow pane would leave too little room for the text: then the rows use all of it.
+    if indent == 0 || body.is_empty() || indent * 2 > width {
+        return wrap_spans(spans, width);
+    }
+    let rest = continuation(prefix);
+    wrap_spans(body, width - indent)
+        .into_iter()
+        .enumerate()
+        .map(|(part, row)| {
+            let mut spans = if part == 0 { prefix.to_vec() } else { rest.clone() };
+            spans.extend(row);
+            spans
+        })
+        .collect()
 }
 
 fn spans_width(spans: &[DocSpan]) -> usize {
@@ -582,6 +606,54 @@ mod tests {
         assert_eq!(lines[0].cell_of(3), Some(3));
         assert_eq!(lines[1].cell_of(11), Some(0));
         assert_eq!(lines[1].cell_of(3), None);
+    }
+
+    #[test]
+    fn a_wrapped_list_item_hangs_under_its_text() {
+        let doc = Doc::parse("- alpha beta gamma delta epsilon zeta eta theta iota kappa lambda\n");
+        let lines = wrap_doc(&doc, 30);
+        let rows: Vec<String> = lines.iter().map(VisualLine::plain).collect();
+        assert!(rows.len() > 1, "{rows:?}");
+        assert!(rows[0].starts_with("- alpha"), "{rows:?}");
+        for row in &rows[1..] {
+            assert!(row.starts_with("  ") && !row.starts_with("   "), "{rows:?}");
+        }
+        assert!(rows.iter().all(|row| row.width() <= 30), "{rows:?}");
+        for line in &lines[1..] {
+            let offsets = line.offsets();
+            assert_eq!(offsets[..2], [None, None], "the indent has no source");
+            let offset = offsets[2].expect("the text has a source");
+            let word = line.plain()[2..].split(' ').next().expect("a word").to_owned();
+            assert_eq!(&doc.source[offset..offset + word.len()], word);
+            assert_eq!(line.cell_of(offset), Some(2));
+        }
+    }
+
+    #[test]
+    fn a_nested_numbered_item_in_a_quote_hangs_under_its_text() {
+        let doc = Doc::parse("> 1. outer\n>    1. one two three four five six seven eight nine ten\n");
+        let lines = wrap_doc(&doc, 30);
+        let rows: Vec<String> =
+            lines.iter().filter(|line| line.doc_line == 1).map(VisualLine::plain).collect();
+        assert!(rows.len() > 1, "{rows:?}");
+        assert!(rows[0].starts_with("│   1. one"), "{rows:?}");
+        for row in &rows[1..] {
+            assert!(row.starts_with("│      ") && !row.starts_with("│       "), "{rows:?}");
+        }
+        assert!(rows.iter().all(|row| row.width() <= 30), "{rows:?}");
+    }
+
+    #[test]
+    fn a_prefix_wider_than_half_the_width_wraps_as_plain_text() {
+        let doc = Doc::parse("> > > > 1. one two three\n");
+        let lines = wrap_doc(&doc, 16);
+        assert_eq!(texts(&lines), ["│ │ │ │ 1. one", "two three"]);
+    }
+
+    #[test]
+    fn a_wrapped_quote_keeps_its_bars() {
+        let doc = Doc::parse("> alpha beta gamma delta epsilon\n");
+        assert_eq!(texts(&wrap_doc(&doc, 16)), ["│ alpha beta", "│ gamma delta", "│ epsilon"]);
     }
 
     /// A table of 3 columns and 12 rows with long prose in the middle column.
