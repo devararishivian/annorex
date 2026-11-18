@@ -1495,6 +1495,51 @@ fn another_key_closes_the_pick_and_then_acts() {
 }
 
 #[test]
+fn ctrl_d_does_not_discard_at_the_quit_question() {
+    let mut app = app(TEXT);
+    press(&mut app, "cx\n");
+    press(&mut app, "q");
+    assert_eq!(press_key(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL), Effect::None);
+    assert_eq!(app.review().expect("review").annotations.len(), 1, "ctrl+d keeps the notes");
+    assert_eq!(press_key(&mut app, KeyCode::Char('d'), KeyModifiers::NONE), Effect::Discard, "d discards");
+}
+
+#[test]
+fn ctrl_y_keeps_the_note_at_the_delete_question() {
+    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
+    press(&mut app, "jcfirst\n");
+    press(&mut app, "x");
+    assert!(render(&mut app, 80, 24).contains("Delete annotation 1? y/n"));
+    press_key(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
+    assert_eq!(app.review().expect("review").annotations.len(), 1, "ctrl+y keeps the note");
+    press(&mut app, "xy");
+    assert!(app.review().expect("review").is_empty(), "y removes it");
+}
+
+#[test]
+fn ctrl_y_does_not_answer_the_paste_question() {
+    let mut app = app(TEXT);
+    press(&mut app, "cx\n");
+    press(&mut app, "P");
+    assert_eq!(press_key(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL), Effect::None);
+    press(&mut app, "P");
+    assert!(matches!(press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE), Effect::Send(_)));
+}
+
+#[test]
+fn ctrl_1_does_not_choose_a_note() {
+    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
+    press(&mut app, "jcone\n");
+    press(&mut app, "ctwo\n");
+    press(&mut app, "e");
+    assert!(render(&mut app, 80, 24).contains("2 \u{1f4ac} two"), "the pick is open");
+    press_key(&mut app, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    assert!(app.editor().is_none(), "ctrl+1 opens no note");
+    assert!(!render(&mut app, 80, 24).contains("y/n"), "ctrl+1 asks no question");
+    assert_eq!(app.review().expect("review").annotations.len(), 2);
+}
+
+#[test]
 fn a_third_v_removes_the_selection() {
     let mut app = app("alpha beta gamma\n");
     press(&mut app, "vllv");

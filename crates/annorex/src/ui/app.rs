@@ -1306,7 +1306,7 @@ impl App {
         // The footer shows the bound keys, so the two screens accept them next to the fixed keys.
         let action = self.action_of(key);
         match &self.screen {
-            Screen::Error(_) => match key.code {
+            Screen::Error(_) => match plain(key) {
                 KeyCode::Char('r') => Effect::Reload,
                 KeyCode::Char('q') => Effect::Quit,
                 _ => match action {
@@ -1321,7 +1321,7 @@ impl App {
                     Some(Action::Down) => KeyCode::Char('j'),
                     Some(Action::Up) => KeyCode::Char('k'),
                     Some(Action::Quit) => KeyCode::Char('q'),
-                    _ => key.code,
+                    _ => plain(key),
                 };
                 match code {
                     KeyCode::Char('j') | KeyCode::Down => {
@@ -1760,8 +1760,9 @@ impl App {
     }
 
     fn confirm_key(&mut self, key: KeyEvent, what: Confirm) -> Effect {
+        let code = plain(key);
         match what {
-            Confirm::Quit => match key.code {
+            Confirm::Quit => match code {
                 KeyCode::Char('s') => {
                     self.confirm = None;
                     self.quit_after = true;
@@ -1789,7 +1790,7 @@ impl App {
             },
             Confirm::Annotation(id) => {
                 self.confirm = None;
-                if key.code != KeyCode::Char('y') {
+                if code != KeyCode::Char('y') {
                     return Effect::None;
                 }
                 let Some(reply) = self.shown_id.clone() else { return Effect::None };
@@ -1803,18 +1804,18 @@ impl App {
             }
             Confirm::Discard => {
                 self.confirm = None;
-                if key.code == KeyCode::Char('y') { self.discard_review(false) } else { Effect::None }
+                if code == KeyCode::Char('y') { self.discard_review(false) } else { Effect::None }
             }
             Confirm::CloseFile => {
                 self.confirm = None;
-                if key.code == KeyCode::Char('y') {
+                if code == KeyCode::Char('y') {
                     self.close_shown();
                 }
                 Effect::None
             }
             Confirm::Paste => {
                 self.confirm = None;
-                if key.code == KeyCode::Char('y') {
+                if code == KeyCode::Char('y') {
                     self.request_send(DeliveryMode::PasteOnly)
                 } else {
                     Effect::None
@@ -2267,7 +2268,7 @@ impl App {
     /// usual: the result is `None` then.
     fn pick_key(&mut self, key: KeyEvent) -> Option<Effect> {
         let ids = self.pick.take()?;
-        match key.code {
+        match plain(key) {
             KeyCode::Esc => Some(Effect::None),
             KeyCode::Char(c @ '1'..='9') => {
                 let chosen = c.to_digit(10).and_then(|n| ids.get(usize::try_from(n).ok()? - 1)).copied();
@@ -2543,6 +2544,12 @@ pub(super) fn is_word(c: char) -> bool {
 
 fn signed(value: usize) -> isize {
     isize::try_from(value).unwrap_or(isize::MAX)
+}
+
+/// The key code for a question or a small screen. A key with ctrl or alt gives `KeyCode::Null`, so
+/// `ctrl+d` does not answer a question as `d` does.
+fn plain(key: KeyEvent) -> KeyCode {
+    if key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) { KeyCode::Null } else { key.code }
 }
 
 /// Case-insensitive search, character by character.

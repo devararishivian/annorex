@@ -552,6 +552,29 @@ fn the_session_picker_is_a_centered_box() {
 }
 
 #[test]
+fn ctrl_j_does_not_move_the_session_picker() {
+    let mut app = App::new(
+        state(Agent::Pi, "idle"),
+        Screen::Picker(vec![candidate("a"), candidate("b")]),
+        Vec::new(),
+        &Config::default(),
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+    assert!(render(&mut app, 80, 24).contains("▸ updated just now · a"), "ctrl+j does not move");
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    assert!(render(&mut app, 80, 24).contains("▸ updated just now · b"), "j moves");
+}
+
+#[test]
+fn ctrl_keys_do_not_answer_the_error_screen() {
+    let mut app =
+        App::new(state(Agent::Pi, "idle"), Screen::Error("no reply".into()), Vec::new(), &Config::default());
+    assert_eq!(app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)), Effect::None);
+    assert_eq!(app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)), Effect::None);
+    assert_eq!(app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)), Effect::Reload);
+}
+
+#[test]
 fn error_screen_hint_click_quits_with_a_rebound_quit_key() {
     use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let dir = tempfile::tempdir().expect("dir");
