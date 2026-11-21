@@ -1,8 +1,8 @@
 class Annorex < Formula
   desc "Annotate the replies and files of a coding agent in Rex and send the notes back"
   homepage "https://github.com/devararishivian/annorex"
-  url "https://github.com/devararishivian/annorex/archive/refs/tags/v0.2.3.tar.gz"
-  sha256 "5aef6ecf7c3071fe5137268f673c0d3045f00a12bb6d0e8a93a4d734db2b9ef5"
+  url "https://github.com/devararishivian/annorex/archive/refs/tags/v0.3.0.tar.gz"
+  sha256 "462bfbe984a3021560d56a2b77efbd4fa9dc6b1caf5039bbc56fd62282992788"
   license "MIT"
 
   depends_on "pkgconf" => :build
