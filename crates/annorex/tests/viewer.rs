@@ -627,3 +627,13 @@ fn the_last_block_stays_on_the_screen_above_a_taller_footer() {
     );
     assert!(lines[23].contains("block") && lines[23].ends_with("q quit"), "{screen}");
 }
+
+#[test]
+fn long_status_keeps_help_and_quit() {
+    let mut app = viewer();
+    app.set_status("x".repeat(200));
+    let screen = render(&mut app, 80, 24);
+    let footer = screen.lines().last().unwrap_or_default().to_owned();
+    assert!(footer.contains("? help") && footer.contains("q quit"), "{footer}");
+    assert!(footer.contains('\u{2026}'), "{footer}");
+}

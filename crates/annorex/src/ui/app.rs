@@ -2270,6 +2270,11 @@ impl App {
         let ids = self.pick.take()?;
         match plain(key) {
             KeyCode::Esc => Some(Effect::None),
+            // A key with ctrl or alt, such as `ctrl+esc`, does nothing: the pick stays open.
+            KeyCode::Null => {
+                self.pick = Some(ids);
+                Some(Effect::None)
+            }
             KeyCode::Char(c @ '1'..='9') => {
                 let chosen = c.to_digit(10).and_then(|n| ids.get(usize::try_from(n).ok()? - 1)).copied();
                 if let Some(id) = chosen {

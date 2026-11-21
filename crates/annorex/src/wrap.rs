@@ -656,6 +656,14 @@ mod tests {
         assert_eq!(texts(&wrap_doc(&doc, 16)), ["│ alpha beta", "│ gamma delta", "│ epsilon"]);
     }
 
+    #[test]
+    fn quote_bar_repeats_on_wrapped_rows() {
+        let text = "> alpha beta gamma delta epsilon zeta eta theta iota kappa lambda\n";
+        let rows = texts(&wrap_doc(&Doc::parse(text), 30));
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        assert!(rows.iter().all(|row| row.starts_with("│ ")), "{rows:?}");
+    }
+
     /// A table of 3 columns and 12 rows with long prose in the middle column.
     fn plan_table() -> String {
         let mut text = String::from("| # | Task | Model |\n|---|------|-------|\n");

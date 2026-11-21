@@ -1480,6 +1480,18 @@ fn several_notes_show_a_numbered_pick() {
 }
 
 #[test]
+fn ctrl_esc_in_note_pick_does_nothing() {
+    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
+    press(&mut app, "jcone\n");
+    press(&mut app, "ctwo\n");
+    press(&mut app, "e");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::CONTROL);
+    assert!(render(&mut app, 80, 24).contains("2 \u{1f4ac} two"), "ctrl+esc keeps the pick open");
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(!render(&mut app, 80, 24).contains("2 \u{1f4ac} two"), "esc closes the pick");
+}
+
+#[test]
 fn another_key_closes_the_pick_and_then_acts() {
     let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
     press(&mut app, "jcone\n");

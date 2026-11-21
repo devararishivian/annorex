@@ -223,7 +223,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     };
     let left = footer_left(app, tree_shown);
     let one_row = !viewer || asking || app.editor.is_some() || area.height < SINGLE_BELOW_HEIGHT;
-    let left_width = left.as_ref().map_or(0, |(text, _)| text_width(text));
+    // A long left text must not push `? help` and `q quit` out: the footer cuts the text instead.
+    let kept_width: u16 = hints
+        .iter()
+        .filter(|(action, _)| matches!(action, Some(Action::Help | Action::Quit)))
+        .map(|(_, text)| text_width(text) + text_width(HINT_GAP))
+        .sum();
+    let left_width =
+        left.as_ref().map_or(0, |(text, _)| text_width(text).min(area.width.saturating_sub(kept_width + 2)));
     let rows = flow_hints(area.width, left_width, hints, if one_row { 1 } else { FOOTER_ROWS });
     let layout = compute(area, app.has_root(), app.tree_open, u16::try_from(rows.len()).unwrap_or(1));
     let Some((header, footer)) = layout.header_footer() else {
