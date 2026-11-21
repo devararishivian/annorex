@@ -175,7 +175,7 @@ local function open_view(ctx, view)
     id, why = pick_agent(agents)
     if id == nil then
       if why == "cancelled" then return nil end
-      fail(not_agent .. " (the command palette did not ask: " .. tostring(why) .. ")")
+      fail(not_agent .. " (no answer from the command palette: " .. tostring(why) .. ")")
     end
   end
   -- The viewer opens in the window of the agent pane. A failed focus does not stop the open.

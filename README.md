@@ -260,7 +260,8 @@ The guide tells more about `bin` and the error messages of the module: [Lua opti
 ## Known limits
 
 - At the first start of Codex in a new folder, Codex asks whether you trust the folder. Do not send notes while this
-  question shows. Rex reports Codex as idle at that time.
+  question shows. Rex can report Codex as idle, or report no state, at that time. With no state, Annorex refuses to
+  send. With idle, Annorex would paste the notes into the question.
 - Claude Code asks the same question in a new folder. It does not report the question to Rex. Annorex cannot see it.
   Do not send notes while it shows.
 

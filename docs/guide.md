@@ -536,7 +536,7 @@ The list is a hint, not the full list. A file that the agent changed with a shel
 with a tool of an MCP server is not shown. Neither is a file that the agent wrote and deleted, or that is outside the
 work directory. Your own send is a prompt. After it, the list holds only what the agent changes next. Raise
 `changes_turns` to look back further. Annorex follows the newest session of the agent in the work directory. With two
-Pi or OpenCode panes in one directory, the list can belong to the other pane.
+Pi, OpenCode, or Codex panes in one directory, the list can belong to the other pane.
 For Codex, Annorex reads the `FileChange` records. It does not show a change that you declined.
 
 One send gives the general notes and the notes of all documents in one message. It has one section for each
@@ -739,7 +739,8 @@ Exit codes:
 - Claude Code asks whether to trust a folder when it starts in a new folder. Claude Code does not report this dialog to
   Rex. Annorex cannot see it. Do not send while this dialog is open.
 - At the first start of Codex in a new folder, Codex asks whether you trust the folder. Do not send notes while this
-  question shows. Rex reports Codex as idle at that time.
+  question shows. Rex can report Codex as idle, or report no state, at that time. With no state, Annorex refuses to
+  send. With idle, Annorex would paste the notes into the question.
 - If the input box of the agent has text when you send, the notes join that text. Annorex cannot see the input box.
 - Annorex shows a change of a file only when the size or the time of the last change differs. A change that keeps
   both is not seen.

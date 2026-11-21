@@ -21,9 +21,9 @@ Annorex has two parts:
    `annorex rex open last` or `annorex rex open files` with `--target BLOCK --session SESSION` and a
    timeout of 25 seconds. It reports the first line of an error. Rex runs actions with a short `PATH`, so the
    module finds the binary itself: the `bin` option, else the path that `annorex rex install` wrote into the module,
-   else the cargo, Homebrew, and `~/.local/bin` places. If `annorex rex open` exits with code 5, the focused pane is not an agent.
-   The module then runs `annorex rex agents` and picks the pane, as the Agent picker row describes. The module has only
-   this logic.
+   else the cargo, Homebrew, and `~/.local/bin` places. If `annorex rex open` exits with code 5, the focused pane is not
+   an agent. The module then runs `annorex rex agents` and picks the pane, as the Agent picker row describes. The
+   module has only this logic.
 2. Rust binary (`annorex`, built). The binary does all other work. It uses only the `rex`
    command-line tool to communicate with Rex. It sends the arguments as JSON on standard input. It never opens a
    network port.
