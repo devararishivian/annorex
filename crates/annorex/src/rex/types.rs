@@ -115,6 +115,9 @@ pub struct SessionView {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Window {
     pub window_id: String,
+    /// The label of the window. It can be empty.
+    #[serde(default)]
+    pub label: String,
     #[serde(default)]
     pub zoomed_block_id: Option<String>,
     #[serde(default)]

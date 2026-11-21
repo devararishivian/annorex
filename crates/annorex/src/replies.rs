@@ -20,7 +20,7 @@ pub const SESSION_LIMIT: usize = 20;
 pub const RECENT: Duration = Duration::from_mins(10);
 
 /// The creator of terminal blocks.
-const TERMINAL_CREATOR: &str = "com.superlogical.terminal";
+pub(crate) const TERMINAL_CREATOR: &str = "com.superlogical.terminal";
 
 /// One reply of the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]

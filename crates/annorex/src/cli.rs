@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::{Parser, Subcommand};
 
 use crate::agent::{Agent, BusyEffect, detect};
+use crate::agents::{AgentPane, agent_panes};
 use crate::config::Config;
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
 use crate::draft::{DraftStore, drafts_dir};
@@ -34,6 +35,9 @@ pub const EXIT_FAILURE: i32 = 1;
 pub const EXIT_REX: i32 = 4;
 /// Exit code: a usage error (`EX_USAGE`).
 pub const EXIT_USAGE: i32 = 64;
+/// Exit code of `annorex rex open last|files` when the target pane runs no agent. The Lua module
+/// then asks which agent pane to open. Other commands give `EXIT_REFUSED` for no agent.
+pub const EXIT_NOT_AGENT: i32 = 5;
 
 /// Annotate the output of a coding agent in Rex and send the notes back.
 #[derive(Debug, Parser)]
@@ -122,6 +126,12 @@ enum RexCommand {
         #[command(subcommand)]
         view: OpenView,
     },
+    /// Print the agent panes of the session as one JSON line. The Lua module runs this command.
+    Agents {
+        /// The Rex session. The default is `$REX_SESSION`.
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -197,6 +207,7 @@ pub fn run(
             let paths: Vec<String> = paths.iter().map(|path| path.to_string_lossy().into_owned()).collect();
             rex_open(&env, &View::Files(&paths), &target, session, no_update_check, out)
         }
+        Command::Rex { command: RexCommand::Agents { session } } => rex_agents(&env, session, out),
     };
     match result {
         Ok(code) => code,
@@ -519,7 +530,7 @@ fn rex_open(
     .is_some();
     let opened = opened.map_err(|error| match error {
         OpenError::Rex(rex) => Failure::from(rex),
-        OpenError::NotAgent => Failure { code: EXIT_REFUSED, message: error.to_string() },
+        OpenError::NotAgent => Failure { code: EXIT_NOT_AGENT, message: error.to_string() },
         OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
     })?;
     let json = serde_json::to_string(&opened)
@@ -530,6 +541,27 @@ fn rex_open(
     if let Some(message) = open_notice(failed_before || reload_failed, existing) {
         return Err(Failure { code: EXIT_REFUSED, message });
     }
+    Ok(EXIT_OK)
+}
+
+/// The output of `annorex rex agents`.
+#[derive(serde::Serialize)]
+struct AgentList {
+    agents: Vec<AgentPane>,
+}
+
+/// `annorex rex agents`: the agent panes of the session, as `{"agents":[...]}` on one line.
+fn rex_agents(
+    env: &impl Fn(&str) -> Option<OsString>,
+    session: Option<String>,
+    out: &mut impl Write,
+) -> Result<i32, Failure> {
+    let rex = Rex::discover_with(env, session)?;
+    let home = env("HOME").map(PathBuf::from).unwrap_or_default();
+    let list = AgentList { agents: agent_panes(&rex, &home)? };
+    let json = serde_json::to_string(&list)
+        .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
+    writeln!(out, "{json}").map_err(|error| io_failure(&error))?;
     Ok(EXIT_OK)
 }
 

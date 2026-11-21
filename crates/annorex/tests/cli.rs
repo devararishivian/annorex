@@ -209,3 +209,52 @@ fn the_module_has_the_update_check_option() {
     assert!(annorex::install::MODULE_SOURCE.contains("update_check"));
     assert!(annorex::install::MODULE_SOURCE.contains("--no-update-check"));
 }
+
+/// A fake `rex` in a new folder: every block is a shell pane. Give the folder as `REX_BIN_DIR`.
+fn fake_rex_with_a_shell_pane() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().expect("temp dir");
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/rex");
+    // The method is the argument before the last one (`-`).
+    let script = format!(
+        "#!/bin/sh\nfor arg in \"$@\"; do method=\"$last\"; last=\"$arg\"; done\ncase \"$method\" in\n  \
+         process) cat '{fixtures}/process-shell.json' ;;\n  \
+         program_status) cat '{fixtures}/status-empty.json' ;;\n  \
+         *) echo \"Error: unknown method $method\" >&2; exit 1 ;;\nesac\n"
+    );
+    let rex = dir.path().join("rex");
+    std::fs::write(&rex, script).expect("fake rex");
+    std::fs::set_permissions(&rex, std::fs::Permissions::from_mode(0o755)).expect("mode");
+    dir
+}
+
+#[test]
+fn rex_open_of_a_pane_without_an_agent_exits_5_and_deliver_still_exits_3() {
+    let rex = fake_rex_with_a_shell_pane();
+    let bin_dir = rex.path().to_str().expect("utf-8 path");
+    let env = [("REX_BIN_DIR", bin_dir), ("PATH", "/usr/bin:/bin"), ("REX_SESSION", "session:x")];
+    let not_agent = "the focused pane is not running Claude Code, Pi, OpenCode, or Codex";
+    for view in ["last", "files"] {
+        let output = annorex(&["rex", "open", view, "--target", "block:b1"], &env, "");
+        assert_eq!(output.status.code(), Some(5), "{view}: {}", text(&output.stderr));
+        assert!(text(&output.stderr).contains(not_agent), "{}", text(&output.stderr));
+    }
+    let output = annorex(&["deliver", "--target", "block:b1"], &env, "a note");
+    assert_eq!(output.status.code(), Some(3), "{}", text(&output.stderr));
+    assert!(text(&output.stderr).contains("no supported agent"), "{}", text(&output.stderr));
+}
+
+#[test]
+fn rex_agents_help_lists_the_session() {
+    let output = annorex(&["rex", "agents", "--help"], &[], "");
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let help = text(&output.stdout);
+    assert!(help.contains("--session"), "{help}");
+}
+
+#[test]
+fn rex_agents_without_session_exits_64() {
+    let output = annorex(&["rex", "agents"], &[("PATH", "")], "");
+    assert_eq!(output.status.code(), Some(64));
+    assert!(text(&output.stderr).contains("session"), "{}", text(&output.stderr));
+}

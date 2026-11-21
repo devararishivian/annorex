@@ -51,7 +51,7 @@ fn parse_label(label: &str) -> Option<&str> {
 }
 
 /// A label of Annorex has a block id after the prefix, so a label such as `annorex: notes` does not count.
-fn is_annorex(block: &BlockInfo) -> bool {
+pub(crate) fn is_annorex(block: &BlockInfo) -> bool {
     parse_label(&block.label).is_some_and(|target| target.starts_with("block:"))
 }
 
