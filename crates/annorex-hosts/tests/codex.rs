@@ -147,6 +147,16 @@ fn sessions_for_cwd_skips_subagents_and_sessions_without_a_reply() {
 }
 
 #[test]
+fn sessions_for_cwd_does_not_follow_a_folder_link_loop() {
+    let root = tempfile::tempdir().expect("temp");
+    let day = root.path().join("2026/11/21");
+    write_rollout(&day, "a", CWD, true, 1_000);
+    std::os::unix::fs::symlink(root.path(), day.join("loop")).expect("loop");
+    let found = sessions_for_cwd(root.path(), Path::new(CWD), usize::MAX);
+    assert_eq!(names(&found), ["rollout-a.jsonl"], "the link is not walked, so no copy of the file");
+}
+
+#[test]
 fn sessions_for_cwd_stops_at_the_limit() {
     let root = tempfile::tempdir().expect("temp");
     for n in 0..5_u64 {

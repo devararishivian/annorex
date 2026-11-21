@@ -42,9 +42,12 @@ fn all_rollouts(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else { return out };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // `file_type` does not follow links: a link to a folder is not walked, so a loop ends.
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
             out.extend(all_rollouts(&path));
-        } else if path.extension().is_some_and(|x| x == "jsonl")
+        } else if kind.is_file()
+            && path.extension().is_some_and(|x| x == "jsonl")
             && path.file_stem().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("rollout-"))
         {
             out.push(path);
