@@ -20,8 +20,9 @@
 --   3. /opt/homebrew/bin/annorex and /usr/local/bin/annorex (Homebrew)
 --   4. ~/.local/bin/annorex
 --
--- This module only starts `annorex rex open last` and `annorex rex open files`. The binary does all
--- other work.
+-- This module only starts `annorex rex open last`, `annorex rex open files`, and `annorex rex agents`.
+-- When the focused pane runs no agent, it asks in the command palette which agent pane to open.
+-- The binary does all other work.
 
 local M = {}
 
@@ -46,6 +47,9 @@ end
 local function fail(message)
   error("Annorex: " .. tostring(message), 0)
 end
+
+-- The exit code of `annorex rex open` when the target pane runs no agent.
+local NOT_AGENT_CODE = 5
 
 -- True when path is a file. io.open also opens a directory, so "path/." is tried too: it opens
 -- only when path is a directory.
@@ -95,22 +99,88 @@ local function binary()
     .. '. Give the path with setup{ bin = "..." }.')
 end
 
-local function open_view(ctx, view)
-  if ctx.block_id == nil or ctx.session_id == nil then fail("no focused pane") end
+-- The first line of the output of a failed command. The binary starts its errors with "annorex: ".
+-- fail() adds "Annorex: " again.
+local function error_line(result, default)
+  local line = first_line(result.stderr) or first_line(result.stdout) or default
+  return (line:gsub("^annorex: ", ""))
+end
+
+-- Run `annorex rex open VIEW` for the agent pane target.
+local function run_open(ctx, view, target)
   local argv = {
     binary(), "rex", "open", view,
-    "--target", ctx.block_id,
+    "--target", target,
     "--session", ctx.session_id,
   }
   if M.options.update_check == false then argv[#argv + 1] = "--no-update-check" end
   local result, err = rex.exec(argv, { timeout = 25 })
   if result == nil then fail(err) end
-  if not result.ok then
-    local line = first_line(result.stderr) or first_line(result.stdout) or "annorex rex open failed"
-    -- The binary starts its errors with "annorex: ". fail() adds "Annorex: " again.
-    fail((line:gsub("^annorex: ", "")))
-  end
+  return result
+end
+
+local function check_open(result)
+  if not result.ok then fail(error_line(result, "annorex rex open failed")) end
   return nil
+end
+
+-- The agent panes of the session, from `annorex rex agents`.
+local function agent_panes(ctx)
+  local result, err = rex.exec({ binary(), "rex", "agents", "--session", ctx.session_id }, { timeout = 25 })
+  if result == nil then fail(err) end
+  if not result.ok then fail(error_line(result, "annorex rex agents failed")) end
+  local list, why = rex.json.decode(result.stdout)
+  if type(list) ~= "table" or type(list.agents) ~= "table" then
+    fail("cannot read the list of agent panes: " .. tostring(why))
+  end
+  return list.agents
+end
+
+-- Ask in the command palette which agent pane to open. Returns its block id, or nil and the reason.
+-- rex.ui.pick works only in the run of an action and in the functions that it calls directly, not in
+-- pcall.
+local function pick_agent(agents)
+  local items = {}
+  for index, agent in ipairs(agents) do
+    items[index] = {
+      id = agent.block_id,
+      title = agent.title,
+      subtitle = agent.subtitle,
+      detail = agent.detail,
+      icon = "terminal",
+    }
+  end
+  return rex.ui.pick{
+    title = "Annorex: pick the agent",
+    placeholder = "Filter agents",
+    confirm = "Open",
+    items = items,
+  }
+end
+
+local function open_view(ctx, view)
+  if ctx.block_id == nil or ctx.session_id == nil then fail("no focused pane") end
+  local result = run_open(ctx, view, ctx.block_id)
+  if result.code ~= NOT_AGENT_CODE then return check_open(result) end
+  -- The focused pane runs no agent: open an agent pane of the session.
+  local not_agent = error_line(result, "the focused pane runs no agent")
+  local agents = agent_panes(ctx)
+  local id
+  if #agents == 0 then
+    fail(not_agent)
+  elseif #agents == 1 then
+    id = agents[1].block_id
+  else
+    local why
+    id, why = pick_agent(agents)
+    if id == nil then
+      if why == "cancelled" then return nil end
+      fail(not_agent .. " (the command palette did not ask: " .. tostring(why) .. ")")
+    end
+  end
+  -- The viewer opens in the window of the agent pane. A failed focus does not stop the open.
+  rex.session.focus_block{ block_id = id }
+  return check_open(run_open(ctx, view, id))
 end
 
 local function open_last(ctx) return open_view(ctx, "last") end
