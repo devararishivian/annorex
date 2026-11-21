@@ -10,17 +10,22 @@ the changes for Annorex. A comment marks the adapted functions in `wrap.rs` and 
 - URL: <https://github.com/plannotator/plannotator-tui>
 - Commit: `83b0cd91e287df391d5b27029140ff72c32c085d`, for all parts except the keys of the note box, the skipped
   folders, the hidden toggle, and the hanging indent. These parts come from the later commit
-  `e537abdefa7f404c62bb51f927cbe426fbdf500c`. The license did not change.
+  `e537abdefa7f404c62bb51f927cbe426fbdf500c`. The license did not change. The Codex reader `codex.rs` comes from
+  the commit `34c238ad49a498740bdad60343df18528d68d6f6`.
 - License: MIT
 - Files in Annorex that come from plannotator-tui:
     - `crates/annorex-hosts/src/lib.rs`, `claude/mod.rs`, `claude/entries.rs`, `claude/ladder.rs`,
       `claude/messages.rs`, `opencode.rs`, `pi.rs`, `sqlite.rs`, and `time.rs` (from
       `crates/plannotator-tui-hosts/src/`)
+    - `crates/annorex-hosts/src/codex.rs` (from `crates/plannotator-tui-hosts/src/codex.rs` at commit `34c238a`).
+      Annorex changed the reader to take the sessions folder, and removed `find_transcripts`,
+      `find_transcripts_by_id`, and `thread_of`. It added `sessions_for_cwd`. It keeps only the final answers and the
+      prompts.
     - `crates/annorex-hosts/src/roots.rs` (from `crates/plannotator-tui/src/last/roots.rs`)
     - `crates/annorex-hosts/tests/claude.rs`, `exact_session.rs`, `ladder.rs`, `opencode.rs`, `pi.rs`, and `roots.rs`
       (from `crates/plannotator-tui-hosts/tests/`)
     - The test fixtures in `crates/annorex-hosts/tests/fixtures/` (from `crates/plannotator-tui-hosts/tests/`), except
-      `claude-code-new-records.jsonl` and `pi-new-records.jsonl`
+      `claude-code-new-records.jsonl`, `pi-new-records.jsonl`, and the folder `codex/`
     - The function `wrap_table` in `crates/annorex/src/wrap.rs`: the column widths and the clip fallback
     - The keys and the word rules of the note box in `crates/annorex/src/ui/editor.rs` (from
       `crates/plannotator-tui/src/ui/compose.rs` at commit `e537abd`)
@@ -30,8 +35,9 @@ the changes for Annorex. A comment marks the adapted functions in `wrap.rs` and 
       (from `crates/plannotator-tui/src/wrap/hang.rs` at commit `e537abd`)
     - The lint table in the root `Cargo.toml` and the root `rustfmt.toml`
 - These files in `crates/annorex-hosts/` are Annorex code: `changes.rs`, `claude/changes.rs`, `pi_changes.rs`,
-  `opencode_changes.rs`, `tests/display_name.rs`, `tests/fixtures/claude-code-new-records.jsonl`, and
-  `tests/fixtures/pi-new-records.jsonl`.
+  `opencode_changes.rs`, `codex_changes.rs`, `tests/display_name.rs`, `tests/codex.rs`,
+  `tests/fixtures/claude-code-new-records.jsonl`, `tests/fixtures/pi-new-records.jsonl`, and the folder
+  `tests/fixtures/codex/`.
 
 ```text
 MIT License

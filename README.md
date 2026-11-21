@@ -17,7 +17,7 @@ notes back to the agent.
 
 ![Annorex: mark up the reply of your coding agent, then send every note back in one message](docs/assets/annorex-banner.png)
 
-Annorex works with Claude Code, Pi, and OpenCode in Rex on macOS. It opens over the window of the agent. You select
+Annorex works with Claude Code, Pi, OpenCode, and Codex CLI in Rex on macOS. It opens over the window of the agent. You select
 the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
 
 <details>
@@ -60,7 +60,7 @@ it finished.
 You need these items:
 
 - Rex on macOS (Apple silicon or Intel).
-- Claude Code, Pi 1.5.0 or later, or OpenCode 2.x.
+- Claude Code, Pi 1.5.0 or later, OpenCode 2.x, or Codex CLI.
 - Rust 1.99 or later, only to build from source.
 
 Install the `annorex` binary in one of these three ways.
@@ -112,6 +112,8 @@ Rex has no plugin system. It has custom actions in its Lua configuration file `i
 The action `annorex_last` opens the last reply. The action `annorex_files` opens the files of the work directory of
 the agent. The command palette shows them as "Annorex: review the last reply" and "Annorex: review files".
 
+Codex CLI needs no extra setup. Rex reports the state of Codex, and Annorex reads the session files of Codex.
+
 ## Update
 
 From version 0.2.0, Annorex tells you about a newer release. The viewer shows one banner line:
@@ -141,7 +143,7 @@ To turn off the check, use one of these ways:
 
 ## Annotate the last reply
 
-1. Focus the pane of Claude Code, Pi, or OpenCode.
+1. Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI.
 2. Press `cmd+shift+a`. Annorex opens over the full window of the agent.
 3. If the agent has two or more replies, choose one in the list and press `enter`. The newest reply is selected first.
    The list holds the 25 newest replies. Press `p` later to open the list again.
@@ -149,6 +151,11 @@ To turn off the check, use one of these ways:
    table.
 5. Press `o` to mark the block as good or `c` to comment. Press `d` to mark it for removal or `s` to replace it.
 6. For `c` and `s`, type the note in the note box and press `enter`. `o` and `d` save at once and need no text.
+
+If the focused pane is not an agent, Annorex finds the agent panes of the Rex session. With one agent pane, it opens
+that pane. With two or more, the command palette asks "Annorex: pick the agent". Choose a pane. The action focuses that
+pane and opens Annorex. If you cancel the question, nothing opens and no message shows. If the session has no agent
+pane, the action shows an error. The action `annorex_files` works in the same way.
 
 In the note box, the arrow keys, `home`, `end`, `ctrl+a`, and `ctrl+e` move the caret. `ctrl+left` and `ctrl+right` move
 by word. `ctrl+w` deletes the word before the caret. `ctrl+u` and `ctrl+k` delete to the start or the end of the line.
@@ -181,7 +188,7 @@ Before it sends, Annorex makes sure that the agent can take the message:
 - The pane of the agent turned on bracketed paste.
 
 Then Annorex pastes the notes into the input box of the agent and presses Enter. An idle agent starts to work on the
-notes. When the agent is busy, Claude Code queues the message. Pi and OpenCode use it to steer the current task. The
+notes. When the agent is busy, Claude Code queues the message. Pi, OpenCode, and Codex CLI use it to steer the current task. The
 send button shows `queued` or `steers` while the agent works.
 
 After a successful send, Annorex closes. The sent notes leave the draft on disk, and Annorex deletes an empty draft.
@@ -249,6 +256,15 @@ the module uses the first of these files that exists:
 4. `~/.local/bin/annorex`.
 
 The guide tells more about `bin` and the error messages of the module: [Lua options](docs/guide.md#lua-options).
+
+## Known limits
+
+- At the first start of Codex in a new folder, Codex asks whether you trust the folder. Do not send notes while this
+  question shows. Rex reports Codex as idle at that time.
+- Claude Code asks the same question in a new folder. It does not report the question to Rex. Annorex cannot see it.
+  Do not send notes while it shows.
+
+The guide lists all known limits: [Known limits](docs/guide.md#known-limits).
 
 ## How it works
 
