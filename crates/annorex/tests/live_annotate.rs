@@ -220,9 +220,9 @@ fn annotate_and_send_for_each_agent() {
             keys(&rex, &viewer, step);
         }
         let screen = capture(&session, &viewer);
-        log(start, &format!("{name} annotated: button shown {}", screen.contains("[Send 1")));
-        if !screen.contains("[Send 1") {
-            fail(format!("{name} annotate: no [Send 1 ▸] button:\n{screen}"));
+        log(start, &format!("{name} annotated: button shown {}", screen.contains("[ Send 1")));
+        if !screen.contains("[ Send 1") {
+            fail(format!("{name} annotate: no [ Send 1 ▸] button:\n{screen}"));
         }
         keys(&rex, &viewer, "S");
         let screen = capture(&session, &viewer);
@@ -255,8 +255,7 @@ fn annotate_and_send_for_each_agent() {
             fail(format!("{name} draft: still on disk after the send: {:?}", drafts(&state_dir, live.agent)));
         }
 
-        // 5. q closes the viewer without the question.
-        keys(&rex, &viewer, "q");
+        // 5. A finished send closes the viewer by itself (`close_after_send`), so no key is needed.
         let gone = wait_until(Duration::from_secs(5), || (!has_block(&rex, &viewer)).then_some(()));
         log(start, &format!("{name} quit after send: viewer gone {}", gone.is_some()));
         if gone.is_none() {

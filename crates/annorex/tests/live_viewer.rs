@@ -146,7 +146,7 @@ fn annorex_last_opens_viewer_for_each_agent() {
 
     for live in &agents {
         let name = live.agent.status_app();
-        let label = live.agent.host().label();
+        let label = live.agent.host().display_name();
         let wanted = heading(live.agent);
         let replied = wait_until(ARRIVAL_TIMEOUT, || {
             newest_reply(&rex, &roots, live).filter(|text| text.contains(&wanted)).map(drop)
@@ -204,7 +204,15 @@ fn annorex_last_opens_viewer_for_each_agent() {
             let size = rex.size(&viewer).map_or((0, 0), |size| (size.columns, size.rows));
             let screen = capture(&session, &viewer);
             let header = size.0 >= 40 && size.1 >= 10;
-            let ok = if header { screen.contains("Annorex · ") } else { screen.contains("pane too small") };
+            // A header of 40 columns or less drops "Annorex · " and the name of the view (see
+            // `draw_viewer`), but every form keeps the position, for example `reply 1/2`.
+            let ok = if !header {
+                screen.contains("pane too small")
+            } else if size.0 <= 40 {
+                screen.contains("reply ") || screen.contains("file ")
+            } else {
+                screen.contains("Annorex · ")
+            };
             log(
                 start,
                 &format!(
@@ -254,7 +262,8 @@ fn annorex_last_opens_viewer_for_each_agent() {
         }
     }
 
-    // A plain shell pane.
+    // A plain shell pane. The module asks which agent to open when it can ask. `rex do` in script
+    // mode cannot ask (reason `unsupported`), so it fails with the not-agent line, as with no agent.
     let split = rex_json(&["split", "-s", &session, "-b", &agents[0].block, "--focus=false", "--json"]);
     let shell = split["block_ids"][0].as_str().expect("block id").to_owned();
     std::thread::sleep(Duration::from_secs(2));

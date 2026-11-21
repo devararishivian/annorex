@@ -27,7 +27,7 @@ use annorex::open::open_files;
 use annorex::rex::Rex;
 use annorex_hosts::roots::Roots;
 use common::{
-    ARRIVAL_TIMEOUT, Cleanup, accept_claude_trust, capture, deliver, drafts, human_messages, keys,
+    ARRIVAL_TIMEOUT, Cleanup, accept_claude_trust, capture, deliver, drafts, has_block, human_messages, keys,
     live_enabled, log, start_agents, unwrap_paste, wait_for_state, wait_until, write_wrapper,
 };
 
@@ -122,8 +122,8 @@ fn one_message_holds_a_reply_note_and_a_file_note() {
             keys(&rex, &viewer, step);
         }
         let screen = capture(&session, &viewer);
-        if !screen.contains("[Send 2") {
-            fail(format!("{name} annotate: no [Send 2 ▸] button:\n{screen}"));
+        if !screen.contains("[ Send 2") {
+            fail(format!("{name} annotate: no [ Send 2 ▸] button:\n{screen}"));
         }
         keys(&rex, &viewer, "S");
 
@@ -156,7 +156,11 @@ fn one_message_holds_a_reply_note_and_a_file_note() {
         if sent.is_none() {
             fail(format!("{name} drafts: {:?}", drafts(&state_dir, live.agent)));
         }
-        keys(&rex, &viewer, "q");
+        // A finished send closes the viewer by itself, so no key is needed.
+        let gone = wait_until(Duration::from_secs(5), || (!has_block(&rex, &viewer)).then_some(()));
+        if gone.is_none() {
+            fail(format!("{name} quit: the viewer stays after a send:\n{}", capture(&session, &viewer)));
+        }
     }
     drop(cleanup);
     log(start, "cleanup done");

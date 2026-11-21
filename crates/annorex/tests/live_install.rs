@@ -132,22 +132,26 @@ fn installed_module_works_with_the_environment_of_a_rex_action() {
         failures.push(format!("bad bin: expected {expected:?}, got {stderr:?}"));
     }
 
-    // 4. A module of an older version: `rex open` writes the module of this binary. This also
-    // starts a real delayed reload of the server's own config, which is harmless.
+    // 4. A module of an older version, and an open on a shell pane. The open ends with `NotAgent`,
+    // and the action then goes on to ask which agent to open. `rex open` must not refresh the module
+    // now (see `refreshes_module`): a reload would come while the action runs. The open of the
+    // chosen agent pane refreshes it, but this test starts no agent, so it checks the guard only.
     let config = work.path().join("config-old");
     let init = install(&config, "require(\"annorex\").setup{}");
     let module = config.join("annorex.lua");
     let current = std::fs::read_to_string(&module).expect("module");
     let version = format!("(annorex {})", env!("CARGO_PKG_VERSION"));
-    std::fs::write(&module, current.replacen(&version, "(annorex 0.0.1)", 1)).expect("old module");
+    let old = current.replacen(&version, "(annorex 0.0.1)", 1);
+    assert_ne!(old, current, "the old module differs from the current one");
+    std::fs::write(&module, &old).expect("old module");
     let output = run_action(&rex, &real_home, &init, &session, &block);
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     log(start, &format!("old module: exit {:?}, {}", output.status.code(), stderr.trim()));
-    let refreshed = std::fs::read_to_string(&module).expect("module");
-    if refreshed != current {
+    let after = std::fs::read_to_string(&module).expect("module");
+    if after != old {
         failures.push(format!(
-            "old module: expected the module of this binary, got {:?}",
-            refreshed.lines().next()
+            "old module: an open on a shell pane must not refresh the module, got {:?}",
+            after.lines().next()
         ));
     }
     if !stderr.contains(NOT_AGENT) {

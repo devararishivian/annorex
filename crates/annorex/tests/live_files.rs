@@ -47,7 +47,7 @@ const TWO: &str = "alpha line\nbeta line\n";
 /// A note ends with a Return key. The text of `one.md` shows without the `# `, so `vll` marks `One`.
 const STEPS: [&str; 10] = ["0", "v", "llll", "c", NOTE_TWO, "\r", "[", "v", "ll", "c"];
 
-/// Write the project of one agent: a `.gitignore`, two files to review, and a file to hide.
+/// Write the project of one agent: a `.gitignore`, two files to review, and a file that `.gitignore` hides (the tree lists it).
 fn write_project(cwd: &Path) {
     std::fs::write(cwd.join(".gitignore"), "ignored.txt\n").expect(".gitignore");
     std::fs::write(cwd.join("one.md"), ONE).expect("one.md");
@@ -139,7 +139,7 @@ fn review_files_for_each_agent() {
             continue;
         }
 
-        // 1. Start the viewer with the two paths. The list has both. The tree hides ignored.txt.
+        // 1. Start the viewer with the two paths. The list has both. The tree lists ignored.txt too.
         let Ok(viewer) = open_viewer(&rex, &session, &live.block, &wrapper).inspect_err(|error| {
             fail(format!("{name} open: {error}"));
         }) else {
@@ -160,16 +160,17 @@ fn review_files_for_each_agent() {
             fail(format!("{name} list: one.md and two.txt are not both listed:\n{list}"));
         }
         keys(&rex, &viewer, "\x1b");
-        keys(&rex, &viewer, "T");
+        // The tree shows by default (`T` would hide it). Since 0.2.3 it lists the files that
+        // `.gitignore` hides.
         let tree = wait_until(Duration::from_secs(5), || {
             let screen = capture(&session, &viewer);
             screen.contains("two.txt").then_some(screen)
         })
         .unwrap_or_default();
-        let hidden = tree.contains("one.md") && tree.contains("two.txt") && !tree.contains("ignored.txt");
-        log(start, &format!("{name} tree: ignored.txt hidden {hidden}"));
-        if !hidden {
-            fail(format!("{name} tree: the tree must list the files and hide ignored.txt:\n{tree}"));
+        let all_listed = tree.contains("one.md") && tree.contains("two.txt") && tree.contains("ignored.txt");
+        log(start, &format!("{name} tree: ignored.txt listed {all_listed}"));
+        if !all_listed {
+            fail(format!("{name} tree: the tree must list one.md, two.txt, and ignored.txt:\n{tree}"));
         }
         keys(&rex, &viewer, "\x1b");
 
@@ -181,9 +182,9 @@ fn review_files_for_each_agent() {
             keys(&rex, &viewer, step);
         }
         let screen = capture(&session, &viewer);
-        log(start, &format!("{name} annotated: button shown {}", screen.contains("[Send 2")));
-        if !screen.contains("[Send 2") {
-            fail(format!("{name} annotate: no [Send 2 ▸] button:\n{screen}"));
+        log(start, &format!("{name} annotated: button shown {}", screen.contains("[ Send 2")));
+        if !screen.contains("[ Send 2") {
+            fail(format!("{name} annotate: no [ Send 2 ▸] button:\n{screen}"));
         }
         keys(&rex, &viewer, "S");
 
@@ -204,7 +205,6 @@ fn review_files_for_each_agent() {
         }
 
         // 4. The send took both notes: both drafts are gone and none has sent_at.
-        //    q closes the viewer without the question.
         let cleared = wait_until(Duration::from_secs(10), || {
             let (all, sent) = file_drafts(&state_dir, live.agent);
             (all == 0 && sent == 0).then_some(())
@@ -213,7 +213,7 @@ fn review_files_for_each_agent() {
         if cleared.is_none() {
             fail(format!("{name} drafts: {:?}", file_drafts(&state_dir, live.agent)));
         }
-        keys(&rex, &viewer, "q");
+        // A finished send closes the viewer by itself, so no key is needed.
         let gone = wait_until(Duration::from_secs(5), || (!has_block(&rex, &viewer)).then_some(()));
         log(start, &format!("{name} quit after send: viewer gone {}", gone.is_some()));
         if gone.is_none() {
