@@ -18,7 +18,8 @@ pub struct AgentPane {
     pub title: String,
     /// The work directory of the agent, with the home folder as `~`.
     pub subtitle: String,
-    /// The label of the window, or `tab N` when the window has no label.
+    /// The label of the window, or `tab N` when the window has no label, and the position of the pane in
+    /// the window, for example `work · pane 2`.
     pub detail: String,
 }
 
@@ -31,10 +32,11 @@ pub fn agent_panes(api: &impl OpenApi, home: &Path) -> Result<Vec<AgentPane>, Re
     for (index, window) in view.windows.iter().enumerate() {
         let detail =
             if window.label.trim().is_empty() { format!("tab {}", index + 1) } else { window.label.clone() };
-        let blocks = window.layers.iter().flat_map(|layer| layer.blocks.iter());
-        for block in blocks
-            .filter(|block| block.creator_name.as_deref() == Some(TERMINAL_CREATOR) && !is_annorex(block))
-        {
+        // The position counts every block of the window, in the order of the view.
+        let blocks = window.layers.iter().flat_map(|layer| layer.blocks.iter()).enumerate();
+        for (position, block) in blocks.filter(|(_, block)| {
+            block.creator_name.as_deref() == Some(TERMINAL_CREATOR) && !is_annorex(block)
+        }) {
             let Ok(process) = api.process(&block.block_id) else { continue };
             let Ok(status) = api.program_status(&block.block_id) else { continue };
             let Some(agent) = detect(&process, &status) else { continue };
@@ -44,7 +46,7 @@ pub fn agent_panes(api: &impl OpenApi, home: &Path) -> Result<Vec<AgentPane>, Re
                 agent,
                 title: agent.host().display_name().to_owned(),
                 subtitle: cwd.map(|cwd| short_path(cwd, home)).unwrap_or_default(),
-                detail: detail.clone(),
+                detail: format!("{detail} · pane {}", position + 1),
             });
         }
     }
@@ -80,6 +82,7 @@ mod tests {
     const BROKEN: &str = "block:01a1b000-0000-7000-8000-0000000000c5";
     const NOTE: &str = "block:01a1b000-0000-7000-8000-0000000000c6";
     const NO_STATUS: &str = "block:01a1b000-0000-7000-8000-0000000000c7";
+    const CODEX_TWO: &str = "block:01a1b000-0000-7000-8000-0000000000c8";
 
     /// A fake Rex: each block gives the process and the status of one fixture.
     struct Fake {
@@ -100,7 +103,7 @@ mod tests {
                 include_str!("../tests/fixtures/rex/process-claude.json"),
                 include_str!("../tests/fixtures/rex/status-claude-working.json"),
             ),
-            CODEX | VIEWER | NO_STATUS => (
+            CODEX | CODEX_TWO | VIEWER | NO_STATUS => (
                 include_str!("../tests/fixtures/rex/process-codex.json"),
                 include_str!("../tests/fixtures/rex/status-codex-idle.json"),
             ),
@@ -192,17 +195,36 @@ mod tests {
                     agent: Agent::ClaudeCode,
                     title: "Claude Code".into(),
                     subtitle: "~/work/project".into(),
-                    detail: "work".into(),
+                    detail: "work · pane 1".into(),
                 },
                 AgentPane {
                     block_id: CODEX.into(),
                     agent: Agent::Codex,
                     title: "Codex".into(),
                     subtitle: "~/work/project".into(),
-                    detail: "tab 2".into(),
+                    detail: "tab 2 · pane 1".into(),
                 },
             ]
         );
+    }
+
+    #[test]
+    fn two_panes_of_one_agent_in_one_window_differ_by_their_position() {
+        let mut fake = Fake::new();
+        fake.view = json!({ "windows": [
+            { "window_id": "window:1", "label": "Window 8c3a9dd3", "layers": [
+                { "layer_id": "layer:t1", "kind": "tiled", "blocks": [
+                    block(SHELL, "zsh", Some(TERMINAL_CREATOR)),
+                    block(CODEX, "codex", Some(TERMINAL_CREATOR)),
+                ] },
+                { "layer_id": "layer:t2", "kind": "tiled", "blocks": [
+                    block(CODEX_TWO, "codex", Some(TERMINAL_CREATOR)),
+                ] },
+            ] },
+        ] });
+        let panes = agent_panes(&fake, &home()).expect("panes");
+        let details: Vec<&str> = panes.iter().map(|pane| pane.detail.as_str()).collect();
+        assert_eq!(details, ["Window 8c3a9dd3 · pane 2", "Window 8c3a9dd3 · pane 3"]);
     }
 
     #[test]
