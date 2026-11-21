@@ -17,8 +17,8 @@ notes back to the agent.
 
 ![Annorex: mark up the reply of your coding agent, then send every note back in one message](docs/assets/annorex-banner.png)
 
-Annorex works with Claude Code, Pi, OpenCode, and Codex CLI in Rex on macOS. It opens over the window of the agent. You select
-the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
+Annorex works with Claude Code, Pi, OpenCode, and Codex CLI in Rex on macOS. It opens over the window of the agent. You
+select the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
 
 <details>
 <summary>See a review from start to end in five screenshots</summary>
@@ -112,7 +112,7 @@ Rex has no plugin system. It has custom actions in its Lua configuration file `i
 The action `annorex_last` opens the last reply. The action `annorex_files` opens the files of the work directory of
 the agent. The command palette shows them as "Annorex: review the last reply" and "Annorex: review files".
 
-Codex CLI needs no extra setup. Rex reports the state of Codex, and Annorex reads the session files of Codex.
+Codex CLI needs no extra setup. Rex reports the state of Codex. Annorex reads the session files of Codex.
 
 ## Update
 
@@ -188,8 +188,8 @@ Before it sends, Annorex makes sure that the agent can take the message:
 - The pane of the agent turned on bracketed paste.
 
 Then Annorex pastes the notes into the input box of the agent and presses Enter. An idle agent starts to work on the
-notes. When the agent is busy, Claude Code queues the message. Pi, OpenCode, and Codex CLI use it to steer the current task. The
-send button shows `queued` or `steers` while the agent works.
+notes. When the agent is busy, Claude Code queues the message. Pi, OpenCode, and Codex CLI use it to steer the current
+task. The send button shows `queued` or `steers` while the agent works.
 
 After a successful send, Annorex closes. The sent notes leave the draft on disk, and Annorex deletes an empty draft.
 If the send fails, Annorex stays open, keeps your notes, and shows the reason in the footer. If a dialog opens after

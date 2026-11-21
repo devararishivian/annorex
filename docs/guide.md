@@ -193,13 +193,14 @@ with a timeout of 25 seconds:
 | `annorex_last`  | "Annorex: review the last reply" |
 | `annorex_files` | "Annorex: review files"          |
 
-If the focused pane is not an agent, each action also runs `annorex rex agents`. See [The agent picker](#the-agent-picker).
+If the focused pane is not an agent, each action also runs `annorex rex agents`. See [The agent
+picker](#the-agent-picker).
 
 ## Review the last reply
 
-Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI. Press the key that you bound, or run "Annorex: review the last reply"
-from the command palette. The action `annorex_last` opens the viewer over the full window. If an Annorex is already
-open in the session, the action focuses it.
+Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI. Press the key that you bound, or run "Annorex: review the
+last reply" from the command palette. The action `annorex_last` opens the viewer over the full window. If an Annorex is
+already open in the session, the action focuses it.
 
 The header shows the agent and its state, for example `Claude Code (idle)` or `OpenCode (waiting for permission)`.
 Annorex reads the state again every 2 seconds.
@@ -348,13 +349,13 @@ narrow window, `T` opens and closes the tree. The list of replies (`p`), the fil
 picker open in a box in the center, at all widths.
 
 The header shows the view, the agent and its state, and the position. It adds `unsent in reply 1,3` or
-`unsent in 2 files` when notes are not sent. On the right, it has the send button `[ Send N → agent ▸ ]`. With no
-notes, the button is dim: `[ Send ▸ ]`. It is dim while the agent shows a dialog too. While the agent works, the
-button adds `queued` for Claude Code or `steers` for Pi, OpenCode, and Codex CLI. After a send, it shows `[ Sent HH:MM ]`. The
+`unsent in 2 files` when notes are not sent. On the right, it has the send button `[ Send N → agent ▸ ]`. With no notes,
+the button is dim: `[ Send ▸ ]`. It is dim while the agent shows a dialog too. While the agent works, the button adds
+`queued` for Claude Code or `steers` for Pi, OpenCode, and Codex CLI. After a send, it shows `[ Sent HH:MM ]`. The
 footer shows the keys of the current mode. The note keys and `S send`, `P paste`, and `Y copy` come first. The hints
-flow onto up to three rows. The footer has one row when the window has fewer than 16 rows. It also has one row while
-a question, the find input, or the note box is open. Annorex leaves out the hints that do not fit, from the end.
-`? help` and `q quit` stay while they fit.
+flow onto up to three rows. The footer has one row when the window has fewer than 16 rows. It also has one row while a
+question, the find input, or the note box is open. Annorex leaves out the hints that do not fit, from the end. `? help`
+and `q quit` stay while they fit.
 
 Notes show in place. The note colors are the 16 ANSI colors. The text under a note keeps its color. Looks good has a
 green underline. A comment has a yellow underline. Remove is red and crossed out. Replace is magenta and crossed out. A
@@ -393,9 +394,9 @@ example, the agent did not answer yet), the list says why, and `r` looks again. 
 
 ### Codex CLI
 
-Codex CLI needs no extension and no install step. Rex reports the state of Codex, and Annorex reads the session files
-of Codex. Annorex finds Codex in a pane through the program status of Rex (`app: "codex"`) or through the process name
-`codex`.
+Codex CLI needs no extension and no install step. Rex reports the state of Codex. Annorex reads the session files of
+Codex. Annorex finds Codex in a pane through the program status of Rex (`app: "codex"`). It can also use the process
+name `codex`.
 
 Codex keeps one file for each session in `~/.codex/sessions`. If the environment variable `CODEX_HOME` is set, the
 folder is `$CODEX_HOME/sessions`. Annorex lists the sessions of the work directory of the agent, newest first. It skips
@@ -489,10 +490,10 @@ discard (`d`), or go back (`esc`).
 
 ## Review files
 
-Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI. Press the key that you bound, or run "Annorex: review files" from the
-command palette. The action `annorex_files` opens the file viewer over the full window. If an Annorex is already open
-in the session, the action focuses it. Then Annorex ignores the new paths. The root is the work directory of the agent
-process.
+Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI. Press the key that you bound, or run "Annorex: review files"
+from the command palette. The action `annorex_files` opens the file viewer over the full window. If an Annorex is
+already open in the session, the action focuses it. Then Annorex ignores the new paths. The root is the work directory
+of the agent process.
 
 The viewer starts with the file tree. Open a file with `enter`. Annorex shows a Markdown file (`.md` or `.markdown`) as
 Markdown, without line numbers. It shows all other files as plain text with line numbers. It shows the text of a file
@@ -528,15 +529,15 @@ agent deletes a file, the banner says `<path> was deleted. Your notes are kept.`
 
 The tree puts the files that the agent changed since your last prompt at the top, under the line
 `* changed by the agent: N`, and marks them with `*`. Annorex reads the transcript of the agent: the files of its
-successful `Edit`, `Write`, `edit`, `write`, and `apply_patch` calls. For Codex, it reads the `FileChange` records. The fuzzy find
-lists them first too. When the
+successful `Edit`, `Write`, `edit`, `write`, and `apply_patch` calls. The fuzzy find lists them first too. When the
 agent changes more files, a banner says `The agent changed N more files.` until you open the tree.
 
 The list is a hint, not the full list. A file that the agent changed with a shell command (for example `sed -i`) or
-with a tool of an MCP server is not shown. For Codex, a change that you declined is not shown either. Neither is a file that the agent wrote and deleted, or that is outside the
+with a tool of an MCP server is not shown. Neither is a file that the agent wrote and deleted, or that is outside the
 work directory. Your own send is a prompt. After it, the list holds only what the agent changes next. Raise
 `changes_turns` to look back further. Annorex follows the newest session of the agent in the work directory. With two
 Pi or OpenCode panes in one directory, the list can belong to the other pane.
+For Codex, Annorex reads the `FileChange` records. It does not show a change that you declined.
 
 One send gives the general notes and the notes of all documents in one message. It has one section for each
 document: `# Annotations on last reply` (or `earlier reply (HH:MM)`) for a reply, and `# Annotations on PATH` for a
