@@ -173,6 +173,17 @@ pub fn sessions(
     roots: &Roots,
     process_table: &[(u32, u32)],
 ) -> Result<Vec<(SessionRef, SystemTime)>, LoadError> {
+    sessions_up_to(source, roots, process_table, SESSION_LIMIT)
+}
+
+/// Like [`sessions`], with at most `limit` sessions for Pi, Codex, and `OpenCode`. A caller that needs
+/// only the newest session passes 1 and the readers stop at the first match.
+pub fn sessions_up_to(
+    source: &Source,
+    roots: &Roots,
+    process_table: &[(u32, u32)],
+    limit: usize,
+) -> Result<Vec<(SessionRef, SystemTime)>, LoadError> {
     let mut found = Vec::new();
     let searched;
     match source.agent {
@@ -193,14 +204,14 @@ pub fn sessions(
         Agent::Pi => {
             let sessions = roots.pi_sessions();
             searched = sessions.display().to_string();
-            for (path, updated) in pi::sessions_for_cwd(&sessions, &source.cwd, SESSION_LIMIT) {
+            for (path, updated) in pi::sessions_for_cwd(&sessions, &source.cwd, limit) {
                 found.push((SessionRef::Pi(path), updated));
             }
         }
         Agent::Codex => {
             let sessions = roots.codex_sessions();
             searched = sessions.display().to_string();
-            for (path, updated) in codex::sessions_for_cwd(&sessions, &source.cwd, SESSION_LIMIT) {
+            for (path, updated) in codex::sessions_for_cwd(&sessions, &source.cwd, limit) {
                 found.push((SessionRef::Codex(path), updated));
             }
         }
@@ -208,7 +219,7 @@ pub fn sessions(
             let databases = roots.opencode_databases();
             searched = databases.iter().map(|db| db.display().to_string()).collect::<Vec<_>>().join(", ");
             for db in databases {
-                for session in opencode::sessions_for_cwd(&db, &source.cwd, SESSION_LIMIT)? {
+                for session in opencode::sessions_for_cwd(&db, &source.cwd, limit)? {
                     let updated =
                         UNIX_EPOCH + Duration::from_millis(u64::try_from(session.updated).unwrap_or(0));
                     found.push((SessionRef::OpenCode { db: db.clone(), found: session }, updated));
@@ -420,6 +431,21 @@ mod tests {
         assert_eq!(replies.len(), 2);
         assert_eq!(replies[0].first_line(), "The requested fixture changes are complete.");
         assert_eq!(replies[1].first_line(), "## Changes");
+    }
+
+    #[test]
+    fn the_newest_session_lookup_stops_at_one_codex_session() {
+        let home =
+            PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../annorex-hosts/tests/fixtures/codex"));
+        let roots = Roots::from_lookup(PathBuf::from("/nonexistent"), |key| {
+            (key == "CODEX_HOME").then(|| home.clone().into_os_string())
+        });
+        let source = Source { agent: Agent::Codex, cwd: PathBuf::from("/Users/dev/work/project"), pid: 1 };
+        let all = sessions(&source, &roots, &[]).expect("sessions");
+        assert!(all.len() > 1, "the fixture holds more than one session of the folder");
+        let newest = sessions_up_to(&source, &roots, &[], 1).expect("newest");
+        assert_eq!(newest.len(), 1);
+        assert_eq!(newest[0].0.id(), all[0].0.id());
     }
 
     #[test]

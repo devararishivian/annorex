@@ -17,6 +17,7 @@ use crate::{Message, Role};
 /// time first. Only the first line of a file is read to match the folder, and a whole file is
 /// read only until `limit` sessions with a reply are found.
 pub fn sessions_for_cwd(sessions_dir: &Path, cwd: &Path, limit: usize) -> Vec<(PathBuf, SystemTime)> {
+    let cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let mut ranked: Vec<(PathBuf, SystemTime)> = all_rollouts(sessions_dir)
         .into_iter()
         .filter_map(|path| std::fs::metadata(&path).and_then(|data| data.modified()).ok().map(|t| (path, t)))
@@ -25,8 +26,9 @@ pub fn sessions_for_cwd(sessions_dir: &Path, cwd: &Path, limit: usize) -> Vec<(P
     ranked
         .into_iter()
         .filter(|(path, _)| {
-            first_line(path)
-                .is_some_and(|line| !is_subagent(&line) && meta_cwd(&line).is_some_and(|c| same_dir(&c, cwd)))
+            first_line(path).is_some_and(|line| {
+                !is_subagent(&line) && meta_cwd(&line).is_some_and(|c| same_dir(&c, &cwd))
+            })
         })
         .filter(|(path, _)| {
             std::fs::read_to_string(path).is_ok_and(|text| crate::has_reply(&parse_messages(&text, 1)))
@@ -65,8 +67,9 @@ fn meta_cwd(first_line: &str) -> Option<PathBuf> {
         .flatten()
 }
 
-fn same_dir(a: &Path, b: &Path) -> bool {
-    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
+/// `real_b` is the canonical form of the folder that is searched, made once by the caller.
+fn same_dir(a: &Path, real_b: &Path) -> bool {
+    a == real_b || std::fs::canonicalize(a).is_ok_and(|a| a == real_b)
 }
 
 /// Is the rollout with this first line a subagent rollout? Subagent rollouts (reviews,

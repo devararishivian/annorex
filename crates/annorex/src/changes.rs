@@ -30,7 +30,7 @@ pub fn resolve(
     roots: &Roots,
     process_table: &[(u32, u32)],
 ) -> Result<SessionRef, LoadError> {
-    let found = replies::sessions(source, roots, process_table)?;
+    let found = replies::sessions_up_to(source, roots, process_table, 1)?;
     found.into_iter().next().map(|(session, _)| session).ok_or_else(|| LoadError::NoTranscript {
         agent: source.agent,
         cwd: source.cwd.clone(),
