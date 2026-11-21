@@ -10,7 +10,7 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 publish = false
-description = "Find the transcript of a coding agent and read its recent messages (Claude Code, Pi, OpenCode)."
+description = "Find the transcript of a coding agent and read its recent messages (Claude Code, Pi, OpenCode, Codex)."
 
 [dependencies]
 rusqlite.workspace = true

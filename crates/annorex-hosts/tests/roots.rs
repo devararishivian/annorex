@@ -45,3 +45,15 @@ fn defaults_are_under_the_home_directory() {
     assert_eq!(roots.claude_config(), Path::new("home/.claude"));
     assert_eq!(roots.pi_sessions(), PathBuf::from("home/.pi/agent/sessions"));
 }
+
+#[test]
+fn codex_sessions_follow_codex_home() {
+    let set: HashMap<&str, OsString> = [("CODEX_HOME", "root/codex".into())].into_iter().collect();
+    let roots = Roots::from_lookup(PathBuf::from("home"), |key| set.get(key).cloned());
+    assert_eq!(roots.codex_sessions(), PathBuf::from("root/codex/sessions"));
+    let empty: HashMap<&str, OsString> = [("CODEX_HOME", "".into())].into_iter().collect();
+    let roots = Roots::from_lookup(PathBuf::from("home"), |key| empty.get(key).cloned());
+    assert_eq!(roots.codex_sessions(), PathBuf::from("home/.codex/sessions"));
+    let roots = Roots::from_lookup(PathBuf::from("home"), |_| None);
+    assert_eq!(roots.codex_sessions(), PathBuf::from("home/.codex/sessions"));
+}

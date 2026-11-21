@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: moved from crates/plannotator-tui/src/last/roots.rs into this crate and made public; kept only Claude Code, Pi, and OpenCode; the Pi agent directory default is fixed to `.pi/agent`; tests moved to tests/roots.rs.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: moved from crates/plannotator-tui/src/last/roots.rs into this crate and made public; kept only Claude Code, Pi, OpenCode, and Codex; the Pi agent directory default is fixed to `.pi/agent`; tests moved to tests/roots.rs; added `codex_sessions`.
 //! Host storage roots derived from the process environment.
 
 use std::ffi::OsString;
@@ -16,6 +16,7 @@ pub struct Roots {
     pi_session_dir: Option<PathBuf>,
     pi_agent_dir: Option<PathBuf>,
     opencode_db: Option<PathBuf>,
+    codex_home: PathBuf,
     xdg_data_home: PathBuf,
 }
 
@@ -33,6 +34,7 @@ impl Roots {
             pi_session_dir: path("PI_CODING_AGENT_SESSION_DIR"),
             pi_agent_dir: path("PI_CODING_AGENT_DIR"),
             opencode_db: path("OPENCODE_DB"),
+            codex_home: path("CODEX_HOME").unwrap_or_else(|| home.join(".codex")),
             xdg_data_home,
             home,
         }
@@ -47,6 +49,11 @@ impl Roots {
         self.pi_session_dir.clone().unwrap_or_else(|| {
             self.pi_agent_dir.clone().unwrap_or_else(|| self.home.join(PI_DEFAULT_AGENT_DIR)).join("sessions")
         })
+    }
+
+    /// Codex CLI's rollout files: `$CODEX_HOME/sessions`, else `~/.codex/sessions`.
+    pub fn codex_sessions(&self) -> PathBuf {
+        self.codex_home.join("sessions")
     }
 
     pub fn opencode_databases(&self) -> Vec<PathBuf> {

@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: kept only Claude Code, Pi, and OpenCode; removed sniff, detect_host, session_id_of, and is_uuid; added the roots module.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: kept only Claude Code, Pi, OpenCode, and Codex; removed sniff, detect_host, session_id_of, and is_uuid; added the roots module; added the codex module and `Host::Codex`.
 //! Find a coding agent's transcript on disk and read its recent rendered messages.
 //!
 //! The readers are pure over strings, slices, and injected directories: no `~`, no
@@ -8,6 +8,7 @@
 
 pub mod changes;
 pub mod claude;
+pub mod codex;
 pub mod opencode;
 pub mod opencode_changes;
 pub mod pi;
@@ -26,6 +27,9 @@ pub enum Host {
     /// `OpenCode`: sessions, messages and parts in `SQLite` (`<xdg data>/opencode/opencode.db`),
     /// addressed by session id or found by the directory `OpenCode` was started in.
     OpenCode,
+    /// Codex CLI: rollout files under `<codex home>/sessions/YYYY/MM/DD/`, found by the folder in
+    /// their `session_meta`.
+    Codex,
 }
 
 impl Host {
@@ -35,6 +39,7 @@ impl Host {
             Self::ClaudeCode => "claude",
             Self::Pi => "pi",
             Self::OpenCode => "opencode",
+            Self::Codex => "codex",
         }
     }
 
@@ -44,11 +49,12 @@ impl Host {
             Self::ClaudeCode => "Claude Code",
             Self::Pi => "Pi",
             Self::OpenCode => "OpenCode",
+            Self::Codex => "Codex",
         }
     }
 
     /// Every host with a transcript reader, for messages that list them.
-    pub const ALL: [Host; 3] = [Host::ClaudeCode, Host::Pi, Host::OpenCode];
+    pub const ALL: [Host; 4] = [Host::ClaudeCode, Host::Pi, Host::OpenCode, Host::Codex];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
