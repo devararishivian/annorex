@@ -9,6 +9,7 @@
 pub mod changes;
 pub mod claude;
 pub mod codex;
+pub mod codex_changes;
 pub mod opencode;
 pub mod opencode_changes;
 pub mod pi;
