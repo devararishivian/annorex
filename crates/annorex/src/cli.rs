@@ -16,7 +16,7 @@ use crate::install::{
     Check, InstallError, Refresh, check_module, config_dir, install, refresh, run_rex_config_check,
     stable_bin,
 };
-use crate::open::{Existing, OpenError, View, open_view};
+use crate::open::{Existing, OpenError, Opened, View, open_view};
 use crate::payload::sanitize;
 use crate::rex::{Rex, RexError, SystemRunner};
 use crate::safety::{Safety, check};
@@ -518,16 +518,17 @@ fn rex_open(
     // open keeps the marker for the next open.
     let failed = crate::draft::state_dir(env).map(|dir| dir.join(RELOAD_FAILED_FILE));
     let failed_before = reload_failed_before(opened.is_ok(), failed.as_deref());
-    // After an upgrade, the installed module is still the old one. Refresh it after the view
-    // opens: the reload must not come while the action runs. A failed refresh never stops the open.
-    // Without a state folder, the failure of the reload cannot be recorded, so ask the user.
-    let reload_failed = refresh_module(config_dir(env), &stable_bin(&exe), || {
-        failed.as_deref().is_some_and(|failed| {
-            failed.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
-                && rex.reload_config_later(failed).is_ok()
+    // After an upgrade, the installed module is still the old one. Refresh it after the open: the
+    // reload must not come while the action runs. A failed refresh never stops the open. Without a
+    // state folder, the failure of the reload cannot be recorded, so ask the user.
+    let reload_failed = refreshes_module(&opened)
+        && refresh_module(config_dir(env), &stable_bin(&exe), || {
+            failed.as_deref().is_some_and(|failed| {
+                failed.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+                    && rex.reload_config_later(failed).is_ok()
+            })
         })
-    })
-    .is_some();
+        .is_some();
     let opened = opened.map_err(|error| match error {
         OpenError::Rex(rex) => Failure::from(rex),
         OpenError::NotAgent => Failure { code: EXIT_NOT_AGENT, message: error.to_string() },
@@ -563,6 +564,14 @@ fn rex_agents(
         .map_err(|error| Failure { code: EXIT_FAILURE, message: error.to_string() })?;
     writeln!(out, "{json}").map_err(|error| io_failure(&error))?;
     Ok(EXIT_OK)
+}
+
+/// Whether `rex open` refreshes the module after this result of the open. After `NotAgent`, the
+/// action goes on: it asks which agent pane to open, for up to minutes. A reload then would come
+/// while the action runs, so the open of the chosen pane refreshes the module. Every other result
+/// ends the action at once.
+fn refreshes_module(opened: &Result<Opened, OpenError>) -> bool {
+    !matches!(opened, Err(OpenError::NotAgent))
 }
 
 /// The file in the state folder that a failed module reload creates.
@@ -700,6 +709,15 @@ mod tests {
         assert_eq!(refresh_module(Some(dir.path().to_path_buf()), Path::new("/x"), &mut reload), None);
         assert_eq!(reloads, 0);
         assert!(!dir.path().join("init.lua").exists());
+    }
+
+    #[test]
+    fn the_module_is_not_refreshed_before_the_agent_picker() {
+        assert!(!refreshes_module(&Err(OpenError::NotAgent)), "the action goes on to the picker");
+        let opened = Opened { block_id: "block:v".into(), focused_existing: false, existing: None };
+        assert!(refreshes_module(&Ok(opened)), "a successful open refreshes as before");
+        assert!(refreshes_module(&Err(OpenError::NoNewBlock)), "a failed open ends the action");
+        assert!(refreshes_module(&Err(OpenError::Rex(RexError::NoSession))));
     }
 
     #[test]

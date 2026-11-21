@@ -258,3 +258,12 @@ fn rex_agents_without_session_exits_64() {
     assert_eq!(output.status.code(), Some(64));
     assert!(text(&output.stderr).contains("session"), "{}", text(&output.stderr));
 }
+
+#[test]
+fn the_module_asks_for_the_agent_on_exit_5() {
+    let module = annorex::install::MODULE_SOURCE;
+    assert!(module.contains("\"rex\", \"agents\""), "the module runs annorex rex agents");
+    assert!(module.contains("rex.ui.pick"));
+    assert!(module.contains("local NOT_AGENT_CODE = 5"));
+    assert_eq!(annorex::cli::EXIT_NOT_AGENT, 5);
+}
