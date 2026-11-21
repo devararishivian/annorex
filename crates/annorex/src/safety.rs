@@ -69,6 +69,16 @@ mod tests {
     }
 
     #[test]
+    fn codex_permission_record_is_blocked() {
+        let status: StatusList =
+            serde_json::from_str(include_str!("../tests/fixtures/rex/status-codex-blocked.json"))
+                .expect("fixture");
+        let safety = check(&status);
+        assert_eq!(safety, Safety::Blocked { kind: Some("permission".to_owned()), msg: None });
+        assert!(!safety.allows_send());
+    }
+
+    #[test]
     fn working_idle_and_done_are_clear() {
         for state in ["working", "idle", "done"] {
             let safety = check(&list(vec![record(None, state)]));

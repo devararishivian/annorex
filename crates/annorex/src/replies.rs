@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use annorex_hosts::opencode::Found;
 use annorex_hosts::roots::Roots;
-use annorex_hosts::{HostError, Message, Role, claude, opencode, pi};
+use annorex_hosts::{HostError, Message, Role, claude, codex, opencode, pi};
 
 use crate::agent::Agent;
 use crate::rex::{ProcessInfo, Rex, RexError, Runner, lsof_path};
@@ -47,14 +47,15 @@ fn first_line(text: &str) -> &str {
 pub enum SessionRef {
     Claude(PathBuf),
     Pi(PathBuf),
+    Codex(PathBuf),
     OpenCode { db: PathBuf, found: Found },
 }
 
 impl SessionRef {
-    /// The id of the session: the file stem for Claude Code and Pi, the session id for `OpenCode`.
+    /// The id of the session: the file stem for Claude Code, Pi, and Codex, the session id for `OpenCode`.
     pub fn id(&self) -> String {
         match self {
-            Self::Claude(path) | Self::Pi(path) => {
+            Self::Claude(path) | Self::Pi(path) | Self::Codex(path) => {
                 path.file_stem().map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
             }
             Self::OpenCode { found, .. } => found.id.clone(),
@@ -135,6 +136,7 @@ fn agent_name(agent: Agent) -> &'static str {
         Agent::ClaudeCode => "Claude Code",
         Agent::Pi => "Pi",
         Agent::OpenCode => "OpenCode",
+        Agent::Codex => "Codex",
     }
 }
 
@@ -146,7 +148,7 @@ pub fn process_table() -> std::io::Result<Vec<(u32, u32)>> {
 }
 
 /// The sessions that can hold the replies of `source`. Claude Code gives one session (found by
-/// pid). Pi and `OpenCode` give all sessions of the directory, newest first.
+/// pid). Pi, Codex, and `OpenCode` give all sessions of the directory, newest first.
 pub fn candidates(
     source: &Source,
     roots: &Roots,
@@ -165,7 +167,7 @@ pub fn candidates(
 }
 
 /// The sessions of [`candidates`] with their times, without the read of any reply. Claude Code
-/// gives one session; Pi and `OpenCode` give the sessions of the directory, newest first.
+/// gives one session; Pi, Codex, and `OpenCode` give the sessions of the directory, newest first.
 pub fn sessions(
     source: &Source,
     roots: &Roots,
@@ -193,6 +195,13 @@ pub fn sessions(
             searched = sessions.display().to_string();
             for (path, updated) in pi::sessions_for_cwd(&sessions, &source.cwd, SESSION_LIMIT) {
                 found.push((SessionRef::Pi(path), updated));
+            }
+        }
+        Agent::Codex => {
+            let sessions = roots.codex_sessions();
+            searched = sessions.display().to_string();
+            for (path, updated) in codex::sessions_for_cwd(&sessions, &source.cwd, SESSION_LIMIT) {
+                found.push((SessionRef::Codex(path), updated));
             }
         }
         Agent::OpenCode => {
@@ -259,6 +268,7 @@ pub fn load_replies(session: &SessionRef) -> Result<Vec<Reply>, LoadError> {
     let messages: Vec<Message> = match session {
         SessionRef::Claude(path) => claude::parse_messages(&std::fs::read_to_string(path)?, REPLY_LIMIT),
         SessionRef::Pi(path) => pi::parse_messages(&std::fs::read_to_string(path)?, REPLY_LIMIT),
+        SessionRef::Codex(path) => codex::parse_messages(&std::fs::read_to_string(path)?, REPLY_LIMIT),
         SessionRef::OpenCode { db, found } => {
             opencode::messages_for_session(db, &found.id, found.schema, REPLY_LIMIT)?
         }
@@ -394,6 +404,22 @@ mod tests {
         let cands = [candidate(now - Duration::from_secs(60)), candidate(now - Duration::from_secs(300))];
         assert!(needs_picker(Agent::Pi, 1, &cands, now));
         assert!(needs_picker(Agent::OpenCode, 1, &cands, now));
+        assert!(needs_picker(Agent::Codex, 2, &cands, now));
+    }
+
+    #[test]
+    fn codex_session_id_is_the_file_stem_and_replies_load() {
+        let path = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../annorex-hosts/tests/fixtures/codex/sessions/2026/11/21/",
+            "rollout-2026-11-21T14-50-48-01a1fd16-21c9-77d1-98ae-ab0ebe08e2bd.jsonl"
+        ));
+        let session = SessionRef::Codex(path);
+        assert_eq!(session.id(), "rollout-2026-11-21T14-50-48-01a1fd16-21c9-77d1-98ae-ab0ebe08e2bd");
+        let replies = load_replies(&session).expect("replies");
+        assert_eq!(replies.len(), 2);
+        assert_eq!(replies[0].first_line(), "The requested fixture changes are complete.");
+        assert_eq!(replies[1].first_line(), "## Changes");
     }
 
     #[test]

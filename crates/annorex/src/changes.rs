@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use annorex_hosts::changes::Changed;
 use annorex_hosts::roots::Roots;
-use annorex_hosts::{HostError, claude, opencode_changes, pi_changes};
+use annorex_hosts::{HostError, claude, codex_changes, opencode_changes, pi_changes};
 
 use crate::replies::{self, LoadError, SessionRef, Source};
 
@@ -19,6 +19,7 @@ pub fn read(session: &SessionRef, turns: usize) -> Result<Vec<Changed>, HostErro
             Ok(claude::changes::parse_changed(&std::fs::read_to_string(path)?, turns))
         }
         SessionRef::Pi(path) => Ok(pi_changes::parse_changed(&std::fs::read_to_string(path)?, turns)),
+        SessionRef::Codex(path) => Ok(codex_changes::parse_changed(&std::fs::read_to_string(path)?, turns)),
         SessionRef::OpenCode { db, found } => opencode_changes::changed_for_session(db, &found.id, turns),
     }
 }
@@ -152,7 +153,7 @@ pub fn looker_with(
         looks += 1;
         let current = session.as_ref()?;
         let mut unchanged = false;
-        if let SessionRef::Claude(path) | SessionRef::Pi(path) = current {
+        if let SessionRef::Claude(path) | SessionRef::Pi(path) | SessionRef::Codex(path) = current {
             let meta = std::fs::metadata(path).ok()?;
             let now = (meta.len(), meta.modified().ok()?);
             unchanged = stamp == Some(now) && raw.is_some();

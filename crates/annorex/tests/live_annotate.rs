@@ -50,6 +50,7 @@ fn heading(agent: Agent) -> String {
         Agent::ClaudeCode => "CLAUDE",
         Agent::Pi => "PI",
         Agent::OpenCode => "OPENCODE",
+        Agent::Codex => "CODEX",
     };
     format!("ANNOREX-M2-{name}")
 }

@@ -16,7 +16,7 @@ const RESOLVE_EVERY: usize = 3;
 /// The stamp of the transcript of `session`, or `None` when it cannot be read.
 pub fn stamp_of(session: &SessionRef) -> Option<Stamp> {
     match session {
-        SessionRef::Claude(path) | SessionRef::Pi(path) => {
+        SessionRef::Claude(path) | SessionRef::Pi(path) | SessionRef::Codex(path) => {
             let meta = std::fs::metadata(path).ok()?;
             Some((meta.len(), meta.modified().ok()?))
         }

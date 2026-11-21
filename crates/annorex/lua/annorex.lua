@@ -130,7 +130,7 @@ function M.setup(opts)
     title = "Annorex: review the last reply",
     description = "Open the last reply of the agent in the focused pane, over the full window.",
     category = "Annorex",
-    keywords = "annorex review reply agent claude pi opencode",
+    keywords = "annorex review reply agent claude pi opencode codex",
     run = function(ctx) return open_last(ctx) end,
   }
   rex.action{
@@ -138,7 +138,7 @@ function M.setup(opts)
     title = "Annorex: review files",
     description = "Open the files of the work directory of the agent in the focused pane, over the full window.",
     category = "Annorex",
-    keywords = "annorex review files tree agent claude pi opencode",
+    keywords = "annorex review files tree agent claude pi opencode codex",
     run = function(ctx) return open_files(ctx) end,
   }
   return M

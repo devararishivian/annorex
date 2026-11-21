@@ -13,6 +13,8 @@ pub enum Agent {
     Pi,
     #[serde(rename = "opencode")]
     OpenCode,
+    #[serde(rename = "codex")]
+    Codex,
 }
 
 /// What a message does when it arrives while the agent works.
@@ -25,10 +27,10 @@ pub enum BusyEffect {
 }
 
 /// The message when a pane does not run a supported agent (spec §6.1).
-pub const NOT_AGENT: &str = "the focused pane is not running Claude Code, Pi, or OpenCode";
+pub const NOT_AGENT: &str = "the focused pane is not running Claude Code, Pi, OpenCode, or Codex";
 
 impl Agent {
-    const ALL: [Agent; 3] = [Agent::ClaudeCode, Agent::Pi, Agent::OpenCode];
+    const ALL: [Agent; 4] = [Agent::ClaudeCode, Agent::Pi, Agent::OpenCode, Agent::Codex];
 
     /// The `app` value of the agent's root status record.
     pub fn status_app(self) -> &'static str {
@@ -36,6 +38,7 @@ impl Agent {
             Self::ClaudeCode => "claude-code",
             Self::Pi => "pi",
             Self::OpenCode => "opencode",
+            Self::Codex => "codex",
         }
     }
 
@@ -45,6 +48,7 @@ impl Agent {
             Self::ClaudeCode => "claude",
             Self::Pi => "pi",
             Self::OpenCode => "opencode",
+            Self::Codex => "codex",
         }
     }
 
@@ -60,6 +64,7 @@ impl Agent {
             Self::ClaudeCode => Host::ClaudeCode,
             Self::Pi => Host::Pi,
             Self::OpenCode => Host::OpenCode,
+            Self::Codex => Host::Codex,
         }
     }
 
@@ -67,7 +72,7 @@ impl Agent {
     pub fn busy_effect(self) -> BusyEffect {
         match self {
             Self::ClaudeCode => BusyEffect::Queued,
-            Self::Pi | Self::OpenCode => BusyEffect::Steers,
+            Self::Pi | Self::OpenCode | Self::Codex => BusyEffect::Steers,
         }
     }
 }
@@ -101,6 +106,7 @@ mod tests {
             "claude" => include_str!("../tests/fixtures/rex/process-claude.json"),
             "pi" => include_str!("../tests/fixtures/rex/process-pi.json"),
             "opencode" => include_str!("../tests/fixtures/rex/process-opencode.json"),
+            "codex" => include_str!("../tests/fixtures/rex/process-codex.json"),
             _ => include_str!("../tests/fixtures/rex/process-shell.json"),
         };
         serde_json::from_str(text).expect("process fixture")
@@ -111,6 +117,7 @@ mod tests {
             "claude" => include_str!("../tests/fixtures/rex/status-claude-working.json"),
             "pi" => include_str!("../tests/fixtures/rex/status-pi-idle.json"),
             "opencode" => include_str!("../tests/fixtures/rex/status-opencode-idle.json"),
+            "codex" => include_str!("../tests/fixtures/rex/status-codex-idle.json"),
             _ => include_str!("../tests/fixtures/rex/status-empty.json"),
         };
         serde_json::from_str(text).expect("status fixture")
@@ -125,6 +132,7 @@ mod tests {
         assert_eq!(detect(&process("claude"), &status("claude")), Some(Agent::ClaudeCode));
         assert_eq!(detect(&process("pi"), &status("pi")), Some(Agent::Pi));
         assert_eq!(detect(&process("opencode"), &status("opencode")), Some(Agent::OpenCode));
+        assert_eq!(detect(&process("codex"), &status("codex")), Some(Agent::Codex));
     }
 
     #[test]
@@ -153,7 +161,7 @@ mod tests {
     fn leftover_record_with_a_shell_in_the_foreground_is_not_an_agent() {
         // Rex keeps `done` and `idle` records after the agent exits to the shell.
         let shell = process("shell");
-        for name in ["claude", "pi", "opencode"] {
+        for name in ["claude", "pi", "opencode", "codex"] {
             let mut leftover = status(name);
             for record in &mut leftover.records {
                 record.state = "done".to_owned();
@@ -167,6 +175,7 @@ mod tests {
         assert_eq!(detect(&process("claude"), &empty()), Some(Agent::ClaudeCode));
         assert_eq!(detect(&process("pi"), &empty()), Some(Agent::Pi));
         assert_eq!(detect(&process("opencode"), &empty()), Some(Agent::OpenCode));
+        assert_eq!(detect(&process("codex"), &empty()), Some(Agent::Codex));
     }
 
     #[test]
@@ -179,6 +188,7 @@ mod tests {
         assert_eq!(Agent::ClaudeCode.busy_effect(), BusyEffect::Queued);
         assert_eq!(Agent::Pi.busy_effect(), BusyEffect::Steers);
         assert_eq!(Agent::OpenCode.busy_effect(), BusyEffect::Steers);
+        assert_eq!(Agent::Codex.busy_effect(), BusyEffect::Steers);
     }
 
     #[test]
@@ -186,6 +196,8 @@ mod tests {
         assert_eq!(Agent::ClaudeCode.status_app(), "claude-code");
         assert_eq!(Agent::Pi.status_app(), "pi");
         assert_eq!(Agent::OpenCode.status_app(), "opencode");
+        assert_eq!(Agent::Codex.status_app(), "codex");
+        assert_eq!(Agent::Codex.host(), Host::Codex);
         assert_eq!(Agent::ClaudeCode.host(), Host::ClaudeCode);
         assert_eq!(Agent::Pi.host(), Host::Pi);
         assert_eq!(Agent::OpenCode.host(), Host::OpenCode);
@@ -206,6 +218,12 @@ mod tests {
         assert_eq!(Agent::from_argv0("pi"), Some(Agent::Pi));
         assert_eq!(Agent::from_argv0("/Users/dev/.local/bin/claude"), Some(Agent::ClaudeCode));
         assert_eq!(Agent::from_argv0("/usr/bin/zsh"), None);
+        assert_eq!(
+            Agent::from_argv0(
+                "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+            ),
+            Some(Agent::Codex)
+        );
         assert_eq!(Agent::from_argv0("/opt/pi/bin/pip"), None, "only the file name counts");
         let text = include_str!("../tests/fixtures/rex/process-pi.json")
             .replace("\"argv0\": \"pi\"", "\"argv0\": \"/opt/homebrew/bin/pi\"");

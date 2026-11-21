@@ -1,0 +1,24 @@
+{
+  "last_exit": null,
+  "child": {
+    "pid": 85576,
+    "user_id": 501,
+    "user": "dev",
+    "name": "codex",
+    "path": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "invoked_path": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "argv0": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "cwd": "/Users/dev/work/project"
+  },
+  "foreground": {
+    "pid": 85576,
+    "user_id": 501,
+    "user": "dev",
+    "name": "codex",
+    "path": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "invoked_path": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "argv0": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "cwd": "/Users/dev/work/project"
+  },
+  "home": "/Users/dev"
+}

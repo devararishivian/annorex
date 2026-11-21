@@ -444,7 +444,7 @@ mod tests {
         };
         let error = open(&fake).expect_err("not an agent");
         assert!(matches!(error, OpenError::NotAgent));
-        assert_eq!(error.to_string(), "the focused pane is not running Claude Code, Pi, or OpenCode");
+        assert_eq!(error.to_string(), "the focused pane is not running Claude Code, Pi, OpenCode, or Codex");
         assert_eq!(fake.called(), ["process 0004", "program_status 0004"]);
     }
 

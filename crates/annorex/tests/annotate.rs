@@ -741,7 +741,7 @@ fn working_state_shows_queued_or_steers() {
     let working = || Safety::Clear { state: Some("working".to_owned()) };
     let mut claude = annotated(Agent::ClaudeCode, working());
     assert!(header(&mut claude).contains("[ Send 1 · queued → Claude Code ▸ ]"), "{}", header(&mut claude));
-    for agent in [Agent::Pi, Agent::OpenCode] {
+    for agent in [Agent::Pi, Agent::OpenCode, Agent::Codex] {
         let mut app = annotated(agent, working());
         assert!(header(&mut app).contains("[ Send 1 · steers → "), "{}", header(&mut app));
     }

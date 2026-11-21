@@ -1,0 +1,15 @@
+{
+  "records": [
+    {
+      "state": "blocked",
+      "kind": "permission",
+      "app": "codex",
+      "effective_app": "codex",
+      "updated_at": "2026-11-21T13:12:26.756071+07:00",
+      "owner": {
+        "pid": 85576,
+        "name": "codex"
+      }
+    }
+  ]
+}

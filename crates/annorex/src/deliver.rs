@@ -70,7 +70,7 @@ pub enum Outcome {
 /// Why delivery did not write, or failed.
 #[derive(Debug, thiserror::Error)]
 pub enum DeliverError {
-    #[error("no supported agent (Claude Code, Pi, OpenCode) runs in the target pane")]
+    #[error("no supported agent (Claude Code, Pi, OpenCode, Codex) runs in the target pane")]
     NoAgent,
     #[error("the agent shows a dialog{}; answer it first", dialog_text(.kind.as_deref(), .msg.as_deref()))]
     Blocked { kind: Option<String>, msg: Option<String> },
@@ -183,6 +183,7 @@ mod tests {
         paste_mode: bool,
         fail_first_write: bool,
         owner_pid: Option<u32>,
+        app: &'static str,
     }
 
     impl Fake {
@@ -194,6 +195,7 @@ mod tests {
                 paste_mode: true,
                 fail_first_write: false,
                 owner_pid: Some(10),
+                app: "claude-code",
             }
         }
 
@@ -209,12 +211,12 @@ mod tests {
         }
     }
 
-    fn status_record(state: &str, owner_pid: Option<u32>) -> StatusRecord {
+    fn status_record(app: &str, state: &str, owner_pid: Option<u32>) -> StatusRecord {
         StatusRecord {
             id: None,
             state: state.to_owned(),
             kind: (state == "blocked").then(|| "question".to_owned()),
-            app: Some("claude-code".to_owned()),
+            app: Some(app.to_owned()),
             msg: (state == "blocked").then(|| "answer: Pick a color.".to_owned()),
             updated_at: "2026-11-09T15:00:00+07:00".to_owned(),
             owner: owner_pid.map(|pid| Owner { pid, name: "claude".to_owned() }),
@@ -238,7 +240,10 @@ mod tests {
             self.log.borrow_mut().push(Call::Status);
             let state = self.states.borrow_mut().pop_front().flatten();
             Ok(StatusList {
-                records: state.map(|state| status_record(state, self.owner_pid)).into_iter().collect(),
+                records: state
+                    .map(|state| status_record(self.app, state, self.owner_pid))
+                    .into_iter()
+                    .collect(),
             })
         }
 
@@ -320,6 +325,18 @@ mod tests {
         let result = deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY);
         assert!(matches!(result, Err(DeliverError::NoStatus)), "{result:?}");
         assert_eq!(fake.writes(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn sends_to_an_idle_codex_pane() {
+        let mut fake = Fake::new(&[Some("idle"), Some("idle"), Some("idle")]);
+        fake.argv0 = Some("codex");
+        fake.app = "codex";
+        assert_eq!(
+            deliver(&fake, &fake, BLOCK, "note", DeliveryMode::Send, ENTER_DELAY).expect("sent"),
+            Outcome::Sent
+        );
+        assert_eq!(fake.writes(), ["\x1b[200~note\x1b[201~", "\r"]);
     }
 
     #[test]

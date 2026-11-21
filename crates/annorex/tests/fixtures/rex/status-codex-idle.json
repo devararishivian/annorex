@@ -1,0 +1,14 @@
+{
+  "records": [
+    {
+      "state": "idle",
+      "app": "codex",
+      "effective_app": "codex",
+      "updated_at": "2026-11-21T13:09:37.357653+07:00",
+      "owner": {
+        "pid": 85576,
+        "name": "codex"
+      }
+    }
+  ]
+}

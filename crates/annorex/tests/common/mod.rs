@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use annorex::agent::Agent;
 use annorex::rex::{Rex, SystemRunner};
 use annorex_hosts::claude;
+use annorex_hosts::codex;
 use annorex_hosts::pi;
 use annorex_hosts::roots::Roots;
 use annorex_hosts::{Role, opencode};
@@ -72,6 +73,8 @@ impl Drop for Cleanup {
                 Agent::Pi => {
                     let _ = std::fs::remove_dir_all(self.roots.pi_sessions().join(pi::encoded_dir(cwd)));
                 }
+                // The live harness does not start Codex yet: no session to remove.
+                Agent::Codex => {}
                 Agent::OpenCode => {
                     for id in opencode_sessions_in(&self.roots, cwd) {
                         let _ = Command::new("opencode")
@@ -183,6 +186,7 @@ pub(crate) fn start_agents(start: Instant, cleanup: &mut Cleanup) -> (String, Ve
         match agent {
             Agent::ClaudeCode => vec!["claude".into(), "--model".into(), CLAUDE_MODEL.into()],
             Agent::Pi => vec!["pi".into(), "--model".into(), PI_MODEL.into()],
+            Agent::Codex => vec!["codex".into()],
             Agent::OpenCode => {
                 std::fs::write(cwd.join("opencode.json"), OPENCODE_CONFIG).expect("opencode.json");
                 vec!["opencode".into()]
@@ -255,6 +259,12 @@ pub(crate) fn human_messages(rex: &Rex<SystemRunner>, roots: &Roots, live: &Live
         Agent::Pi => pi::find_transcript(&roots.pi_sessions(), &live.cwd)
             .and_then(|path| std::fs::read_to_string(path).ok())
             .map(|text| pi::parse_messages(&text, 1000))
+            .unwrap_or_default(),
+        Agent::Codex => codex::sessions_for_cwd(&roots.codex_sessions(), &live.cwd, 1)
+            .into_iter()
+            .next()
+            .and_then(|(path, _)| std::fs::read_to_string(path).ok())
+            .map(|text| codex::parse_messages(&text, 1000))
             .unwrap_or_default(),
         Agent::OpenCode => roots
             .opencode_databases()
