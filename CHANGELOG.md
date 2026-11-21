@@ -88,7 +88,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 - Notes on text: looks good, comment, remove, and replace. A mouse and a keyboard both work.
 - `S` sends all notes to the agent in one message. `P` pastes the notes without Enter. `Y` copies them.
 - Drafts. Annorex saves the notes to disk and deletes them only after a send that finished.
-- The commands `annorex probe`, `annorex deliver`, `annorex last`, `annorex files`, `annorex rex install`, and `annorex rex open last|files`.
+- The commands `annorex probe`, `annorex deliver`, `annorex last`, `annorex files`, `annorex rex install`, and
+  `annorex rex open last|files`.
 - Installers for Homebrew and for the shell, and a Lua module for Rex.
 
 [Unreleased]: https://github.com/devararishivian/annorex/compare/v0.2.3...HEAD

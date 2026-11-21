@@ -5,7 +5,7 @@
 
 ## Overview
 
-```
+```text
 Rex init.lua -- require("annorex").setup{} --> annorex.lua
                                                  | custom actions: annorex_last, annorex_files
                                                  v opens a full-window layer
