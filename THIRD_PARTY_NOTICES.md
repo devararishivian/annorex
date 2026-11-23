@@ -103,6 +103,7 @@ SOFTWARE.
 - Project: oh-my-pi (OhMyPi)
 - URL: <https://github.com/can1357/oh-my-pi>
 - Version: `v19.1.1` (`31ffee5`)
+- Copyright: Copyright (c) 2025 Mario Zechner, Copyright (c) 2025-2026 Can Bölük, Copyright (c) 2026 Stencil Labs, Inc.
 - License: MIT
 - Files in Annorex that come from oh-my-pi:
     - `crates/annorex-hosts/src/omp.rs`: the folder names of a work directory in `bucket_names`, from
@@ -113,6 +114,8 @@ SOFTWARE.
 MIT License
 
 Copyright (c) 2025 Mario Zechner
+Copyright (c) 2025-2026 Can Bölük
+Copyright (c) 2026 Stencil Labs, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

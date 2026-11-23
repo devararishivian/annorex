@@ -1,3 +1,5 @@
+// Derived from oh-my-pi (https://github.com/can1357/oh-my-pi) @ 31ffee5 (v19.1.1), Copyright (c) 2025 Mario Zechner, Copyright (c) 2025-2026 Can Bölük, Copyright (c) 2026 Stencil Labs, Inc., MIT License. Changes for Annorex: the folder-name rule of `getDefaultSessionDirName` written again in Rust; all three folder names are tried.
+
 //! `OhMyPi` (`omp`): the Pi session tree under other folder names.
 //!
 //! The files and entries have the Pi shape, so [`parse_messages`] is the Pi reader. Two things
