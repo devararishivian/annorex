@@ -557,7 +557,7 @@ fn state_with_bound(skipped: &[&str]) -> crate::setup::InitState {
 /// `rex install`: add the setup lines to `init.lua`, check it, and reload Rex. Returns the exit
 /// code.
 fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, init: &Path) -> i32 {
-    use crate::setup::{Change, InitState, KEY_FILES, KEY_LAST, SetupError, apply, block};
+    use crate::setup::{Change, InitState, SetupError, apply, block};
     let indented = |text: &str| text.lines().map(|line| format!("  {line}")).collect::<Vec<_>>();
     let mut checked = Check::Skipped;
     let mut start_error = None;
@@ -599,28 +599,17 @@ fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, i
                     .to_owned(),
             );
             lines.push(String::new());
-            // The hand list is the setup block without its comment line and without a bound key.
-            lines.extend(
-                block(&state, true)
-                    .lines()
-                    .filter(|line| !line.starts_with("--"))
-                    .map(|line| format!("  {line}")),
-            );
-            if let InitState::NotLoaded { binds_a, binds_f } = state {
-                for key in [(binds_a, KEY_LAST), (binds_f, KEY_FILES)]
-                    .into_iter()
-                    .filter_map(|(b, k)| b.then_some(k))
-                {
-                    lines.extend(bound_key_note(key));
-                }
-            }
+            lines.extend(hand_list(&state));
             message = Some(text);
         }
-        Err(SetupError::Io(error)) => {
+        Err(SetupError::Io { error, state }) => {
             failed = true;
             lines.push(format!("Cannot change {}: {error}. Add these lines by hand:", init.display()));
             lines.push(String::new());
-            lines.extend(SETUP_LINES.iter().map(|line| format!("  {line}")));
+            match state {
+                Some(state) => lines.extend(hand_list(&state)),
+                None => lines.extend(SETUP_LINES.iter().map(|line| format!("  {line}"))),
+            }
         }
     }
     lines.push(String::new());
@@ -651,6 +640,24 @@ fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, i
         Some(_) => "Could not reload Rex. Run: rex config reload".to_owned(),
     });
     EXIT_OK
+}
+
+/// The lines to add by hand: the setup block without its comment line and without a bound key,
+/// then a note for each bound key.
+fn hand_list(state: &crate::setup::InitState) -> Vec<String> {
+    use crate::setup::{InitState, KEY_FILES, KEY_LAST, block};
+    let mut lines: Vec<String> = block(state, true)
+        .lines()
+        .filter(|line| !line.starts_with("--"))
+        .map(|line| format!("  {line}"))
+        .collect();
+    if let InitState::NotLoaded { binds_a, binds_f } = *state {
+        for key in [(binds_a, KEY_LAST), (binds_f, KEY_FILES)].into_iter().filter_map(|(b, k)| b.then_some(k))
+        {
+            lines.extend(bound_key_note(key));
+        }
+    }
+    lines
 }
 
 /// What `rex install` says about the binary that the module starts.

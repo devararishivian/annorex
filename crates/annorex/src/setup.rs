@@ -46,8 +46,9 @@ pub enum SetupError {
     #[error("rex config check found errors:\n{message}")]
     /// `state` is what `init.lua` held, so the caller can print the lines to add by hand.
     CheckFailed { message: String, state: InitState },
-    #[error("cannot change init.lua: {0}")]
-    Io(#[from] std::io::Error),
+    /// `state` is what `init.lua` held, when the read of it worked before the error.
+    #[error("cannot change init.lua: {error}")]
+    Io { error: std::io::Error, state: Option<InitState> },
 }
 
 /// Read what `init.lua` holds. Rulings: a `require` of `annorex` in any form counts, also in a
@@ -144,32 +145,54 @@ fn check_name() -> String {
 /// file. On `Check::Passed` or `Check::Skipped`, the new text replaces the file atomically. A
 /// symbolic link stays: the file that it points to gets the text. The mode of the file stays.
 pub fn apply(path: &Path, check: impl FnOnce(&Path) -> Check) -> Result<Change, SetupError> {
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    use std::os::unix::fs::PermissionsExt as _;
     let is_link = path.symlink_metadata().is_ok_and(|meta| meta.file_type().is_symlink());
-    let target: PathBuf = if is_link { std::fs::canonicalize(path)? } else { path.to_path_buf() };
+    let target: PathBuf = if is_link {
+        std::fs::canonicalize(path).map_err(|error| SetupError::Io { error, state: None })?
+    } else {
+        path.to_path_buf()
+    };
     let (text, mode, state) = match std::fs::read_to_string(&target) {
         Ok(text) => {
-            let mode = std::fs::metadata(&target)?.permissions().mode();
+            let mode = std::fs::metadata(&target)
+                .map_err(|error| SetupError::Io { error, state: None })?
+                .permissions()
+                .mode();
             let state = inspect(&text);
             (text, Some(mode), state)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             (String::new(), None, InitState::Missing)
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => return Err(SetupError::Io { error, state: None }),
     };
     if state == InitState::Loaded {
         return Ok(Change::Unchanged);
     }
+    write_checked(path, &target, &text, mode, state, check)
+}
+
+/// The second half of `apply`: build the new text, check it, and write it. An I/O error here
+/// carries `state`, so the caller can print the lines to add by hand.
+fn write_checked(
+    path: &Path,
+    target: &Path,
+    text: &str,
+    mode: Option<u32>,
+    state: InitState,
+    check: impl FnOnce(&Path) -> Check,
+) -> Result<Change, SetupError> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let io = |error| SetupError::Io { error, state: Some(state) };
     let line_end = if text.contains("\r\n") { "\r\n" } else { "\n" };
-    let mut contents = text.clone();
+    let mut contents = text.to_owned();
     if !text.is_empty() && !text.ends_with('\n') {
         contents.push_str(line_end);
     }
     contents.push_str(&block(&state, text.is_empty()).replace('\n', line_end));
 
     let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    std::fs::create_dir_all(dir)?;
+    std::fs::create_dir_all(dir).map_err(io)?;
     let name = check_name();
     let check_file = dir.join(&name);
     // A file of an earlier run that stopped has the same name only with the same process ID.
@@ -182,13 +205,13 @@ pub fn apply(path: &Path, check: impl FnOnce(&Path) -> Check) -> Result<Change, 
         .and_then(|mut file| std::io::Write::write_all(&mut file, contents.as_bytes()));
     let result = written.map(|()| check(&check_file));
     let _ = std::fs::remove_file(&check_file);
-    match result? {
+    match result.map_err(io)? {
         Check::Failed(message) => {
             return Err(SetupError::CheckFailed { message: message.replace(&name, "init.lua"), state });
         }
         Check::Passed | Check::Skipped | Check::NoScratch => {}
     }
-    crate::install::write_atomic_with_mode(&target, &contents, mode)?;
+    crate::install::write_atomic_with_mode(target, &contents, mode).map_err(io)?;
     let skipped = match state {
         InitState::NotLoaded { binds_a, binds_f } => [(binds_a, KEY_LAST), (binds_f, KEY_FILES)]
             .into_iter()

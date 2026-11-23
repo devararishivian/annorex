@@ -272,6 +272,32 @@ fn rex_install_hand_list_leaves_out_a_bound_key_and_names_it() {
 }
 
 #[test]
+fn rex_install_hand_list_of_a_write_error_leaves_out_a_bound_key_and_names_it() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let rex = fake_rex_config();
+    let dir = tempfile::tempdir().expect("temp dir");
+    // init.lua is a link to a file in a read-only folder, so the final write fails.
+    let locked = dir.path().join("locked");
+    std::fs::create_dir(&locked).expect("locked dir");
+    std::fs::write(locked.join("init.lua"), "rex.bind(\"shift+cmd+f\", \"find\")\n").expect("init");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500)).expect("mode");
+    std::os::unix::fs::symlink(locked.join("init.lua"), dir.path().join("init.lua")).expect("link");
+    let output = install_with_fake_rex(&rex, dir.path(), &[]);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).expect("mode");
+    assert_eq!(output.status.code(), Some(1), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    assert!(out.contains("Add these lines by hand:"), "{out}");
+    assert!(out.contains("annorex_last"), "{out}");
+    assert!(!out.contains("rex.bind(\"cmd+shift+f\", \"annorex_files\")"), "{out}");
+    assert!(
+        out.contains(
+            "init.lua already binds cmd+shift+f, so Annorex left out its line. Choose a free key and add:"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
 fn rex_install_does_not_write_init_lua_when_the_check_fails() {
     let rex = fake_rex_config();
     std::fs::write(rex.path().join("check-fails"), "").expect("flag");
