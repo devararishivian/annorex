@@ -157,7 +157,7 @@ fn newer(slot: &mut Option<Found>, candidate: Found) {
     }
 }
 
-fn has_table(connection: &rusqlite::Connection, name: &str) -> Result<bool, HostError> {
+pub(crate) fn has_table(connection: &rusqlite::Connection, name: &str) -> Result<bool, HostError> {
     connection
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -170,16 +170,18 @@ fn has_table(connection: &rusqlite::Connection, name: &str) -> Result<bool, Host
 
 /// The content items of an assistant `session_message`: the `data` of its `session_part` rows in
 /// `ordinal` order, or the items of `inline["content"]` when it has no part rows or the
-/// database has no `session_part` table (a database from before `OpenCode` v2.2.2).
+/// database has no `session_part` table (a database from before `OpenCode` v2.2.2). `has_parts`
+/// tells whether the table exists: the caller checks it once for each connection.
 pub(crate) fn assistant_content(
     connection: &rusqlite::Connection,
+    has_parts: bool,
     message_id: &str,
     inline: &serde_json::Value,
 ) -> Result<Vec<serde_json::Value>, HostError> {
     let mut items = Vec::new();
-    if has_table(connection, "session_part")? {
+    if has_parts {
         let mut statement = connection
-            .prepare("SELECT data FROM session_part WHERE message_id = ?1 ORDER BY ordinal")
+            .prepare_cached("SELECT data FROM session_part WHERE message_id = ?1 ORDER BY ordinal")
             .map_err(|e| sql_error(WHAT, &e))?;
         let rows = statement
             .query_map(params![message_id], |row| row.get::<_, String>(0))
@@ -286,6 +288,7 @@ fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
             ))
         })
         .map_err(|e| sql_error(WHAT, &e))?;
+    let has_parts = has_table(&connection, "session_part")?;
     let mut messages = Vec::new();
     for row in rows {
         if replies(&messages) >= n {
@@ -295,7 +298,7 @@ fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) else { continue };
         let (role, text) = match kind.as_str() {
             "assistant" => {
-                let items = assistant_content(&connection, &id, &json)?;
+                let items = assistant_content(&connection, has_parts, &id, &json)?;
                 let parts: Vec<&str> = items
                     .iter()
                     .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))

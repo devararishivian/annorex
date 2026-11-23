@@ -133,6 +133,7 @@ fn v2_events(
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
         })
         .map_err(|e| sql_error(WHAT, &e))?;
+    let has_parts = crate::opencode::has_table(connection, "session_part")?;
     let mut events = Vec::new();
     let mut any = false;
     for row in rows {
@@ -145,7 +146,9 @@ fn v2_events(
             }
             continue;
         }
-        for (index, item) in crate::opencode::assistant_content(connection, &id, &data)?.iter().enumerate() {
+        for (index, item) in
+            crate::opencode::assistant_content(connection, has_parts, &id, &data)?.iter().enumerate()
+        {
             if item.get("type").and_then(Value::as_str) != Some("tool") {
                 continue;
             }
