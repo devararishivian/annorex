@@ -599,7 +599,7 @@ fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, i
                     .to_owned(),
             );
             lines.push(String::new());
-            lines.extend(hand_list(&state));
+            lines.extend(hand_list(state));
             message = Some(text);
         }
         Err(SetupError::Io { error, state }) => {
@@ -607,7 +607,7 @@ fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, i
             lines.push(format!("Cannot change {}: {error}. Add these lines by hand:", init.display()));
             lines.push(String::new());
             match state {
-                Some(state) => lines.extend(hand_list(&state)),
+                Some(state) => lines.extend(hand_list(state)),
                 None => lines.extend(SETUP_LINES.iter().map(|line| format!("  {line}"))),
             }
         }
@@ -644,14 +644,14 @@ fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, i
 
 /// The lines to add by hand: the setup block without its comment line and without a bound key,
 /// then a note for each bound key.
-fn hand_list(state: &crate::setup::InitState) -> Vec<String> {
+fn hand_list(state: crate::setup::InitState) -> Vec<String> {
     use crate::setup::{InitState, KEY_FILES, KEY_LAST, block};
-    let mut lines: Vec<String> = block(state, true)
+    let mut lines: Vec<String> = block(&state, true)
         .lines()
         .filter(|line| !line.starts_with("--"))
         .map(|line| format!("  {line}"))
         .collect();
-    if let InitState::NotLoaded { binds_a, binds_f } = *state {
+    if let InitState::NotLoaded { binds_a, binds_f } = state {
         for key in [(binds_a, KEY_LAST), (binds_f, KEY_FILES)].into_iter().filter_map(|(b, k)| b.then_some(k))
         {
             lines.extend(bound_key_note(key));
