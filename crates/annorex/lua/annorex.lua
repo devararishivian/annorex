@@ -1,12 +1,13 @@
 -- Annorex for Rex: review the replies and the files of a coding agent over the full window of the agent.
 --
--- `annorex rex install` writes this file beside Rex's init.lua. Then add to init.lua:
+-- `annorex rex install` writes this file beside Rex's init.lua, adds these lines to init.lua,
+-- and runs `rex config reload`:
 --
 --   require("annorex").setup{}
 --   rex.bind("cmd+shift+a", "annorex_last")
 --   rex.bind("cmd+shift+f", "annorex_files")
 --
--- and run `rex config reload`.
+-- `annorex rex install --no-init` writes only this file. Then add the lines yourself.
 --
 -- Options of setup{}:
 --   bin           The annorex binary: a path, or a name that Rex looks up on its own PATH.
