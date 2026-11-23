@@ -150,6 +150,8 @@ Annorex is for another agent, the action shows this message:
 
 `Annorex is already open in this tab, for {agent}. It is in front now. Press q there to close it, then open Annorex again.`
 
+`{agent}` is the product name: Claude Code, Pi, OpenCode, or Codex.
+
 The replies of the agent and the files of its work directory are in the same Annorex. `annorex_last` and
 `annorex_files` open the same viewer. They differ in the first document: the newest reply, or the files that you name
 (the file tree when you name none). The file viewer shows the tree on the left and the file keys in the footer. The

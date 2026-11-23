@@ -142,6 +142,10 @@ pub struct Existing {
     pub target: String,
     /// The name of that agent (`claude-code`, `pi`, or `opencode`), when Rex still reports it.
     pub agent: Option<String>,
+    /// The product name of that agent (`Claude Code`, `Pi`, `OpenCode`, or `Codex`) for the notice.
+    /// The JSON does not carry it.
+    #[serde(skip)]
+    pub agent_label: Option<&'static str>,
     /// True when the open Annorex serves the agent block that the user asked for.
     pub same_target: bool,
 }
@@ -153,7 +157,7 @@ impl Existing {
         if self.same_target {
             return None;
         }
-        let agent = self.agent.as_deref().unwrap_or("an agent");
+        let agent = self.agent_label.unwrap_or("an agent");
         Some(format!(
             "Annorex is already open in this tab, for {agent}. It is in front now. Press q there to close it, then open Annorex again."
         ))
@@ -226,9 +230,13 @@ fn describe(api: &impl OpenApi, found: &Located<'_>, target: &str) -> Option<Exi
         .process(served)
         .ok()
         .zip(api.program_status(served).ok())
-        .and_then(|(process, status)| detect(&process, &status))
-        .map(|agent: Agent| agent.status_app().to_owned());
-    Some(Existing { target: served.to_owned(), agent, same_target: served == target })
+        .and_then(|(process, status)| detect(&process, &status));
+    Some(Existing {
+        target: served.to_owned(),
+        agent: agent.map(|agent: Agent| agent.status_app().to_owned()),
+        agent_label: agent.map(|agent| agent.host().display_name()),
+        same_target: served == target,
+    })
 }
 
 /// Show the open Annorex `found` and say so.
@@ -765,12 +773,17 @@ mod tests {
 
     #[test]
     fn the_notice_names_the_tab() {
-        let same = Existing { target: TARGET.into(), agent: Some("pi".into()), same_target: true };
+        let same = Existing {
+            target: TARGET.into(),
+            agent: Some("opencode".into()),
+            agent_label: Some("OpenCode"),
+            same_target: true,
+        };
         assert_eq!(same.notice(), None);
         let other = Existing { same_target: false, ..same };
         assert_eq!(
             other.notice().expect("notice"),
-            "Annorex is already open in this tab, for pi. It is in front now. Press q there to close it, then open Annorex again."
+            "Annorex is already open in this tab, for OpenCode. It is in front now. Press q there to close it, then open Annorex again."
         );
     }
 
