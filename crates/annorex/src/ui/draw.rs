@@ -631,18 +631,18 @@ fn prompt_text(app: &App, what: Confirm, width: u16) -> String {
             let files = "documents";
             match &app.save_error {
                 Some(error) => format!(
-                    "Unsent notes in {count} {files}. The drafts cannot be saved: {error}. s send · d discard · esc back"
+                    "Unsent notes in {count} {files} · The drafts cannot be saved: {error} · s send · d discard · esc back"
                 ),
                 None => format!(
-                    "Unsent notes in {count} {files}. s send · k keep the drafts · d discard · esc back"
+                    "Unsent notes in {count} {files} · s send · k keep the drafts · d discard · esc back"
                 ),
             }
         }
         Confirm::Quit => match &app.save_error {
             Some(error) => {
-                format!("Unsent notes. The draft cannot be saved: {error}. s send · d discard · esc back")
+                format!("Unsent notes · The draft cannot be saved: {error} · s send · d discard · esc back")
             }
-            None => "Unsent notes. s send · k keep the draft · d discard · esc back".to_owned(),
+            None => "Unsent notes · s send · k keep the draft · d discard · esc back".to_owned(),
         },
     }
 }

@@ -773,9 +773,9 @@ fn quit_with_unsent_notes_asks_once() {
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
     assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::None);
     let screen = render(&mut app, 120, 12);
-    assert!(screen.contains("Unsent notes. s send · k keep the draft · d discard · esc back"), "{screen}");
+    assert!(screen.contains("Unsent notes · s send · k keep the draft · d discard · esc back"), "{screen}");
     press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-    assert!(!render(&mut app, 120, 12).contains("Unsent notes."));
+    assert!(!render(&mut app, 120, 12).contains("Unsent notes"));
     assert_eq!(press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE), Effect::None);
     assert_eq!(press_key(&mut app, KeyCode::Char('k'), KeyModifiers::NONE), Effect::Quit);
 }
@@ -987,7 +987,7 @@ fn ctrl_c_asks_once() {
     let mut app = annotated(Agent::ClaudeCode, idle());
     let ctrl_c = |app: &mut App| press_key(app, KeyCode::Char('c'), KeyModifiers::CONTROL);
     assert_eq!(ctrl_c(&mut app), Effect::None);
-    assert!(render(&mut app, 120, 12).contains("Unsent notes."));
+    assert!(render(&mut app, 120, 12).contains("Unsent notes"));
     assert_eq!(ctrl_c(&mut app), Effect::Quit);
     let mut editing = annotated(Agent::ClaudeCode, idle());
     press(&mut editing, "cabc");
@@ -2144,4 +2144,60 @@ fn another_key_in_the_rail_flow_clears_the_hint_and_then_acts() {
     press(&mut app, "a");
     let footer = last_row(&mut app, 80, 24);
     assert!(!footer.contains("notes here") && footer.contains("block 2/"), "{footer}");
+}
+
+/// Three paragraphs. Note L starts in block 1 and runs into block 2, M is in block 1, N is in block 2.
+fn notes_across_two_blocks() -> App {
+    let mut app = app("alpha\n\nbeta\n\ngamma\n");
+    press(&mut app, "vjcL\n");
+    press(&mut app, "kcM\n");
+    press(&mut app, "jcN\n");
+    render(&mut app, 120, 40);
+    app
+}
+
+#[test]
+fn the_rail_flow_stays_on_the_notes_of_the_place() {
+    let mut app = notes_across_two_blocks();
+    let notes: Vec<String> =
+        app.review().expect("review").in_order().iter().map(|a| a.note.clone()).collect();
+    assert_eq!(notes, ["L", "M", "N"]);
+    press(&mut app, "x");
+    assert!(last_row(&mut app, 120, 40).contains("2 notes here"));
+    assert!(active_card_text(&mut app).contains('L'));
+    press(&mut app, "j");
+    assert!(active_card_text(&mut app).contains('N'), "down skips M");
+    press(&mut app, "j");
+    assert!(active_card_text(&mut app).contains('N'), "down stops at the last note of the place");
+    press(&mut app, "k");
+    press(&mut app, "k");
+    assert!(active_card_text(&mut app).contains('L'), "up stops at the first note of the place");
+}
+
+#[test]
+fn a_removal_in_the_rail_picks_the_next_note_of_the_place() {
+    let mut app = notes_across_two_blocks();
+    press(&mut app, "xjxy");
+    let notes: Vec<String> =
+        app.review().expect("review").in_order().iter().map(|a| a.note.clone()).collect();
+    assert_eq!(notes, ["L", "M"], "the note N is removed");
+    assert!(active_card_text(&mut app).contains('L'), "the rail goes to a note of the place, not to M");
+    press(&mut app, "xy");
+    assert_eq!(app.annotation_count(), 1, "the last note of the place goes");
+    assert!(!last_row(&mut app, 120, 40).contains("enter go"), "the focus is back in the document");
+}
+
+#[test]
+fn the_edit_flow_never_lands_on_a_note_without_text() {
+    let mut app = app("alpha\n\nbeta\n");
+    press(&mut app, "cfirst\n");
+    press(&mut app, "o");
+    press(&mut app, "csecond\n");
+    render(&mut app, 120, 40);
+    press(&mut app, "e");
+    assert!(last_row(&mut app, 120, 40).contains("2 notes here"));
+    press(&mut app, "j");
+    assert!(active_card_text(&mut app).contains("second"), "down skips the looks good note");
+    press(&mut app, "e");
+    assert_eq!(app.editor().expect("editor").text, "second");
 }

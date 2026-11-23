@@ -240,7 +240,7 @@ fn the_questions_name_the_document_on_the_screen() {
     assert!(render(&mut app, 100, 24).contains("Discard the notes of this reply? · y discard · n keep"));
     press(&mut app, "n");
     press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE);
-    assert!(render(&mut app, 120, 24).contains("Unsent notes in 2 documents."));
+    assert!(render(&mut app, 120, 24).contains("Unsent notes in 2 documents"));
 }
 
 #[test]

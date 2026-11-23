@@ -279,6 +279,8 @@ pub struct App {
     /// The footer hint of the rail after the edit or the remove key found several notes at the focus:
     /// the number of notes and true for the remove key. The next key other than up and down clears it.
     pub(crate) rail_hint: Option<(usize, bool)>,
+    /// The ids of the notes that the edit or remove flow started with. While set, the rail moves only among them.
+    rail_scope: Option<Vec<u64>>,
     /// A send or a discard from the quit question. The viewer ends when it works.
     quit_after: bool,
     exit: bool,
@@ -371,6 +373,7 @@ impl App {
             annotation_index: 0,
             confirm: None,
             rail_hint: None,
+            rail_scope: None,
             quit_after: false,
             exit: false,
             shown_id: None,
@@ -974,6 +977,7 @@ impl App {
     fn place_again(&mut self, changed: &[(String, String, String)]) {
         if !changed.is_empty() {
             self.rail_hint = None;
+            self.rail_scope = None;
         }
         for (id, old, new) in changed {
             if let Some(review) = self.reviews.get_mut(id) {
@@ -1081,6 +1085,7 @@ impl App {
         let outgoing = self.editor.as_ref().map(|editor| self.editing_of(editor));
         // The text can be new, so the place of the rail hint can be stale.
         self.rail_hint = None;
+        self.rail_scope = None;
         self.doc = match self.files.get(&id) {
             Some(file) => Doc::for_kind(file.kind, &reply.text),
             None => Doc::parse(&reply.text),
@@ -1286,6 +1291,9 @@ impl App {
             return self.request_quit();
         }
         self.status = None;
+        if self.focus != Focus::Rail {
+            self.rail_scope = None;
+        }
         if !matches!(self.action_of(key), Some(Action::Up | Action::Down)) {
             self.rail_hint = None;
         }
@@ -1495,6 +1503,7 @@ impl App {
     /// Give the focus to the card rail or to the annotation list, with the cursor on the note `at`.
     /// Without that note, the cursor keeps its place.
     fn open_rail(&mut self, at: Option<u64>) {
+        self.rail_scope = None;
         self.list_open = true;
         self.close_box_only();
         self.focus = Focus::Rail;
@@ -1677,6 +1686,7 @@ impl App {
 
     /// Give the focus back to the document. The list stays open only where it stands beside the document.
     fn leave_rail(&mut self) {
+        self.rail_scope = None;
         if !self.docked.rail || self.docked.cards {
             self.list_open = false;
         }
@@ -1685,8 +1695,17 @@ impl App {
 
     /// Move in the annotation list. On the card rail, the document shows the note of the focused card.
     fn rail_move(&mut self, delta: isize) {
-        let last = self.review().map_or(0, |review| review.annotations.len()).saturating_sub(1);
-        self.annotation_index = self.annotation_index.saturating_add_signed(delta).min(last);
+        if let Some(scope) = &self.rail_scope {
+            let order = self.review().map(|r| r.in_order().iter().map(|a| a.id).collect::<Vec<u64>>());
+            let order: Vec<u64> =
+                order.unwrap_or_default().into_iter().filter(|id| scope.contains(id)).collect();
+            let at = self.listed_annotation().and_then(|id| order.iter().position(|&other| other == id));
+            let to = at.unwrap_or(0).saturating_add_signed(delta).min(order.len().saturating_sub(1));
+            self.list_at(order.get(to).copied());
+        } else {
+            let last = self.review().map_or(0, |review| review.annotations.len()).saturating_sub(1);
+            self.annotation_index = self.annotation_index.saturating_add_signed(delta).min(last);
+        }
         self.show_listed();
     }
 
@@ -1828,18 +1847,25 @@ impl App {
                     return Effect::None;
                 }
                 let Some(reply) = self.shown_id.clone() else { return Effect::None };
-                let here = if self.focus == Focus::Rail { self.notes_here() } else { Vec::new() };
+                let here = match (&self.rail_scope, self.focus == Focus::Rail) {
+                    (Some(scope), true) => self.in_document_order(scope),
+                    (None, true) => self.notes_here(),
+                    _ => Vec::new(),
+                };
                 if let Some(review) = self.reviews.get_mut(&reply) {
                     review.remove(id);
                 }
                 self.sent.remove(&reply);
                 let count = self.review().map_or(0, |review| review.annotations.len());
                 self.annotation_index = self.annotation_index.min(count.saturating_sub(1));
-                // A removal from the rail at the focus of the document: the rail goes to the next note at
+                // A removal from the rail at the focus of the document: the rail goes to the next note of
                 // that place, else the focus goes back to the document.
                 if let Some(at) = here.iter().position(|&other| other == id) {
                     match here.get(at + 1).or_else(|| at.checked_sub(1).and_then(|before| here.get(before))) {
                         Some(&next) => {
+                            if let Some(scope) = &mut self.rail_scope {
+                                scope.retain(|&other| other != id);
+                            }
                             self.list_at(Some(next));
                             self.show_listed();
                         }
@@ -2302,6 +2328,7 @@ impl App {
             [first, ..] => {
                 self.open_rail(Some(*first));
                 self.rail_hint = Some((ids.len(), remove));
+                self.rail_scope = Some(ids);
             }
         }
         Effect::None
@@ -2315,6 +2342,12 @@ impl App {
         } else {
             self.begin_edit(id)
         }
+    }
+
+    /// These ids of notes, in document order.
+    fn in_document_order(&self, ids: &[u64]) -> Vec<u64> {
+        let order = self.review().map(|r| r.in_order().iter().map(|a| a.id).collect::<Vec<u64>>());
+        order.unwrap_or_default().into_iter().filter(|id| ids.contains(id)).collect()
     }
 
     /// Whether the note with this id can have text: a comment or a replace.

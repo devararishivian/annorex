@@ -384,7 +384,7 @@ fn annotate_and_send_for_each_agent() {
 
         // q asks, k keeps the draft.
         keys(&rex, &viewer, "q");
-        let asked = capture(&session, &viewer).contains("Unsent notes. s send · k keep the draft");
+        let asked = capture(&session, &viewer).contains("Unsent notes · s send · k keep the draft");
         keys(&rex, &viewer, "k");
         let gone = wait_until(Duration::from_secs(5), || (!has_block(&rex, &viewer)).then_some(()));
         let kept = drafts(&state_dir, live.agent).iter().any(|draft| {
