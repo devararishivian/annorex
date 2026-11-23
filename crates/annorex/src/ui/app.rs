@@ -2226,6 +2226,15 @@ impl App {
             .collect()
     }
 
+    /// The active note: with the rail focus, the note under the rail cursor. With the document focus, the first
+    /// note at the focus in document order. With no note at the focus, there is none.
+    pub(super) fn active_note(&self) -> Option<u64> {
+        if self.focus == Focus::Rail {
+            return self.listed_annotation();
+        }
+        self.notes_here().first().copied()
+    }
+
     /// The edit or the remove key in the document: act on the note at the focus. With several
     /// notes, open the numbered pick.
     fn note_here(&mut self, remove: bool) -> Effect {

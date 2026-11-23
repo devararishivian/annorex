@@ -3,9 +3,9 @@ source: crates/annorex/tests/files_review.rs
 expression: "render(&mut app, 120, 40)"
 ---
 Annorex · files · Claude Code (idle) · file 1/2 · unsent in 2 files                           [ Send 2 → Claude Code ▸ ]
- Tree                      │▍1 beta line                                               ┌ 💬 comment ───────────────────┐
-Scanning…                  │▍2 second line                                             │ note b                        │
-                           │                                                           └─────────── e edit ─ x remove ─┘
+ Tree                      │▍1 beta line                                               ┏▸ 💬 comment ━━━━━━━━━━━━━━━━━━┓
+Scanning…                  │▍2 second line                                             ┃ note b                        ┃
+                           │                                                           ┗━━━━━━━━━━━ e edit ━ x remove ━┛
                            │
                            │
                            │

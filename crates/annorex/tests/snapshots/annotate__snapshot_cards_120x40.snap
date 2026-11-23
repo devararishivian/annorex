@@ -11,9 +11,9 @@ Annorex · last reply · Claude Code (idle) · reply 1/1 · unsent in reply 1   
 ▍- two                                                                                 │ the new one, after the move   │
                                                                                        │ of the login form.            │
  The end.                                                                              └───────────────────────────────┘
-                                                                                       ┌ ✕ remove ─────────────────────┐
-                                                                                       │                               │
-                                                                                       └──────────────────── x remove ─┘
+                                                                                       ┏▸ ✕ remove ━━━━━━━━━━━━━━━━━━━━┓
+                                                                                       ┃                               ┃
+                                                                                       ┗━━━━━━━━━━━━━━━━━━━━ x remove ━┛
                                                                                        ┌ ⇄ replace ────────────────────┐
                                                                                        │ The last line.                │
                                                                                        └───────────────────────────────┘

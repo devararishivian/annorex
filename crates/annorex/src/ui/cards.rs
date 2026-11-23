@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::app::{App, Focus};
@@ -176,6 +176,7 @@ struct Shown {
     annotation: Annotation,
     row: u16,
     in_focus: bool,
+    active: bool,
 }
 
 /// The notes whose range has a row on the screen, in document order. Detached notes are left out.
@@ -191,13 +192,15 @@ fn shown_notes(app: &mut App) -> Vec<Shown> {
     } else {
         app.notes_here()
     };
+    let active = app.active_note();
     notes
         .into_iter()
         .filter_map(|annotation| {
             let (first, _) = shown_rows(app, &annotation.range)?;
             let row = u16::try_from(first).ok()?;
             let in_focus = focused.contains(&annotation.id);
-            Some(Shown { annotation, row, in_focus })
+            let active = active == Some(annotation.id);
+            Some(Shown { annotation, row, in_focus, active })
         })
         .collect()
 }
@@ -211,26 +214,29 @@ pub(super) fn draw_side(frame: &mut Frame, app: &mut App, side: Side) {
     }
 }
 
-/// One `●` in the note color in the marker margin, on the first row of each note. Where notes
-/// share a row, the first note gives the color.
+/// One marker in the note color in the marker margin, on the first row of each note: `◆` for the
+/// active note and `●` for the others. Where notes share a row, the first note gives the color,
+/// but the active note always wins.
 fn draw_markers(frame: &mut Frame, app: &mut App, column: Rect) {
     if column.width < MARKER_WIDTH {
         return;
     }
     let mut used = Vec::new();
     for shown in shown_notes(app) {
-        if shown.row >= column.height || used.contains(&shown.row) {
+        if shown.row >= column.height || (used.contains(&shown.row) && !shown.active) {
             continue;
         }
         used.push(shown.row);
         let style = Style::new().fg(kind_color(shown.annotation.kind));
-        frame.buffer_mut().set_string(column.x + 1, column.y + shown.row, "●", style);
+        let mark = if shown.active { "◆" } else { "●" };
+        frame.buffer_mut().set_string(column.x + 1, column.y + shown.row, mark, style);
     }
 }
 
 /// The cards in the rail, each at the first row of its note when it can. A card has a border in
 /// the note color, the icon and the word of the type in its title, and the note text inside. The
-/// cards of the notes on the focused block are bold and have `edit` and `remove` buttons.
+/// active card has a thick border, a title in reverse video that starts with `▸`, and the `edit` and
+/// `remove` buttons. Where a note is active, the cards that are not at the focus are dim.
 fn draw_cards(frame: &mut Frame, app: &mut App, rail: Rect) {
     if rail.width < 8 || rail.height < 3 {
         return;
@@ -258,6 +264,7 @@ fn draw_cards(frame: &mut Frame, app: &mut App, rail: Rect) {
         .collect();
     let edit = app.config.keys.label(Action::Edit);
     let remove = app.config.keys.label(Action::Remove);
+    let has_active = shown.iter().any(|shown| shown.active);
     for (id, rect) in layout_cards(&wanted, cards) {
         // The layout can leave out cards at the start, so find the note of the card by its id.
         let Some((shown, body)) = shown.iter().zip(&bodies).find(|(shown, _)| shown.annotation.id == id)
@@ -266,17 +273,28 @@ fn draw_cards(frame: &mut Frame, app: &mut App, rail: Rect) {
         };
         let annotation = &shown.annotation;
         let mut style = Style::new().fg(kind_color(annotation.kind));
-        if shown.in_focus {
+        let dim = has_active && !shown.in_focus;
+        if shown.active {
             style = style.add_modifier(Modifier::BOLD);
+        } else if dim {
+            style = style.add_modifier(Modifier::DIM);
         }
         let label = annotation.label.as_ref().map_or_else(String::new, |label| format!("· {label} "));
-        let title = format!(" {} {} {label}", icon(annotation.kind), word(annotation.kind));
-        let block = Block::new().borders(Borders::ALL).border_style(style).title(Span::styled(title, style));
-        let lines: Vec<Line<'static>> = body.iter().map(|row| Line::raw(format!(" {row}"))).collect();
+        let title = format!("{} {} {label}", icon(annotation.kind), word(annotation.kind));
+        let (title, border_type) = if shown.active {
+            (Span::styled(format!("▸ {title}"), style.add_modifier(Modifier::REVERSED)), BorderType::Thick)
+        } else {
+            (Span::styled(format!(" {title}"), style), BorderType::Plain)
+        };
+        let block =
+            Block::new().borders(Borders::ALL).border_type(border_type).border_style(style).title(title);
+        let body_style = if dim { Style::new().add_modifier(Modifier::DIM) } else { Style::new() };
+        let lines: Vec<Line<'static>> =
+            body.iter().map(|row| Line::styled(format!(" {row}"), body_style)).collect();
         frame.render_widget(Clear, rect);
         frame.render_widget(Paragraph::new(lines).block(block), rect);
         app.hits.push(rect, Hit::Card(id));
-        if shown.in_focus {
+        if shown.active {
             draw_card_buttons(frame, app, rect, id, (&edit, &remove), annotation.kind);
         }
     }

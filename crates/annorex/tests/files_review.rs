@@ -1050,7 +1050,7 @@ fn a_focuses_the_rail_at_120_columns() {
     let screen = render(&mut app, 120, 30);
     assert!(!screen.contains("Annotations"), "no list beside the rail: {screen}");
     assert!(screen.lines().last().unwrap_or_default().contains("enter go"), "{screen}");
-    assert!(screen.contains(" e edit ─ x remove ─"), "the focused card: {screen}");
+    assert!(screen.contains(" e edit ━ x remove ━"), "the focused card: {screen}");
     press(&mut app, "a");
     assert!(render(&mut app, 120, 30).lines().last().unwrap_or_default().contains("j/k block"));
 }

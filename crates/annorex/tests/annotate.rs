@@ -1393,17 +1393,17 @@ fn cards_show_at_120_columns_and_markers_below() {
     assert_eq!(title, row_of(&wide, "We change the login page."), "the card is at its block:\n{wide}");
     assert!(wide.contains("Which page?"), "{wide}");
     let line = wide.lines().nth(title).expect("title row");
-    let card_x = line.find('┌').expect("card border");
+    let card_x = line.find('┏').expect("card border");
     assert!(card_x > 80, "the card is in the rail on the right: {line:?}");
     let buffer = drawn(&mut app, 120, 40);
-    let corners = cells_with(&buffer, "┌");
+    let corners = cells_with(&buffer, "┏");
     assert!(corners.iter().any(|(_, _, style)| style.fg == Some(Color::Yellow)), "the border is yellow");
     assert!(cells_with(&buffer, "●").is_empty(), "no marker with the rail");
 
     let narrow = render(&mut app, 110, 40);
     assert!(!narrow.contains("💬 comment"), "no card below 120 columns:\n{narrow}");
     let buffer = drawn(&mut app, 110, 40);
-    let markers = cells_with(&buffer, "●");
+    let markers = cells_with(&buffer, "◆");
     let row = u16::try_from(row_of(&narrow, "We change the login page.")).expect("row");
     assert_eq!(markers.len(), 1, "{narrow}");
     let (x, y, style) = markers[0];
@@ -1586,7 +1586,7 @@ fn a_card_starts_on_the_first_row_of_its_block_at_240_columns() {
     assert_eq!(title, block, "the card top is the first row of its block:\n{screen}");
     // The card sits in the rail at the right edge of the window.
     let line = screen.lines().nth(title).expect("row");
-    let card_x = line.find('┌').expect("card border");
+    let card_x = line.find('┏').expect("card border");
     assert!((200..210).contains(&card_x), "the card is in the rail at the right edge: {card_x}");
 }
 
@@ -1918,4 +1918,125 @@ fn a_held_send_keeps_the_notes_on_disk() {
 #[test]
 fn a_paste_keeps_the_notes_on_disk() {
     assert_notes_kept_after(&SendResult::Pasted);
+}
+
+/// Three notes on the second paragraph block, then the focus on it. `bar_text` has the heading, the paragraph, and so on.
+fn three_notes_on_one_block() -> App {
+    let mut app = app(bar_text());
+    press(&mut app, "jcfirst\n");
+    press(&mut app, "cmiddle\n");
+    press(&mut app, "cthird\n");
+    app
+}
+
+fn cell_rows(app: &mut App, width: u16, height: u16, text: &str) -> Vec<(u16, u16)> {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    let buffer = terminal.backend().buffer();
+    let mut found = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            if buffer.cell((x, y)).is_some_and(|cell| cell.symbol() == text) {
+                found.push((x, y));
+            }
+        }
+    }
+    found
+}
+
+fn style_at(app: &mut App, width: u16, height: u16, at: (u16, u16)) -> ratatui::style::Style {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal.draw(|frame| draw(frame, app)).expect("draw");
+    terminal.backend().buffer().cell(at).expect("cell").style()
+}
+
+#[test]
+fn only_the_first_note_at_the_focus_has_the_thick_active_card() {
+    let mut app = three_notes_on_one_block();
+    assert_eq!(cell_rows(&mut app, 120, 40, "┏").len(), 1, "one thick card");
+    let screen = render(&mut app, 120, 40);
+    let marked = screen.lines().filter(|line| line.contains("┏▸")).count();
+    assert_eq!(marked, 1, "{screen}");
+}
+
+#[test]
+fn the_buttons_show_only_on_the_active_card() {
+    let mut app = three_notes_on_one_block();
+    let screen = render(&mut app, 120, 40);
+    let bottoms: Vec<&str> = screen.lines().filter(|line| line.contains('┛') || line.contains('┘')).collect();
+    assert_eq!(bottoms.len(), 3, "{screen}");
+    assert_eq!(bottoms.iter().filter(|line| line.contains(" remove ")).count(), 1, "{screen}");
+    assert_eq!(bottoms.iter().filter(|line| line.contains(" edit ")).count(), 1, "{screen}");
+    assert!(bottoms.first().is_some_and(|line| line.contains('┛')), "the first card has the buttons");
+}
+
+#[test]
+fn the_active_title_is_in_reverse_video_in_the_note_color() {
+    use ratatui::style::{Color, Modifier};
+    let mut app = three_notes_on_one_block();
+    let (x, y) = *cell_rows(&mut app, 120, 40, "┏").first().expect("corner");
+    let (x, y) = (x + 1, y);
+    let style = style_at(&mut app, 120, 40, (x, y));
+    assert!(style.add_modifier.contains(Modifier::REVERSED), "{style:?}");
+    assert_eq!(style.fg, Some(Color::Yellow));
+}
+
+#[test]
+fn a_card_not_at_the_focus_is_dim_and_the_cards_at_the_focus_are_not() {
+    use ratatui::style::Modifier;
+    let mut app = three_notes_on_one_block();
+    press(&mut app, "jjcelsewhere\n");
+    press(&mut app, "kk");
+    let corners = cell_rows(&mut app, 120, 40, "┌");
+    assert_eq!(corners.len(), 3, "two normal cards at the focus and one away from it");
+    let dim: Vec<bool> = corners
+        .iter()
+        .map(|&at| style_at(&mut app, 120, 40, at).add_modifier.contains(Modifier::DIM))
+        .collect();
+    assert_eq!(dim.iter().filter(|&&d| d).count(), 1, "{corners:?} {dim:?}");
+    assert_eq!(dim.last(), Some(&true), "the card of the last note is the dim one");
+}
+
+#[test]
+fn with_no_note_at_the_focus_no_card_is_active_or_dim() {
+    use ratatui::style::Modifier;
+    let mut app = app(bar_text());
+    press(&mut app, "jcone\n");
+    press(&mut app, "jj");
+    assert_eq!(cell_rows(&mut app, 120, 40, "┏"), vec![]);
+    let (x, y) = *cell_rows(&mut app, 120, 40, "┌").first().expect("card");
+    assert!(!style_at(&mut app, 120, 40, (x, y)).add_modifier.contains(Modifier::DIM));
+}
+
+#[test]
+fn with_the_rail_focus_the_card_under_the_rail_cursor_is_active() {
+    let mut app = three_notes_on_one_block();
+    press(&mut app, "a");
+    press(&mut app, "j");
+    assert_eq!(cell_rows(&mut app, 120, 40, "┏").len(), 1);
+    let screen = render(&mut app, 120, 40);
+    let rows: Vec<&str> = screen.lines().collect();
+    let title = rows.iter().position(|line| line.contains("┏▸")).expect("active title");
+    assert!(rows[title + 1].contains("middle"), "{screen}");
+}
+
+#[test]
+fn the_annotation_list_marks_the_active_row_with_the_document_focus() {
+    let mut app = three_notes_on_one_block();
+    // At 110 columns the list stands beside the document and stays open after `esc`.
+    press(&mut app, "a");
+    render(&mut app, 110, 30);
+    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    let screen = render(&mut app, 110, 30);
+    assert!(screen.lines().any(|line| line.contains("▸ 1  l.")), "{screen}");
+    assert_eq!(screen.matches("│▸").count(), 1, "{screen}");
+}
+
+#[test]
+fn the_marker_margin_shows_a_diamond_for_the_active_note_and_a_dot_for_the_others() {
+    let mut app = three_notes_on_one_block();
+    press(&mut app, "jjcelsewhere\n");
+    press(&mut app, "kk");
+    assert_eq!(cell_rows(&mut app, 80, 30, "◆").len(), 1);
+    assert_eq!(cell_rows(&mut app, 80, 30, "●").len(), 1);
 }

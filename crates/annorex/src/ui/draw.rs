@@ -1500,11 +1500,13 @@ fn draw_annotation_list(frame: &mut Frame, app: &mut App, area: Rect, borders: B
             _ => annotation.note.as_str(),
         };
         let second = format!("    {}", detail.lines().next().unwrap_or_default());
-        let style = if index == app.annotation_index && app.focus == Focus::Rail {
-            Style::new().add_modifier(Modifier::REVERSED)
+        let active = app.active_note() == Some(annotation.id);
+        let style = if active {
+            Style::new().fg(kind_color(annotation.kind)).add_modifier(Modifier::REVERSED)
         } else {
             Style::new()
         };
+        let first = if active && !annotation.detached { first.replacen(bang, "▸", 1) } else { first };
         lines.push(Line::styled(fit(&first, inner.width), style));
         lines.push(Line::styled(fit(&second, inner.width), style.add_modifier(Modifier::DIM)));
         rows.push(index);

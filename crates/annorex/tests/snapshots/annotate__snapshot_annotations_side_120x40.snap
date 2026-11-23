@@ -6,9 +6,9 @@ Annorex · last reply · Claude Code (idle) · reply 1/1 · unsent in reply 1   
 ▍alpha beta gamma                                                                      ┌ 💬 comment ───────────────────┐
                                                                                        │ Which page?                   │
  - one                                                                                 └───────────────────────────────┘
-▍- two                                                                                 ┌ ✕ remove ─────────────────────┐
-                                                                                       │                               │
-                                                                                       └──────────────────── x remove ─┘
+▍- two                                                                                 ┏▸ ✕ remove ━━━━━━━━━━━━━━━━━━━━┓
+                                                                                       ┃                               ┃
+                                                                                       ┗━━━━━━━━━━━━━━━━━━━━ x remove ━┛
 
 
 
