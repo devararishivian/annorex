@@ -177,16 +177,27 @@ fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     write_atomic_with_mode(path, contents, None)
 }
 
-/// `write_atomic` that gives the new file the permission bits `mode`, before the rename. So a
-/// private file never shows its new text with other permissions.
+/// `write_atomic` that gives the new file the permission bits `mode`. The temporary file is
+/// created with `mode`, so the new text never shows with more permissions than `mode`. The umask can
+/// clear bits of `mode` at the creation, so the mode is set again before the rename.
 pub(crate) fn write_atomic_with_mode(path: &Path, contents: &str, mode: Option<u32>) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
+    use std::io::Write as _;
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
     let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let temp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    let written = std::fs::write(&temp, contents)
-        .and_then(|()| match mode {
-            Some(mode) => std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(mode & 0o7777)),
-            None => Ok(()),
+    // A file of an earlier run that stopped has the same name only with the same process ID.
+    let _ = std::fs::remove_file(&temp);
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(mode.map_or(0o666, |mode| mode & 0o7777))
+        .open(&temp)
+        .and_then(|mut file| {
+            file.write_all(contents.as_bytes())?;
+            if let Some(mode) = mode {
+                file.set_permissions(std::fs::Permissions::from_mode(mode & 0o7777))?;
+            }
+            file.sync_all()
         })
         .and_then(|()| std::fs::rename(&temp, path));
     if written.is_err() {
@@ -276,6 +287,19 @@ pub fn run_rex_config_check(rex: &Path, init: &Path) -> std::io::Result<Probe> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
+    #[test]
+    fn write_atomic_with_mode_replaces_a_stale_temp_file_and_sets_the_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("init.lua");
+        let stale = dir.path().join(format!(".init.lua.{}.tmp", std::process::id()));
+        std::fs::write(&stale, "old").expect("stale");
+        write_atomic_with_mode(&path, "new\n", Some(0o600)).expect("write");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "new\n");
+        assert_eq!(std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777, 0o600);
+        assert!(!stale.exists());
+    }
+
     use std::ffi::OsString;
     use std::path::PathBuf;
 
