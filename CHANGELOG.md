@@ -7,6 +7,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 
 ## [Unreleased]
 
+## [0.5.0] - Unreleased
+
+### Added
+
+- OhMyPi (`omp`) is a supported agent, on a best-effort basis. Annorex finds OhMyPi in a pane, shows its replies, and
+  lists the files that it changed. Annorex reads the default profile only.
+- The README has a "Supported agents" table with the minimum version of each agent and the version that Annorex was
+  checked with.
+- The card rail marks one active note with a thick border and the sign `▸`. The other cards are dim. The margin dot of
+  the active note is `◆`.
+- The list of replies shows the selected reply while you move in it. `esc` shows the earlier reply again.
+
+### Changed
+
+- When several notes share a place, the edit and remove keys move the focus to the card rail. The numbered pick is gone.
+  The footer says `N notes here · ↑↓ choose · KEY remove · esc back`.
+- The question to remove a note shows the kind and the text of the note: `Remove this comment? "TEXT" · y remove · n
+  keep`. The other footer questions are clearer too.
+- The agent name of Codex is "Codex CLI" everywhere.
+
+### Fixed
+
+- Annorex lists the files that an agent changed when the agent gives a path through a link to the real folder, for
+  example `/tmp` instead of `/private/tmp`.
+
 ## [0.4.0] - 2026-11-23
 
 ### Added

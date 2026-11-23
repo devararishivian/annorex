@@ -53,7 +53,7 @@ is busy.
 You need these items:
 
 - Rex on macOS (Apple silicon or Intel).
-- Claude Code, Pi 1.5.0 or later, OpenCode 2.3.2 or later, or Codex CLI.
+- A supported coding agent at its minimum version or later. The [README](../README.md#supported-agents) lists the versions.
 - Rust 1.99 or later, only to build from source.
 
 Each release has prebuilt binaries for Apple silicon and Intel. Install the binary with Homebrew:
@@ -150,7 +150,7 @@ Annorex is for another agent, the action shows this message:
 
 `Annorex is already open in this tab, for {agent}. It is in front now. Press q there to close it, then open Annorex again.`
 
-`{agent}` is the product name: Claude Code, Pi, OpenCode, or Codex CLI.
+`{agent}` is the product name: Claude Code, Pi, OpenCode, Codex CLI, or OhMyPi.
 
 The replies of the agent and the files of its work directory are in the same Annorex. `annorex_last` and
 `annorex_files` open the same viewer. They differ in the first document: the newest reply, or the files that you name
@@ -229,7 +229,7 @@ picker](#the-agent-picker).
 
 ## Review the last reply
 
-Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI. Press the key that you bound, or run "Annorex: review the
+Focus the pane of Claude Code, Pi, OpenCode, Codex CLI, or OhMyPi. Press the key that you bound, or run "Annorex: review the
 last reply" from the command palette. The action `annorex_last` opens the viewer over the full window. If an Annorex is
 already open in the tab, the action focuses it.
 
@@ -266,7 +266,14 @@ action bar above it.
 | `h` `l` `w` `b` `0` `$`   | Enter text mode at the start of the block, then do the move                                                           |
 
 A block that is taller than the screen scrolls first. `j` moves to the next block when the end of the block is visible.
-`k` works the same way upward. If several notes share one block, a numbered list shows. Press `1` to `9` to pick one.
+`k` works the same way upward.
+
+If several notes share one block, press `e` or `x`. The focus moves to the card rail, or to the list of notes when the
+window has no rail. The footer says `N notes here · ↑↓ choose · x remove · esc back`. The key in the hint is the key that
+you bound to remove. Press `up` or `down` to choose a note, then press `e` to edit it or `x` to remove it. The footer
+asks `Remove this comment? "TEXT" · y remove · n keep`. The word is the kind of the note. `TEXT` is the first line of
+the note, or of its quote when the note has no text. Press `y` to remove the note. Press `n` or `esc` to keep it. After
+a removal, the focus stays on the next note at the same place. If no note is left there, it goes back to the document.
 
 ### Text mode
 
@@ -325,7 +332,9 @@ and an open note box close it too.
 | `q`, `ctrl+c` | Close the viewer                                                 |
 
 In the list of notes and on a card, `j` and `k` move between notes, and `enter` goes to the note. `e` and `x` edit
-and delete the note. `esc` returns to the document. In the list of replies, `enter` shows the selected reply.
+and delete the note. `esc` returns to the document. In the list of replies, the document shows the selected reply while you press `up` or `down`. `enter` keeps it. `esc`
+shows the reply again that was on the screen when you opened the list. A note that you edited during the preview stays
+with its reply.
 
 ### The note box
 
@@ -382,11 +391,15 @@ picker open in a box in the center, at all widths.
 The header shows the view, the agent and its state, and the position. It adds `unsent in reply 1,3` or
 `unsent in 2 files` when notes are not sent. On the right, it has the send button `[ Send N → agent ▸ ]`. With no notes,
 the button is dim: `[ Send ▸ ]`. It is dim while the agent shows a dialog too. While the agent works, the button adds
-`queued` for Claude Code or `steers` for Pi, OpenCode, and Codex CLI. After a send, it shows `[ Sent HH:MM ]`. The
+`queued` for Claude Code or `steers` for Pi, OpenCode, Codex CLI, and OhMyPi. After a send, it shows `[ Sent HH:MM ]`. The
 footer shows the keys of the current mode. The note keys and `S send`, `P paste`, and `Y copy` come first. The hints
 flow onto up to three rows. The footer has one row when the window has fewer than 16 rows. It also has one row while a
 question, the find input, or the note box is open. Annorex leaves out the hints that do not fit, from the end. `? help`
 and `q quit` stay while they fit.
+
+The card rail marks one active note. When the document has the focus, it is the first note at the focus. When the rail
+has the focus, it is the note under the rail cursor. The active card has a thick border, a filled title bar, and the sign
+`▸`. A card that is not at the focus is dim. The dot in the margin of the active note has the sign `◆`.
 
 Notes show in place. The note colors are the 16 ANSI colors. The text under a note keeps its color. Looks good has a
 green underline. A comment has a yellow underline. Remove is red and crossed out. Replace is magenta and crossed out. A
@@ -411,7 +424,6 @@ Each mouse action has a key. The help screen does not list the mouse actions.
 | Header send button         | Click          | The same as `S`, with the same dialog test and messages                                                                |
 | Tree row                   | Click          | Open the file, or open or close the directory                                                                          |
 | Row of a list or picker    | Click          | Open that reply, session, or file                                                                                      |
-| Numbered list of notes     | Click          | Choose that note                                                                                                       |
 | Footer hint                | Click          | Do that action                                                                                                         |
 | Note box                   | Click          | Move the caret. Click `save` or `cancel` to save or cancel. A click outside the box does nothing. The wheel scrolls it |
 | Help screen                | Click or wheel | Close the help screen                                                                                                  |
@@ -444,6 +456,16 @@ the sessions of subagents.
 
 A reply is a final answer of Codex. Annorex also counts a message that has no `phase`. Annorex does not show the
 progress messages that Codex writes while it works (`phase: commentary`).
+
+### OhMyPi
+
+OhMyPi is a fork of Pi. It writes the Pi session format, so Annorex reads it with the Pi reader. Annorex finds OhMyPi in
+a pane through the program status of Rex (`app: "omp"`). It can also use the process name `omp`.
+
+OhMyPi keeps its sessions in `~/.omp/agent/sessions`. The variables `PI_CODING_AGENT_DIR` and `PI_CONFIG_DIR` change
+this folder. Annorex looks in the folder of the work directory of the agent. OhMyPi can name this folder in three ways.
+Annorex looks in all three and takes the newest session. Annorex lists the files that OhMyPi changed from the results of
+its tool calls. It follows the entry `activeLeafId` of a session file.
 
 ### The agent picker
 
@@ -506,7 +528,7 @@ A send follows these steps. `annorex deliver` uses the same steps.
 Annorex never sends again automatically. If a step before the paste fails, Annorex writes nothing to the agent.
 
 An idle agent starts to work on the notes. When the agent is busy, it still gets the message. Claude Code queues the
-message. Pi, OpenCode, and Codex CLI use it to steer the current task.
+message. Pi, OpenCode, Codex CLI, and OhMyPi use it to steer the current task.
 
 `S` refuses to send when the agent shows a dialog, such as a permission prompt. The footer says
 `Not sent: the agent shows a permission dialog. Your notes are kept.` Your notes stay in the draft.
@@ -534,7 +556,7 @@ discard (`d`), or go back (`esc`).
 
 ## Review files
 
-Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI. Press the key that you bound, or run "Annorex: review files"
+Focus the pane of Claude Code, Pi, OpenCode, Codex CLI, or OhMyPi. Press the key that you bound, or run "Annorex: review files"
 from the command palette. The action `annorex_files` opens the file viewer over the full window. If an Annorex is
 already open in the tab, the action focuses it. Then Annorex ignores the new paths. The root is the work directory
 of the agent process.
@@ -742,7 +764,7 @@ and does not press Enter. It refuses to send when:
 If the agent opens a dialog after the paste, `annorex deliver` does not press Enter. The text stays in the input box of
 the agent. Answer the dialog, then press Enter yourself.
 
-When the agent is busy, Claude Code queues the message. Pi, OpenCode, and Codex CLI use it to steer the current task.
+When the agent is busy, Claude Code queues the message. Pi, OpenCode, Codex CLI, and OhMyPi use it to steer the current task.
 
 Exit codes:
 
@@ -789,7 +811,13 @@ Exit codes:
 - Annorex shows a change of a file only when the size or the time of the last change differs. A change that keeps
   both is not seen.
 
-Supported agents: Claude Code, Pi, OpenCode, and Codex CLI, in Rex on macOS.
+- OhMyPi (`omp`) has best-effort support. Annorex reads the default profile only. It does not read
+  `PI_CODING_AGENT_SESSION_DIR`, `OMP_PROFILE`, `PI_PROFILE`, or `$XDG_DATA_HOME/omp`. A paste of 100 lines or more
+  opens a menu in OhMyPi, and Annorex then holds back Enter. Set `paste.largeMenuThreshold: 0` in OhMyPi.
+- Annorex does not check the version of an agent at run time.
+
+Supported agents: Claude Code, Pi, OpenCode, Codex CLI, and OhMyPi, in Rex on macOS. The
+[README](../README.md#supported-agents) lists the minimum version of each agent.
 
 ## How Annorex differs from plannotator-tui
 

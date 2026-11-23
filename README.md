@@ -17,8 +17,8 @@ notes back to the agent.
 
 ![Annorex: mark up the reply of your coding agent, then send every note back in one message](docs/assets/annorex-banner.png)
 
-Annorex works with Claude Code, Pi, OpenCode, and Codex CLI in Rex on macOS. It opens over the window of the agent. You
-select the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
+Annorex works with Claude Code, Pi, OpenCode, Codex CLI, and OhMyPi in Rex on macOS. It opens over the window of the
+agent. You select the text that you want to change and write a note on it. One key sends all notes to the agent in one message.
 
 <details>
 <summary>See a review from start to end in five screenshots</summary>
@@ -60,7 +60,7 @@ it finished.
 You need these items:
 
 - Rex on macOS (Apple silicon or Intel).
-- Claude Code, Pi 1.5.0 or later, OpenCode 2.3.2 or later, or Codex CLI.
+- A supported coding agent at its minimum version or later. See [Supported agents](#supported-agents).
 - Rust 1.99 or later, only to build from source.
 
 Install the `annorex` binary in one of these three ways.
@@ -87,6 +87,19 @@ The fully qualified name `devararishivian/tap/annorex` trusts only the Annorex f
 tap, run `brew trust --tap devararishivian/tap`.
 
 For more install options, read [Install](docs/guide.md#install) in the guide.
+
+## Supported agents
+
+| Agent       | Minimum version | Checked with                | Notes                                                                                                                                                                                                                                                                                                                                   |
+|-------------|-----------------|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Claude Code | 2.1.319         | 2.1.330                     |                                                                                                                                                                                                                                                                                                                                         |
+| Pi          | 0.31.0          | 1.6.0                       |                                                                                                                                                                                                                                                                                                                                         |
+| OpenCode    | 2.3.2           | 2.4.0                       |                                                                                                                                                                                                                                                                                                                                         |
+| Codex CLI   | 0.158.0         | 0.171.0                     | Threads from before 0.158.0 miss prompts and changed files.                                                                                                                                                                                                                                                                             |
+| OhMyPi      | 19.1.1          | Not checked live            | Best effort. Annorex reads the default profile only. It does not read `PI_CODING_AGENT_SESSION_DIR`, `OMP_PROFILE`, `PI_PROFILE`, or `$XDG_DATA_HOME/omp`. Set `paste.largeMenuThreshold: 0` in OhMyPi. A paste of 100 lines or more opens a menu, and Annorex then holds back Enter. |
+| Rex         | Mac app 0.1.0-preview.32 and CLI 0.1.0-preview.21 | Mac app 0.1.0-preview.32 and CLI 0.1.0-preview.22 | |
+
+Annorex does not check these versions at run time.
 
 ## Set up Rex
 
@@ -127,7 +140,7 @@ To write the module only, run `annorex rex install --no-init`. The command print
 The action `annorex_last` opens the last reply. The action `annorex_files` opens the files of the work directory of
 the agent. The command palette shows them as "Annorex: review the last reply" and "Annorex: review files".
 
-Codex CLI needs no extra setup. Rex reports the state of Codex. Annorex reads the session files of Codex.
+Codex CLI and OhMyPi need no extra setup. Rex reports their state. Annorex reads their session files.
 
 ## Update
 
@@ -162,10 +175,11 @@ To turn off the check, use one of these ways:
 
 ## Annotate the last reply
 
-1. Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI.
+1. Focus the pane of Claude Code, Pi, OpenCode, Codex CLI, or OhMyPi.
 2. Press `cmd+shift+a`. Annorex opens over the full window of the agent.
 3. If the agent has two or more replies, choose one in the list and press `enter`. The newest reply is selected first.
-   The list holds the 25 newest replies. Press `p` later to open the list again.
+   The list holds the 25 newest replies. The document shows the selected reply while you press `up` or `down`. Press
+   `esc` to go back to the reply that showed before. Press `p` later to open the list again.
 4. Press `j` or `k` to choose a block, or click one. A block is a paragraph, a list item, a heading, a code block, or a
    table.
 5. Press `o` to mark the block as good or `c` to comment. Press `d` to mark it for removal or `s` to replace it.
@@ -176,6 +190,12 @@ shows the reason in its title, for example "omp is not supported". It asks also 
 session has only one agent pane. Choose a pane. The action focuses that pane and opens Annorex. If you cancel the
 question, nothing opens and no message shows. If the session has no agent pane, the action shows an error. The action
 `annorex_files` works in the same way.
+
+The card rail marks one active note. Its card has a thick border and the sign `▸`. The other cards are dim.
+
+If several notes are at the focus, press `e` or `x`. The focus moves to the card rail, and the footer says
+`N notes here · ↑↓ choose · x remove · esc back`. Press `up` or `down` to choose a note. Press `x` to remove it. The
+footer asks `Remove this comment? "TEXT" · y remove · n keep`. Press `y` to remove the note or `n` to keep it.
 
 In the note box, the arrow keys, `home`, `end`, `ctrl+a`, and `ctrl+e` move the caret. `ctrl+left` and `ctrl+right` move
 by word. `ctrl+w` deletes the word before the caret. `ctrl+u` and `ctrl+k` delete to the start or the end of the line.
@@ -208,8 +228,8 @@ Before it sends, Annorex makes sure that the agent can take the message:
 - The pane of the agent turned on bracketed paste.
 
 Then Annorex pastes the notes into the input box of the agent and presses Enter. An idle agent starts to work on the
-notes. When the agent is busy, Claude Code queues the message. Pi, OpenCode, and Codex CLI use it to steer the current
-task. The send button shows `queued` or `steers` while the agent works.
+notes. When the agent is busy, Claude Code queues the message. Pi, OpenCode, Codex CLI, and OhMyPi use it to steer the
+current task. The send button shows `queued` or `steers` while the agent works.
 
 After a successful send, Annorex closes. The sent notes leave the draft on disk, and Annorex deletes an empty draft.
 If the send fails, Annorex stays open, keeps your notes, and shows the reason in the footer. If a dialog opens after
@@ -330,6 +350,12 @@ Annorex uses these projects:
 - [crossterm](https://github.com/crossterm-rs/crossterm) reads the keys and the mouse and controls the terminal.
 - [Rex](https://www.superlogical.com/rex) is the terminal that Annorex runs in. Its custom actions and its `rex`
   command make the integration possible.
+
+Annorex reads the sessions of [OhMyPi](https://github.com/can1357/oh-my-pi) by Can Bölük. OhMyPi is a fork of Pi.
+Annorex uses the rule for its session folder names under the MIT License. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+OpenCode is a project of the OpenCode team. Annorex is not built by the OpenCode team and is not affiliated with it.
 
 Annorex is an independent project. It has no connection to these projects, and they do not endorse it.
 
