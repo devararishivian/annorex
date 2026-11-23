@@ -113,8 +113,9 @@ The command acts on `init.lua` in this way:
 
 - If `init.lua` is missing, the command creates the file and the folder.
 - If `init.lua` does not load Annorex, the command appends the block.
-- If `init.lua` already loads Annorex, the command changes nothing. This holds for each form of `require`, also a
-  commented line or `pcall(require, "annorex")`.
+- If `init.lua` already loads Annorex, the command does not change `init.lua`. This holds for each form of `require`,
+  also a commented line or `pcall(require, "annorex")`. The command still checks that `init.lua` with
+  `rex config check`. If the check fails, it prints the Rex message and exits with status 1. Otherwise it reloads Rex.
 - If `init.lua` already binds a key of the block, the command leaves out that `rex.bind` line and names the key. Add
   the line yourself with a free key.
 - If `init.lua` is a symbolic link, the link stays and the target gets the lines.
@@ -423,8 +424,8 @@ example, the agent did not answer yet), the list says why, and `r` looks again. 
 ### OpenCode and Claude Code storage
 
 Annorex supports OpenCode from version 2.3.2. OpenCode 2.3.0 and later store new replies in the table `session_part`.
-Annorex reads the reply text and the tool calls from that table. Annorex reads older replies from the old tables as
-before.
+Annorex reads the reply text and the tool calls from that table. Older replies of OpenCode v2 keep their text in the
+table `session_message`. Annorex reads that text as before. Only OpenCode v1 uses other tables.
 
 For Claude Code, Annorex finds the project folder in `~/.claude/projects` with the rule of Claude Code. The rule covers
 paths over 200 characters and characters outside the basic plane.

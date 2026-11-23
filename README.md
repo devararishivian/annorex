@@ -108,7 +108,9 @@ rex.bind("cmd+shift+f", "annorex_files")
 ```
 
 The command creates `init.lua` when it is missing. It appends the lines when `init.lua` does not load Annorex. It
-changes nothing when `init.lua` already loads Annorex. It leaves out a `rex.bind` line when `init.lua` already binds
+does not change `init.lua` when `init.lua` already loads Annorex. It still checks that `init.lua` with
+`rex config check`. If the check fails, it prints the Rex message and exits with status 1. Otherwise it reloads Rex. It
+leaves out a `rex.bind` line when `init.lua` already binds
 that key, and it names the key.
 
 Before it writes, the command runs `rex config check` on the new file. If the check fails, the command does not write
@@ -144,10 +146,11 @@ depends on how you installed Annorex:
 - Shell installer: it runs the latest installer again.
 - `cargo install`: it prints the `cargo install` command. You must run it yourself.
 
-After a successful upgrade, `annorex update` runs `annorex rex install`. It prints `Running:` and the command. After
-`brew upgrade`, the next time Annorex opens it writes the new `annorex.lua` and asks Rex to reload the configuration.
-You do not need to run `annorex rex install` again. If the reload fails, Annorex shows `run: rex config reload` at the
-next open.
+After a successful upgrade, `annorex update` runs `annorex rex install`. It prints `Running:` and the command. The
+binary of version 0.3.0 does not do this step.
+
+After `brew upgrade`, or an update from version 0.3.0, the next open from Rex writes the new `annorex.lua` and asks Rex
+to reload the configuration. If the reload fails, Annorex shows `run: rex config reload` at the next open.
 
 If you use version 0.3.0 and never added the setup lines to `init.lua`, run `annorex rex install` one time.
 
@@ -316,7 +319,8 @@ These projects are the base of the Annorex idea:
 
 The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the
 rule of one review layer for each tab of Rex. Two more ideas come from plannotator-tui. Annorex tests the Lua module
-with `rex config check` on a scratch copy. It finds the window of the agent pane with `session.describe_block`.
+with `rex config check`. The check of `init.lua` runs on a check file beside the real `init.lua`, before the write. It
+finds the window of the agent pane with `session.describe_block`.
 
 Annorex uses these projects:
 
