@@ -22,6 +22,7 @@ pub mod review;
 pub mod rex;
 pub mod safety;
 pub mod send;
+pub mod setup;
 pub mod tui;
 pub mod ui;
 pub mod update;

@@ -165,9 +165,21 @@ pub fn refresh(dir: &Path, bin: Option<&Path>) -> Result<Refresh, InstallError> 
 /// Write `contents` to a temporary file beside `path`, then rename it to `path`. So Rex never
 /// reads a module that is only partly written.
 fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
+    write_atomic_with_mode(path, contents, None)
+}
+
+/// `write_atomic` that gives the new file the permission bits `mode`, before the rename. So a
+/// private file never shows its new text with other permissions.
+pub(crate) fn write_atomic_with_mode(path: &Path, contents: &str, mode: Option<u32>) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
     let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let temp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    let written = std::fs::write(&temp, contents).and_then(|()| std::fs::rename(&temp, path));
+    let written = std::fs::write(&temp, contents)
+        .and_then(|()| match mode {
+            Some(mode) => std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(mode & 0o7777)),
+            None => Ok(()),
+        })
+        .and_then(|()| std::fs::rename(&temp, path));
     if written.is_err() {
         let _ = std::fs::remove_file(&temp);
     }
