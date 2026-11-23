@@ -150,7 +150,7 @@ impl App {
                 Some(Hit::BoxInside) => {}
                 // A stray click must not end the start list, because `esc` there quits.
                 _ if self.start_box => {}
-                _ => self.close_box(),
+                _ => self.cancel_box(),
             }
             return Effect::None;
         }

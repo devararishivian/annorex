@@ -223,6 +223,8 @@ pub struct App {
     pub(crate) boxed: Option<BoxView>,
     /// The reply list at the start of the last-reply view is open. `esc` quits there.
     pub(crate) start_box: bool,
+    /// The reply that showed when the reply list opened. `esc` restores it.
+    reply_at_open: usize,
     /// What the last frame showed beside the document. The keys `tab`, `T`, and `a` use it.
     pub(crate) docked: Docked,
     /// The cursor of the reply list.
@@ -339,6 +341,7 @@ impl App {
             list_open: false,
             boxed: None,
             start_box: false,
+            reply_at_open: 0,
             docked: Docked::default(),
             panel_index: 0,
             picker_index: 0,
@@ -423,6 +426,7 @@ impl App {
             self.boxed = Some(BoxView::Replies);
             self.focus = Focus::Box;
             self.panel_index = 0;
+            self.reply_at_open = self.selected;
             self.start_box = true;
         }
     }
@@ -1517,7 +1521,10 @@ impl App {
         self.start_box = false;
         self.focus = Focus::Box;
         match view {
-            BoxView::Replies => self.panel_index = self.selected,
+            BoxView::Replies => {
+                self.panel_index = self.selected;
+                self.reply_at_open = self.selected;
+            }
             BoxView::Finder => self.finder = Finder::new(self.tree.file_paths()),
         }
     }
@@ -1714,7 +1721,7 @@ impl App {
             KeyCode::Enter => return self.replies_enter(),
             // The start list is the way in: `esc` there ends the session.
             KeyCode::Esc if self.start_box => return self.request_quit(),
-            KeyCode::Esc => self.close_box(),
+            KeyCode::Esc => self.cancel_box(),
             KeyCode::Tab => {}
             _ => {
                 let action = self.action_of(key);
@@ -1738,6 +1745,19 @@ impl App {
         }
         let last = self.replies.len().saturating_sub(1);
         self.panel_index = self.panel_index.saturating_add_signed(delta).min(last);
+        // The document behind the box shows the highlighted reply at once.
+        self.show_reply(self.panel_index);
+    }
+
+    /// Close the box without a choice. The reply list restores the reply from the open.
+    pub(super) fn cancel_box(&mut self) {
+        if self.boxed == Some(BoxView::Replies)
+            && !matches!(self.reply_source, ReplySource::Pick(_))
+            && self.selected != self.reply_at_open
+        {
+            self.show_reply(self.reply_at_open);
+        }
+        self.close_box();
     }
 
     /// The id of the annotation under the cursor of the annotation list.

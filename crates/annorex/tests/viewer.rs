@@ -228,6 +228,43 @@ fn panel_lists_replies_and_enter_selects() {
 }
 
 #[test]
+fn a_move_in_the_reply_list_shows_the_reply_at_once() {
+    let mut app = viewer();
+    press(&mut app, "p");
+    press(&mut app, "j");
+    assert_eq!(app.reply_position(), (1, 3));
+    let screen = render(&mut app, 120, 40);
+    assert!(screen.lines().next().expect("header").contains("reply 2/3"), "{screen}");
+    press(&mut app, "k");
+    assert_eq!(app.reply_position(), (0, 3));
+}
+
+#[test]
+fn enter_in_the_reply_list_keeps_the_previewed_reply() {
+    let mut app = viewer();
+    press(&mut app, "p");
+    press(&mut app, "jj\n");
+    assert_eq!(app.reply_position(), (2, 3));
+    let screen = render(&mut app, 120, 40);
+    assert!(screen.contains("Oldest reply: short."), "{screen}");
+}
+
+#[test]
+fn esc_in_the_reply_list_restores_the_reply_from_the_open() {
+    let mut app = viewer();
+    press(&mut app, "p");
+    press(&mut app, "j\n");
+    assert_eq!(app.reply_position(), (1, 3));
+    press(&mut app, "p");
+    press(&mut app, "jj");
+    assert_eq!(app.reply_position(), (2, 3));
+    press(&mut app, "\u{1b}");
+    assert_eq!(app.reply_position(), (1, 3));
+    let screen = render(&mut app, 120, 40);
+    assert!(screen.contains("The older reply."), "{screen}");
+}
+
+#[test]
 fn header_shows_blocked_kind() {
     let mut app = viewer();
     app.set_state(AgentState {
