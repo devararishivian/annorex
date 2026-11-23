@@ -294,7 +294,9 @@ These projects are the base of the Annorex idea:
   [plannotator-tui](https://github.com/plannotator/plannotator-tui) by Plannotator and Michael Ramos. These projects do
   the same review in a terminal. Annorex uses the transcript readers from plannotator-tui under the MIT License. See
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- [memex](https://github.com/nicosuave/memex) by Nico Ritschel. memex shows how to connect a Rust tool to Rex.
+- [memex](https://github.com/nicosuave/memex) by Nico Ritschel. memex shows how to connect a Rust tool to Rex. Annorex
+  uses its rule for Claude Code project folder names under the MIT License. See
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the
 rule of one review layer for each session. Two more ideas come from plannotator-tui. Annorex tests the Lua module with
