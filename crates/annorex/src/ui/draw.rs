@@ -620,12 +620,12 @@ fn prompt_text(app: &App, what: Confirm, width: u16) -> String {
         Confirm::Discard => "Discard the notes of this reply? · y discard · n keep".to_owned(),
         Confirm::CloseFile => {
             let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
-            format!("Close {path}? It has unsent notes · y close · n keep open")
+            let tail = "? It has unsent notes · y close · n keep open";
+            // A long path gives way, so that the keys stay on the screen.
+            let room = width.saturating_sub(text_width("Close ") + text_width(tail));
+            format!("Close {}{tail}", fit(&path, room))
         }
-        Confirm::Paste => {
-            "Paste the notes into the agent prompt, without Enter? Annorex closes after · y paste · n cancel"
-                .to_owned()
-        }
+        Confirm::Paste => "Paste without Enter? Annorex closes after · y paste · n cancel".to_owned(),
         Confirm::Quit if app.unsent_file_count() > 1 => {
             let count = app.unsent_file_count();
             let files = "documents";
@@ -1625,7 +1625,7 @@ fn draw_editor(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// The first row of the editor box of `height` rows. `anchor` is the first and the last row of the
 /// range on the screen, as offsets from the top of `area`.
-pub(super) fn editor_top(area: Rect, height: u16, anchor: Option<(usize, usize)>) -> u16 {
+fn editor_top(area: Rect, height: u16, anchor: Option<(usize, usize)>) -> u16 {
     let lowest = area.bottom().saturating_sub(height);
     let Some((first, last)) = anchor else { return lowest };
     let offset = |row: usize| area.y.saturating_add(u16::try_from(row).unwrap_or(u16::MAX));

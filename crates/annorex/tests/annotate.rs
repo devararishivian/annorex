@@ -535,8 +535,7 @@ fn send_keys_ask_the_caller() {
     assert_eq!(press_key(&mut app, KeyCode::Char('Y'), KeyModifiers::SHIFT), Effect::Copy);
 }
 
-const PASTE_QUESTION: &str =
-    "Paste the notes into the agent prompt, without Enter? Annorex closes after · y paste · n cancel";
+const PASTE_QUESTION: &str = "Paste without Enter? Annorex closes after · y paste · n cancel";
 
 #[test]
 fn the_box_follows_the_caret() {
@@ -582,6 +581,13 @@ fn paste_asks_first() {
         press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE),
         Effect::Send(DeliveryMode::PasteOnly)
     );
+}
+
+#[test]
+fn the_paste_question_fits_80_columns() {
+    let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
+    press_key(&mut app, KeyCode::Char('P'), KeyModifiers::SHIFT);
+    assert!(render(&mut app, 80, 12).contains(PASTE_QUESTION));
 }
 
 #[test]

@@ -139,6 +139,18 @@ fn list_marks_unsent_files() {
 }
 
 #[test]
+fn the_close_question_cuts_the_name_and_keeps_the_keys() {
+    let mut app = files_app();
+    app.open_file(loaded("b.txt", "beta line\nsecond line\n"));
+    let name = format!("{}/a.md", "long".repeat(15));
+    app.open_file(loaded(&name, "# Title\n\nalpha text\n"));
+    press(&mut app, "jcnote a\n");
+    press(&mut app, "W");
+    let screen = render(&mut app, 80, 12);
+    assert!(screen.contains("? It has unsent notes · y close · n keep open"), "{screen}");
+}
+
+#[test]
 fn closing_a_file_with_unsent_notes_asks() {
     let mut app = two_files();
     press(&mut app, "jcnote a\n");

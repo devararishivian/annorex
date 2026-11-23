@@ -524,7 +524,7 @@ fn a_click_on_the_paste_hint_asks_first() {
     let screen = frame(&mut app, (200, 20));
     assert_eq!(click(&mut app, find(&screen, "P paste")), Effect::None);
     let screen = frame(&mut app, (200, 20));
-    assert!(footer(&screen).contains("Paste the notes into the agent prompt"), "{}", footer(&screen));
+    assert!(footer(&screen).contains("Paste without Enter?"), "{}", footer(&screen));
 }
 
 #[test]
