@@ -292,6 +292,10 @@ fn annotate_and_send_for_each_agent() {
         };
         // The model answered the export, so the viewer shows a newer reply. Its draft is new.
         std::thread::sleep(Duration::from_secs(1));
+        // Two or more replies open the reply list first, and its keys are not the keys of a note.
+        // `enter` opens the selected (newest) reply [docs/guide.md, "Review the last reply"].
+        keys(&rex, &viewer, "\r");
+        std::thread::sleep(Duration::from_secs(1));
         let old_drafts = drafts(&state_dir, live.agent).len();
         let annotate = |note: &str| {
             for step in ["v", "lll", "c", note, "\r"] {
@@ -307,6 +311,8 @@ fn annotate_and_send_for_each_agent() {
         let made = wait_until(Duration::from_secs(5), || {
             (drafts(&state_dir, live.agent).len() == old_drafts + 1).then_some(())
         });
+        // The screen before `X`, kept only when no draft file came, so the failure shows why.
+        let before = if made.is_none() { capture(&session, &viewer) } else { String::new() };
         keys(&rex, &viewer, "X");
         keys(&rex, &viewer, "y");
         // The check is the draft file: `X` asks, and `y` deletes it. The dialog text is not read.
@@ -319,10 +325,11 @@ fn annotate_and_send_for_each_agent() {
         );
         if made.is_none() || left.is_none() {
             fail(format!(
-                "{name} discard: draft made {}, draft file gone {}: {:?}",
+                "{name} discard: draft made {}, draft file gone {}: {:?}\nviewer before X:\n{before}\nviewer after y:\n{}",
                 made.is_some(),
                 left.is_some(),
-                drafts(&state_dir, live.agent)
+                drafts(&state_dir, live.agent),
+                capture(&session, &viewer)
             ));
         }
 
