@@ -140,7 +140,7 @@ impl<R: Runner> OpenApi for Rex<R> {
 pub struct Existing {
     /// The agent block that the open Annorex serves.
     pub target: String,
-    /// The name of that agent (`claude-code`, `pi`, or `opencode`), when Rex still reports it.
+    /// The name of that agent (`claude-code`, `pi`, `opencode`, or `codex`), when Rex still reports it.
     pub agent: Option<String>,
     /// The product name of that agent (`Claude Code`, `Pi`, `OpenCode`, or `Codex`) for the notice.
     /// The JSON does not carry it.
@@ -829,5 +829,14 @@ mod tests {
             let ours = BlockInfo { block_id: "block:o".into(), label, creator_name: None };
             assert!(is_annorex(&ours));
         }
+    }
+
+    #[test]
+    fn program_name_drops_the_path_and_the_login_dash() {
+        assert_eq!(program_name("-zsh"), Some("zsh".to_owned()));
+        assert_eq!(program_name("/bin/zsh"), Some("zsh".to_owned()));
+        assert_eq!(program_name("/a/b/omp"), Some("omp".to_owned()));
+        assert_eq!(program_name("-"), None);
+        assert_eq!(program_name(""), None);
     }
 }
