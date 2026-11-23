@@ -48,7 +48,12 @@ pub fn normalize(root: &Path, raw: &[Changed]) -> Vec<PathBuf> {
     let real = root.canonicalize().ok();
     for changed in raw {
         let path = Path::new(&changed.path);
-        let relative = relative_inside(root, path).or_else(|| relative_inside(real.as_deref()?, path));
+        // The agent can also write a path through a link to the real directory that Rex reports
+        // (`/tmp` for `/private/tmp`): compare the real path of the file too.
+        let relative =
+            relative_inside(root, path).or_else(|| relative_inside(real.as_deref()?, path)).or_else(|| {
+                path.is_absolute().then(|| relative_inside(real.as_deref()?, &path.canonicalize().ok()?))?
+            });
         let Some(relative) = relative else { continue };
         if root.join(&relative).is_file() && !out.contains(&relative) {
             out.push(relative);
@@ -226,6 +231,21 @@ mod tests {
         std::os::unix::fs::symlink(real.path(), &link).expect("link");
         let abs = real.path().canonicalize().expect("canonical").join("a.rs");
         assert_eq!(normalize(&link, &changed(&[abs.to_str().expect("utf8")])), [PathBuf::from("a.rs")]);
+    }
+
+    #[test]
+    fn accepts_a_path_through_a_link_to_a_real_root() {
+        // Rex reports `/private/tmp/x`, and the agent writes `/tmp/x/a.rs`.
+        let real = root_with(&["a.rs"]);
+        let parent = tempfile::tempdir().expect("dir");
+        let link = parent.path().join("link");
+        std::os::unix::fs::symlink(real.path(), &link).expect("link");
+        let through_link = link.join("a.rs");
+        let root = real.path().canonicalize().expect("canonical");
+        assert_eq!(
+            normalize(&root, &changed(&[through_link.to_str().expect("utf8")])),
+            [PathBuf::from("a.rs")]
+        );
     }
 
     #[test]
