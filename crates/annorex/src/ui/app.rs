@@ -2005,7 +2005,13 @@ impl App {
             .map(|part| {
                 let source = part.source.as_str();
                 Box::new(move |offset: usize| {
-                    source.get(..offset).map_or(1, |head| head.matches('\n').count() + 1)
+                    source
+                        .as_bytes()
+                        .iter()
+                        .take(offset.min(source.len()))
+                        .filter(|&&byte| byte == b'\n')
+                        .count()
+                        + 1
                 }) as Box<dyn Fn(usize) -> usize + '_>
             })
             .collect();
@@ -2633,5 +2639,17 @@ mod tests {
         let mut fresh = app();
         fresh.keep_update_check(&mut old);
         assert_eq!(fresh.banner().as_deref(), Some(NOTICE));
+    }
+
+    #[test]
+    fn an_annotation_that_ends_on_a_multibyte_character_keeps_its_line() {
+        let mut app = app();
+        let source = "x\n".repeat(43) + "中文\nnext";
+        app.set_replies(vec![Reply { id: "r".to_owned(), text: source.clone(), at: None }]);
+        let start = source.find('中').expect("the Chinese text");
+        let review = app.reviews.entry("r".to_owned()).or_default();
+        review.add(&source, Kind::LooksGood, start..start + "中文".len());
+        let export = app.export();
+        assert!(export.contains("## Annotation 1 (line 44)"), "{export}");
     }
 }

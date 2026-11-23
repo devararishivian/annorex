@@ -270,7 +270,9 @@ mod tests {
     use super::*;
 
     fn line_of(source: &str) -> impl Fn(usize) -> usize + '_ {
-        move |offset| source[..offset.min(source.len())].matches('\n').count() + 1
+        move |offset| {
+            source.as_bytes().iter().take(offset.min(source.len())).filter(|&&byte| byte == b'\n').count() + 1
+        }
     }
 
     fn numbered(count: usize) -> String {
@@ -328,6 +330,16 @@ mod tests {
         review.add(long, Kind::LooksGood, 0..10);
         let text = export_one("", long, &review);
         assert!(text.contains("(lines 1–2)\nLooks good:\n```\nalpha\nbeta\n```"), "{text}");
+    }
+
+    #[test]
+    fn export_keeps_the_line_of_a_multibyte_ending() {
+        let source = "x\n".repeat(43) + "中文\nnext";
+        let mut review = Review::default();
+        let start = source.find('中').expect("text");
+        review.add(&source, Kind::LooksGood, start..start + "中文".len());
+        let text = export_one("", &source, &review);
+        assert!(text.contains("## Annotation 1 (line 44)"), "{text}");
     }
 
     #[test]
