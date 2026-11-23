@@ -1,4 +1,4 @@
-// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: none in logic; the header line only.
+// Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: `project_slug` follows the memex rule (see the next header line); no other logic change.
 // Derived from memex (https://github.com/nicosuave/memex) @ 9c5395e, Copyright (c) 2026 Nico Ritschel, MIT License. Changes for Annorex: `project_slug` and `base36` are ported from `claude_project_dir` and `base36` in `src/sources/claude.rs`; `project_slug` takes a `Path` and returns a `String`. The tests are Annorex code.
 //! Claude Code: `~/.claude/sessions/<pid>.json` names a running session, and
 //! `~/.claude/projects/<slug>/<session>.jsonl` is its transcript.
@@ -114,9 +114,24 @@ mod tests {
 
     #[test]
     fn slug_of_a_long_path_is_cut_with_a_hash() {
-        let cwd = format!("/{}", "a".repeat(249));
-        let expected = format!("-{}-wkpu26", "a".repeat(199));
-        assert_eq!(project_slug(Path::new(&cwd)), expected);
+        // Names that Claude Code 2.1.330 used, as traced in memex.
+        let exactly_200 = format!("/work/{}", "a".repeat(194));
+        assert_eq!(project_slug(Path::new(&exactly_200)), format!("-work-{}", "a".repeat(194)));
+        let cases = [
+            (format!("/work/{}", "a".repeat(195)), format!("-work-{}-9suycy", "a".repeat(194))),
+            (
+                format!("/work/{}/{}", "a".repeat(120), "b".repeat(123)),
+                format!("-work-{}-{}-kvy58e", "a".repeat(120), "b".repeat(73)),
+            ),
+            // The hash runs over UTF-16 code units, including both halves of U+1D11E.
+            (
+                format!("/work/{}/{}/\u{1d11e}\u{1d11e}", "x".repeat(100), "\u{e9}".repeat(100)),
+                format!("-work-{}{}-5jt2sd", "x".repeat(100), "-".repeat(94)),
+            ),
+        ];
+        for (cwd, expected) in cases {
+            assert_eq!(project_slug(Path::new(&cwd)), expected, "{cwd:?}");
+        }
     }
 
     #[test]
