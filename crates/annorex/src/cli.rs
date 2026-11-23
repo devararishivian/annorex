@@ -264,10 +264,26 @@ fn update(
                 let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
                 let _ = write_cache(&path, &Cache { checked_at: now, latest: None });
             }
-            writeln!(out, "Rex loads the new Annorex module the next time you open Annorex.")
-                .map_err(|e| io_failure(&e))?;
+            let bin = stable_bin(&exe);
+            writeln!(out, "Running: {} rex install", bin.display()).map_err(|e| io_failure(&e))?;
+            let _ = out.flush();
+            let line =
+                after_upgrade(&bin, |bin| std::process::Command::new(bin).args(["rex", "install"]).status());
+            writeln!(out, "{line}").map_err(|e| io_failure(&e))?;
             Ok(EXIT_OK)
         }
+    }
+}
+
+/// Run `<bin> rex install` after an upgrade. The child output goes to the user. Return the closing line.
+fn after_upgrade(bin: &Path, run: impl FnOnce(&Path) -> std::io::Result<std::process::ExitStatus>) -> String {
+    match run(bin) {
+        Ok(status) if status.success() => "Annorex is updated.".to_owned(),
+        Ok(_) => "Annorex is updated, but annorex rex install failed. Run it again to see why.".to_owned(),
+        Err(error) => format!(
+            "Annorex is updated, but Annorex cannot run {}: {error}. Run annorex rex install yourself.",
+            bin.display()
+        ),
     }
 }
 
@@ -734,6 +750,38 @@ fn refresh_module(dir: Option<PathBuf>, bin: &Path, reload: impl FnOnce() -> boo
 #[allow(clippy::expect_used, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
+
+    fn exit(code: i32) -> std::process::ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(code << 8)
+    }
+
+    #[test]
+    fn after_upgrade_runs_rex_install_of_the_new_binary() {
+        let bin = PathBuf::from("/opt/homebrew/bin/annorex");
+        let mut seen = None;
+        let line = after_upgrade(&bin, |path| {
+            seen = Some(path.to_path_buf());
+            Ok(exit(0))
+        });
+        assert_eq!(seen, Some(bin));
+        assert_eq!(line, "Annorex is updated.");
+    }
+
+    #[test]
+    fn after_upgrade_reports_a_failed_install() {
+        let line = after_upgrade(Path::new("/x/annorex"), |_| Ok(exit(1)));
+        assert_eq!(line, "Annorex is updated, but annorex rex install failed. Run it again to see why.");
+    }
+
+    #[test]
+    fn after_upgrade_reports_a_missing_binary() {
+        let line = after_upgrade(Path::new("/x/annorex"), |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+        });
+        assert!(line.starts_with("Annorex is updated, but Annorex cannot run /x/annorex"), "{line}");
+        assert!(line.contains("annorex rex install"), "{line}");
+    }
 
     /// A writer that always fails, like a closed pipe.
     struct Closed;
