@@ -1,4 +1,5 @@
 // Derived from plannotator-tui (https://github.com/plannotator/plannotator-tui) @ 83b0cd9, Copyright (c) 2026 Michael Ramos, MIT License. Changes for Annorex: none in logic; the header line only.
+// Derived from memex (https://github.com/nicosuave/memex) @ 9c5395e, Copyright (c) 2026 Nico Ritschel, MIT License. Changes for Annorex: `project_slug` and `base36` are ported from `claude_project_dir` and `base36` in `src/sources/claude.rs`; `project_slug` takes a `Path` and returns a `String`. The tests are Annorex code.
 //! Claude Code: `~/.claude/sessions/<pid>.json` names a running session, and
 //! `~/.claude/projects/<slug>/<session>.jsonl` is its transcript.
 
@@ -49,13 +50,42 @@ pub fn parse_session_meta(json: &str) -> Option<SessionMeta> {
     })
 }
 
-/// Claude Code's project directory name for a cwd: every byte outside `[A-Za-z0-9-]`
-/// becomes `-` (so `/Users/me/repo` is `-Users-me-repo`).
+/// Longest project directory name Claude Code uses before it appends a hash.
+const PROJECT_DIR_MAX: usize = 200;
+
+/// Claude Code's project directory name for a cwd, as Claude Code 2.1.330 computes it: every
+/// UTF-16 code unit that is not an ASCII letter or digit becomes `-` (so `/Users/me/repo` is
+/// `-Users-me-repo`). A name longer than 200 is cut to 200 and followed by `-` and the base-36
+/// absolute value of the Java-style 32-bit string hash of the path.
 pub fn project_slug(cwd: &Path) -> String {
-    cwd.to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
-        .collect()
+    let text = cwd.to_string_lossy();
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let name: String = units
+        .iter()
+        .map(|&unit| match u8::try_from(unit) {
+            Ok(byte) if byte.is_ascii_alphanumeric() => char::from(byte),
+            _ => '-',
+        })
+        .collect();
+    if name.len() <= PROJECT_DIR_MAX {
+        return name;
+    }
+    let hash = units.iter().fold(0i32, |hash, &unit| hash.wrapping_mul(31).wrapping_add(i32::from(unit)));
+    let head: String = name.chars().take(PROJECT_DIR_MAX).collect();
+    format!("{head}-{}", base36(hash.unsigned_abs()))
+}
+
+fn base36(mut value: u32) -> String {
+    let mut digits = Vec::new();
+    loop {
+        digits.push(char::from_digit(value % 36, 36).unwrap_or('0'));
+        value /= 36;
+        if value == 0 {
+            break;
+        }
+    }
+    digits.reverse();
+    digits.into_iter().collect()
 }
 
 /// `ps -eo pid=,ppid=` output → `(pid, ppid)` pairs. Tolerates padding and blank lines.
@@ -69,4 +99,28 @@ pub fn parse_ps(output: &str) -> Vec<(u32, u32)> {
             Some((pid, parent))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_slug;
+    use std::path::Path;
+
+    #[test]
+    fn slug_maps_each_utf16_unit() {
+        // U+1F600 is one character but two UTF-16 units, so it gives two dashes.
+        assert_eq!(project_slug(Path::new("/a/\u{1F600}")), "-a---");
+    }
+
+    #[test]
+    fn slug_of_a_long_path_is_cut_with_a_hash() {
+        let cwd = format!("/{}", "a".repeat(249));
+        let expected = format!("-{}-wkpu26", "a".repeat(199));
+        assert_eq!(project_slug(Path::new(&cwd)), expected);
+    }
+
+    #[test]
+    fn slug_keeps_the_old_result_for_a_plain_path() {
+        assert_eq!(project_slug(Path::new("/Users/me/repo")), "-Users-me-repo");
+    }
 }
