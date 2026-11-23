@@ -19,6 +19,12 @@
 //! assistant, `text` for a user). Other channels use `opencode-<channel>.db` next to it
 //! (`packages/cli/src/server-process.ts`). A v1 session and a v2 session can therefore both
 //! match one directory; the newest wins, whichever schema and file it lives in.
+//!
+//! The `session_part` table (one row per part, `ordinal` order, payload in `data`) exists from
+//! `OpenCode` v2.2.2. From v2.3.0 each new assistant message keeps its parts there and its
+//! `session_message` row keeps `content: []` (`packages/core/src/session/projector.ts`,
+//! `history.ts` `withParts`). Older messages keep the parts inline. Like `OpenCode`, this reader
+//! uses the part rows when a message has some, and the inline `content` otherwise.
 
 use std::path::Path;
 
@@ -162,6 +168,33 @@ fn has_table(connection: &rusqlite::Connection, name: &str) -> Result<bool, Host
         .map_err(|e| sql_error(WHAT, &e))
 }
 
+/// The content items of an assistant `session_message`: the `data` of its `session_part` rows in
+/// `ordinal` order, or the items of `inline["content"]` when it has no part rows or the
+/// database has no `session_part` table (a database from before `OpenCode` v2.2.2).
+pub(crate) fn assistant_content(
+    connection: &rusqlite::Connection,
+    message_id: &str,
+    inline: &serde_json::Value,
+) -> Result<Vec<serde_json::Value>, HostError> {
+    let mut items = Vec::new();
+    if has_table(connection, "session_part")? {
+        let mut statement = connection
+            .prepare("SELECT data FROM session_part WHERE message_id = ?1 ORDER BY ordinal")
+            .map_err(|e| sql_error(WHAT, &e))?;
+        let rows = statement
+            .query_map(params![message_id], |row| row.get::<_, String>(0))
+            .map_err(|e| sql_error(WHAT, &e))?;
+        for row in rows {
+            let data = row.map_err(|e| sql_error(WHAT, &e))?;
+            items.push(serde_json::from_str(&data).unwrap_or(serde_json::Value::Null));
+        }
+    }
+    if items.is_empty() {
+        items = inline.get("content").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+    }
+    Ok(items)
+}
+
 /// The user and assistant messages of `session_id` that carry text, newest first, through the
 /// `n`th newest assistant reply.
 pub fn messages_for_session(
@@ -262,18 +295,13 @@ fn messages_v2(db: &Path, session_id: &str, n: usize) -> Result<Vec<Message>, Ho
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) else { continue };
         let (role, text) = match kind.as_str() {
             "assistant" => {
-                let parts: Vec<&str> = json
-                    .get("content")
-                    .and_then(serde_json::Value::as_array)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
-                            .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
-                            .filter(|t| !t.trim().is_empty())
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let items = assistant_content(&connection, &id, &json)?;
+                let parts: Vec<&str> = items
+                    .iter()
+                    .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
+                    .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                    .filter(|t| !t.trim().is_empty())
+                    .collect();
                 (Role::Assistant, parts.join("\n\n"))
             }
             "user" => (Role::Human, json.get("text").and_then(|t| t.as_str()).unwrap_or_default().to_owned()),

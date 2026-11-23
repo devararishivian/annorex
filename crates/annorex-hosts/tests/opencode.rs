@@ -381,3 +381,93 @@ fn open_read_only_reads_a_database_under_a_path_with_hash_and_percent() {
     drop(connection);
     assert!(opencode::find_session(&db, Path::new("/w")).is_ok());
 }
+
+/// `session_part` as `OpenCode` 2.3 writes it (`packages/core/src/session/sql.ts`): one row per
+/// part of an assistant message, in `ordinal` order.
+const SESSION_PART: &str = "
+CREATE TABLE session_part (message_id TEXT NOT NULL, session_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+    type TEXT NOT NULL, call_id TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
+    data TEXT NOT NULL, PRIMARY KEY (message_id, ordinal));
+";
+
+fn part_v2(c: &Connection, message: &str, ordinal: i64, data: &str) {
+    c.execute(
+        "INSERT INTO session_part (message_id, session_id, ordinal, type, time_created, time_updated, data) \
+         VALUES (?1, 'ses2', ?2, 'x', 1, 1, ?3)",
+        params![message, ordinal, data],
+    )
+    .expect("session_part");
+}
+
+fn inline(text: &str) -> String {
+    format!(r#"{{"content":[{{"type":"text","text":"{text}"}}],"time":{{"created":1}}}}"#)
+}
+
+/// A v2 database with a session `ses2`, built by `fill`. `with_parts` adds the `session_part` table.
+fn v2_db(tag: &str, with_parts: bool, fill: impl FnOnce(&Connection)) -> (PathBuf, PathBuf) {
+    let dir = temp_dir(tag);
+    let db = dir.join("opencode.db");
+    let c = Connection::open(&db).expect("open");
+    c.execute_batch(SCHEMA_V2).expect("schema v2");
+    if with_parts {
+        c.execute_batch(SESSION_PART).expect("schema part");
+    }
+    session_v2(&c, "ses2", "/work/app", None, 5000, None);
+    fill(&c);
+    (dir, db)
+}
+
+fn reply_texts(db: &Path) -> Vec<String> {
+    let messages = opencode::messages_for_session(db, "ses2", Schema::V2, 25).expect("messages");
+    messages.into_iter().filter(|m| m.role == Role::Assistant).map(|m| m.text).collect()
+}
+
+#[test]
+fn v2_reply_text_comes_from_session_part() {
+    let (dir, db) = v2_db("part-text", true, |c| {
+        message_v2(c, "m1", "ses2", 1, "assistant", r#"{"content":[]}"#);
+        part_v2(c, "m1", 1, r#"{"type":"text","text":"second"}"#);
+        part_v2(c, "m1", 0, r#"{"type":"text","text":"first"}"#);
+    });
+    assert_eq!(reply_texts(&db), ["first\n\nsecond"]);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn v2_inline_message_without_parts_still_reads() {
+    let (dir, db) = v2_db("inline", true, |c| {
+        message_v2(c, "m1", "ses2", 1, "assistant", &inline("old"));
+    });
+    assert_eq!(reply_texts(&db), ["old"]);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn v2_parts_win_over_inline() {
+    let (dir, db) = v2_db("parts-win", true, |c| {
+        message_v2(c, "m1", "ses2", 1, "assistant", &inline("old"));
+        part_v2(c, "m1", 0, r#"{"type":"text","text":"new"}"#);
+    });
+    assert_eq!(reply_texts(&db), ["new"]);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn v2_mixed_session_lists_both_replies_newest_first() {
+    let (dir, db) = v2_db("mixed", true, |c| {
+        message_v2(c, "m2", "ses2", 2, "assistant", &inline("inline reply"));
+        message_v2(c, "m4", "ses2", 4, "assistant", r#"{"content":[]}"#);
+        part_v2(c, "m4", 0, r#"{"type":"text","text":"part reply"}"#);
+    });
+    assert_eq!(reply_texts(&db), ["part reply", "inline reply"]);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn v2_without_session_part_table_reads_inline() {
+    let (dir, db) = v2_db("no-part-table", false, |c| {
+        message_v2(c, "m1", "ses2", 1, "assistant", &inline("inline only"));
+    });
+    assert_eq!(reply_texts(&db), ["inline only"]);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}

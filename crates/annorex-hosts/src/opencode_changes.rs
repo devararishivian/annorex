@@ -145,7 +145,7 @@ fn v2_events(
             }
             continue;
         }
-        for (index, item) in data.get("content").and_then(Value::as_array).into_iter().flatten().enumerate() {
+        for (index, item) in crate::opencode::assistant_content(connection, &id, &data)?.iter().enumerate() {
             if item.get("type").and_then(Value::as_str) != Some("tool") {
                 continue;
             }
@@ -433,5 +433,19 @@ mod tests {
         let connection = open_read_only(&p, WHAT).expect("open");
         assert_eq!(v1_bound(&connection, "s", 1), Some((398, "m199a".to_owned())));
         assert_eq!(v1_bound(&connection, "s", 500), None);
+    }
+
+    #[test]
+    fn v2_tool_parts_in_session_part_count_as_changes() {
+        let (_d, p) = db_v2(&[("user", r#"{"text":"one"}"#), ("assistant", r#"{"content":[]}"#)]);
+        let c = Connection::open(&p).expect("open");
+        c.execute_batch(
+            "CREATE TABLE session_part (message_id TEXT NOT NULL, session_id TEXT NOT NULL, ordinal INTEGER NOT NULL, type TEXT NOT NULL, call_id TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);",
+        )
+        .expect("schema");
+        let tool = r#"{"type":"tool","id":"c","name":"write","state":{"status":"completed","input":{"filePath":"/w/part.rs","content":"x"}}}"#;
+        c.execute("INSERT INTO session_part VALUES ('m1','s',0,'tool','c',1,1,?1)", params![tool])
+            .expect("part");
+        assert_eq!(paths(&p, 1), ["/w/part.rs"]);
     }
 }
