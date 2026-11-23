@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-23
+
 ### Added
 
 - OhMyPi (`omp`) is a supported agent, on a best-effort basis. Annorex finds OhMyPi in a pane, shows its replies, and
@@ -141,7 +143,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
   `annorex rex open last|files`.
 - Installers for Homebrew and for the shell, and a Lua module for Rex.
 
-[Unreleased]: https://github.com/devararishivian/annorex/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/devararishivian/annorex/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/devararishivian/annorex/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/devararishivian/annorex/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/devararishivian/annorex/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/devararishivian/annorex/compare/v0.2.2...v0.2.3
