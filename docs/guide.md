@@ -53,7 +53,7 @@ is busy.
 You need these items:
 
 - Rex on macOS (Apple silicon or Intel).
-- Claude Code, Pi 1.5.0 or later, OpenCode 2.x, or Codex CLI.
+- Claude Code, Pi 1.5.0 or later, OpenCode 2.3.2 or later, or Codex CLI.
 - Rust 1.99 or later, only to build from source.
 
 Each release has prebuilt binaries for Apple silicon and Intel. Install the binary with Homebrew:
@@ -92,23 +92,45 @@ module:
 annorex rex install
 ```
 
-`annorex rex install` writes the Lua module `annorex.lua` beside the `init.lua` of Rex. It does not change `init.lua`.
-It finds the directory of Rex in this order: the directory of `$REX_CONFIG`, then `$XDG_CONFIG_HOME/rex`, then
-`~/.config/rex`. Use `--dir DIR` to write the module to a different directory.
+`annorex rex install` writes the Lua module `annorex.lua` beside the `init.lua` of Rex. Then it adds the setup block to
+`init.lua`. It finds the directory of Rex in this order: the directory of `$REX_CONFIG`, then `$XDG_CONFIG_HOME/rex`,
+then `~/.config/rex`. Use `--dir DIR` to write to a different directory. The command writes `DIR/init.lua`. The reload
+still makes the running Rex server read its own configuration file, not `DIR/init.lua`.
 
 The command replaces only a module that an earlier `annorex rex install` wrote. If a different `annorex.lua` exists,
 the command refuses with exit code 3. Remove or rename that file first.
 
-The command then runs `rex config check` on a scratch copy of the module. It reports errors in the module. If that
-test fails, the exit code is 1. Then add these lines to `init.lua`:
+This is the setup block:
 
 ```lua
+-- Added by `annorex rex install`. Remove these lines to remove Annorex.
 require("annorex").setup{}
 rex.bind("cmd+shift+a", "annorex_last")
 rex.bind("cmd+shift+f", "annorex_files")
 ```
 
-Run `rex config reload`.
+The command acts on `init.lua` in this way:
+
+- If `init.lua` is missing, the command creates the file and the folder.
+- If `init.lua` does not load Annorex, the command appends the block.
+- If `init.lua` already loads Annorex, the command changes nothing. This holds for each form of `require`, also a
+  commented line or `pcall(require, "annorex")`.
+- If `init.lua` already binds a key of the block, the command leaves out that `rex.bind` line and names the key. Add
+  the line yourself with a free key.
+- If `init.lua` is a symbolic link, the link stays and the target gets the lines.
+
+Before it writes, the command runs `rex config check` on the new file. If the check fails, the command does not write
+`init.lua`. The exit code is 1, and the command prints the lines to add by hand. Without `rex` on the path, the command
+writes without the check and skips the reload.
+
+After it writes, the command runs `rex config reload`. If the reload fails, the command prints
+`Could not reload Rex. Run: rex config reload`. The exit code stays 0.
+
+To write the module only, run `annorex rex install --no-init`. The command prints the lines to add. You must add them
+and run `rex config reload` yourself.
+
+To undo the change, delete the block from the marked comment to the last `rex.bind` line. Then run
+`rex config reload`.
 
 The command prints the path of the binary that Rex starts, after `Rex starts:`. If the path is in a cargo build
 directory (`target/debug` or `target/release`), the command warns you. That path changes with each build. Run
@@ -119,11 +141,10 @@ directory (`target/debug` or `target/release`), the command warns you. That path
 Annorex always opens over the full window of the agent. The agent pane keeps its size. There is no option for the
 placement. The key `placement` in `config.toml` and the option `--placement` give an error.
 
-Only one Annorex runs in each Rex session. If you start Annorex while one is open in the session, Annorex shows the
-open one. It does not open a second one, also for another agent. Different sessions can each run their own Annorex at
-the same time. Rex ends the zoom of a pane when the layer opens. Rex does not restore the zoom when you close the
-viewer. If the open Annorex is for another agent, the action shows a message that names it. Press `q` there to close
-it.
+Only one Annorex runs in each Rex tab (window). If you start Annorex while one is open in the tab, Annorex shows the
+open one. It does not open a second one, also for another agent. A second tab opens its own Annorex. Rex ends the zoom of a pane when the layer opens. Rex does not restore the zoom when you close the
+viewer. If the open Annorex is for another agent, the action shows this message: `Annorex is already open in this tab, for
+{agent}. It is in front now. Press q there to close it, then open Annorex again.`
 
 The replies of the agent and the files of its work directory are in the same Annorex. `annorex_last` and
 `annorex_files` open the same viewer. They differ in the first document: the newest reply, or the files that you name
@@ -152,9 +173,13 @@ command depends on the install channel:
 | Shell installer | Runs the latest installer of the release again       |
 | `cargo install` | Prints the `cargo install` command. You must run it. |
 
-The next time Annorex opens after an upgrade, it replaces the `annorex.lua` of Rex with the new module. It does this
-only for a file that Annorex wrote. Then it asks Rex to reload the configuration. If the reload fails, the next open
-shows `run: rex config reload`. Run that command.
+After a successful upgrade, `annorex update` runs `<binary> rex install` and prints `Running:` and the command.
+
+After `brew upgrade`, or an update from version 0.3.0, the next open of Annorex replaces the `annorex.lua` of Rex
+with the new module. It does this only for a file that Annorex wrote. Then it asks Rex to reload the configuration.
+If the reload fails, the next open shows `run: rex config reload`. Run that command.
+
+If you use version 0.3.0 and never added the setup lines to `init.lua`, run `annorex rex install` one time.
 
 To turn off the check, use one of these ways:
 
@@ -200,7 +225,7 @@ picker](#the-agent-picker).
 
 Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI. Press the key that you bound, or run "Annorex: review the
 last reply" from the command palette. The action `annorex_last` opens the viewer over the full window. If an Annorex is
-already open in the session, the action focuses it.
+already open in the tab, the action focuses it.
 
 The header shows the agent and its state, for example `Claude Code (idle)` or `OpenCode (waiting for permission)`.
 Annorex reads the state again every 2 seconds.
@@ -392,6 +417,15 @@ Pi and OpenCode can have more than one session in the same directory. If Annorex
 with certainty, the list shows the sessions, newest first. Select one with `enter`. If Annorex finds no replies (for
 example, the agent did not answer yet), the list says why, and `r` looks again. The files still work.
 
+### OpenCode and Claude Code storage
+
+Annorex supports OpenCode from version 2.3.2. OpenCode 2.3.0 and later store new replies in the table `session_part`.
+Annorex reads the reply text and the tool calls from that table. Annorex reads older replies from the old tables as
+before.
+
+For Claude Code, Annorex finds the project folder in `~/.claude/projects` with the rule of Claude Code. The rule covers
+paths over 200 characters and characters outside the basic plane.
+
 ### Codex CLI
 
 Codex CLI needs no extension and no install step. Rex reports the state of Codex. Annorex reads the session files of
@@ -492,7 +526,7 @@ discard (`d`), or go back (`esc`).
 
 Focus the pane of Claude Code, Pi, OpenCode, or Codex CLI. Press the key that you bound, or run "Annorex: review files"
 from the command palette. The action `annorex_files` opens the file viewer over the full window. If an Annorex is
-already open in the session, the action focuses it. Then Annorex ignores the new paths. The root is the work directory
+already open in the tab, the action focuses it. Then Annorex ignores the new paths. The root is the work directory
 of the agent process.
 
 The viewer starts with the file tree. Open a file with `enter`. Annorex shows a Markdown file (`.md` or `.markdown`) as
@@ -551,7 +585,7 @@ annorex files --target block:... README.md docs/guide.md
 annorex rex open files --target block:... README.md
 ```
 
-A path can name a directory. Then the tree opens there. If an Annorex is already open in the session,
+A path can name a directory. Then the tree opens there. If an Annorex is already open in the tab,
 `annorex rex open files` only moves the focus to it and does not open the paths. Open them in that viewer with
 `ctrl+p` or `T`.
 
@@ -670,7 +704,7 @@ annorex rex open last --target block:...
 annorex files --target block:... [PATH...]
 annorex rex open files --target block:... [PATH...]
 annorex rex agents --session SESSION
-annorex rex install [--dir DIR]
+annorex rex install [--dir DIR] [--no-init]
 annorex update [--check]
 ```
 

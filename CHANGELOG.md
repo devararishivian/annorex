@@ -7,6 +7,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 
 ## [Unreleased]
 
+### Added
+
+- `annorex rex install` adds the setup block to `init.lua`. It creates the file when it is missing. It appends the
+  block when `init.lua` does not load Annorex. It leaves out a `rex.bind` line for a key that `init.lua` already binds.
+  It checks the new file with `rex config check` and does not write when the check fails. Then it runs
+  `rex config reload`. The option `--no-init` writes the module only.
+- `annorex update` runs `annorex rex install` after a successful upgrade.
+
+### Changed
+
+- Annorex runs once for each Rex tab, not once for each session. A second tab opens its own Annorex. The notice for
+  another agent in the same tab now says that Annorex is already open in this tab.
+- OpenCode 2.3.2 is the first supported OpenCode version.
+
+### Fixed
+
+- Annorex shows the replies and the changed files of OpenCode 2.3.0 and later. It reads them from the table
+  `session_part`.
+- Annorex finds the Claude Code project folder for paths over 200 characters and for characters outside the basic plane.
+
 ## [0.3.0] - 2026-11-21
 
 ### Added

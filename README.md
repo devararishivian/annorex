@@ -60,7 +60,7 @@ it finished.
 You need these items:
 
 - Rex on macOS (Apple silicon or Intel).
-- Claude Code, Pi 1.5.0 or later, OpenCode 2.x, or Codex CLI.
+- Claude Code, Pi 1.5.0 or later, OpenCode 2.3.2 or later, or Codex CLI.
 - Rust 1.99 or later, only to build from source.
 
 Install the `annorex` binary in one of these three ways.
@@ -92,22 +92,35 @@ For more install options, read [Install](docs/guide.md#install) in the guide.
 
 Rex has no plugin system. It has custom actions in its Lua configuration file `init.lua`. Annorex adds two actions.
 
-1. Write the Lua module `annorex.lua` beside the `init.lua` of Rex:
+Run one command:
 
-   ```sh
-   annorex rex install
-   ```
+```sh
+annorex rex install
+```
 
-   The command does not change `init.lua`. It prints the path of the binary that Rex starts, after `Rex starts:`.
-2. Add these lines to `init.lua`:
+The command writes the Lua module `annorex.lua` beside the `init.lua` of Rex. Then it adds these lines to `init.lua`:
 
-   ```lua
-   require("annorex").setup{}
-   rex.bind("cmd+shift+a", "annorex_last")
-   rex.bind("cmd+shift+f", "annorex_files")
-   ```
+```lua
+-- Added by `annorex rex install`. Remove these lines to remove Annorex.
+require("annorex").setup{}
+rex.bind("cmd+shift+a", "annorex_last")
+rex.bind("cmd+shift+f", "annorex_files")
+```
 
-3. Run `rex config reload`.
+The command creates `init.lua` when it is missing. It appends the lines when `init.lua` does not load Annorex. It
+changes nothing when `init.lua` already loads Annorex. It leaves out a `rex.bind` line when `init.lua` already binds
+that key, and it names the key.
+
+Before it writes, the command runs `rex config check` on the new file. If the check fails, the command does not write
+`init.lua`. It exits with code 1 and prints the lines to add by hand. Then it runs `rex config reload`. If the reload
+fails, the command prints `Could not reload Rex. Run: rex config reload`. Without `rex` on the path, the command skips
+the check and the reload.
+
+To remove Annorex from `init.lua`, delete the lines from the marked comment to the last `rex.bind` line. Then run
+`rex config reload`.
+
+To write the module only, run `annorex rex install --no-init`. The command prints the lines. You must add them to
+`init.lua` yourself.
 
 The action `annorex_last` opens the last reply. The action `annorex_files` opens the files of the work directory of
 the agent. The command palette shows them as "Annorex: review the last reply" and "Annorex: review files".
@@ -131,9 +144,12 @@ depends on how you installed Annorex:
 - Shell installer: it runs the latest installer again.
 - `cargo install`: it prints the `cargo install` command. You must run it yourself.
 
-The next time Annorex opens after an upgrade, it writes the new `annorex.lua` and asks Rex to reload the configuration.
+After a successful upgrade, `annorex update` runs `annorex rex install`. It prints `Running:` and the command. After
+`brew upgrade`, the next time Annorex opens it writes the new `annorex.lua` and asks Rex to reload the configuration.
 You do not need to run `annorex rex install` again. If the reload fails, Annorex shows `run: rex config reload` at the
 next open.
+
+If you use version 0.3.0 and never added the setup lines to `init.lua`, run `annorex rex install` one time.
 
 To turn off the check, use one of these ways:
 
@@ -299,7 +315,7 @@ These projects are the base of the Annorex idea:
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the
-rule of one review layer for each session. Two more ideas come from plannotator-tui. Annorex tests the Lua module with
+rule of one review layer for each tab of Rex. Two more ideas come from plannotator-tui. Annorex tests the Lua module with
 `rex config check` on a scratch copy. It finds the window of the agent pane with `session.describe_block`.
 
 Annorex uses these projects:
