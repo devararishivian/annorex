@@ -500,7 +500,7 @@ fn rex_open_of_a_pane_without_an_agent_exits_5_and_deliver_still_exits_3() {
     let rex = fake_rex_with_a_shell_pane();
     let bin_dir = rex.path().to_str().expect("utf-8 path");
     let env = [("REX_BIN_DIR", bin_dir), ("PATH", "/usr/bin:/bin"), ("REX_SESSION", "session:x")];
-    let not_agent = "this pane runs ";
+    let not_agent = "zsh is not supported";
     for view in ["last", "files"] {
         let output = annorex(&["rex", "open", view, "--target", "block:b1"], &env, "");
         assert_eq!(output.status.code(), Some(5), "{view}: {}", text(&output.stderr));

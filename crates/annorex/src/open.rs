@@ -181,8 +181,8 @@ fn program_name(argv0: &str) -> Option<String> {
 
 fn not_agent_text(program: Option<&str>) -> String {
     match program {
-        Some(program) => format!("this pane runs {program}, which Annorex does not support"),
-        None => "this pane runs no supported agent".to_owned(),
+        Some(program) => format!("{program} is not supported"),
+        None => "no supported agent here".to_owned(),
     }
 }
 
@@ -486,7 +486,7 @@ mod tests {
             matches!(&error, OpenError::NotAgent { program } if program.as_deref() == Some("omp")),
             "{error:?}"
         );
-        assert_eq!(error.to_string(), "this pane runs omp, which Annorex does not support");
+        assert_eq!(error.to_string(), "omp is not supported");
         assert_eq!(fake.called(), ["process 0004", "program_status 0004"]);
     }
 
@@ -499,7 +499,7 @@ mod tests {
         };
         let error = open(&fake).expect_err("not an agent");
         assert!(matches!(&error, OpenError::NotAgent { program: None }), "{error:?}");
-        assert_eq!(error.to_string(), "this pane runs no supported agent");
+        assert_eq!(error.to_string(), "no supported agent here");
     }
 
     // S3: the same viewer again shows the open layer and opens no second one.

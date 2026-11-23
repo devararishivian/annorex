@@ -166,7 +166,7 @@ local function open_view(ctx, view)
   if result.code ~= NOT_AGENT_CODE then return check_open(result) end
   -- The focused pane runs no supported agent. Say so and ask which agent pane of the session to open,
   -- also when there is only one. Never go to another pane without an answer.
-  local not_agent = error_line(result, "this pane runs no supported agent")
+  local not_agent = error_line(result, "no supported agent here")
   local agents = agent_panes(ctx)
   if #agents == 0 then
     fail(not_agent .. ". No pane of this session runs Claude Code, Pi, OpenCode, or Codex.")

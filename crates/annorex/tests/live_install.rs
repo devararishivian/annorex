@@ -29,7 +29,7 @@ use common::{Cleanup, live_enabled, log, rex_json};
 
 const BIN: &str = env!("CARGO_BIN_EXE_annorex");
 const SHORT_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
-const NOT_AGENT: &str = "Annorex: this pane runs ";
+const NOT_AGENT: &str = " is not supported";
 
 /// Install the module into `dir` and write an `init.lua` with `init_line`.
 fn install(dir: &Path, init_line: &str) -> PathBuf {
