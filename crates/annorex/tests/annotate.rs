@@ -535,7 +535,8 @@ fn send_keys_ask_the_caller() {
     assert_eq!(press_key(&mut app, KeyCode::Char('Y'), KeyModifiers::SHIFT), Effect::Copy);
 }
 
-const PASTE_QUESTION: &str = "Paste the notes into the agent prompt";
+const PASTE_QUESTION: &str =
+    "Paste the notes into the agent prompt, without Enter? Annorex closes after · y paste · n cancel";
 
 #[test]
 fn the_box_follows_the_caret() {
@@ -821,7 +822,7 @@ fn quit_without_notes_does_not_ask() {
 fn discard_removes_the_review_after_y() {
     let mut app = annotated(Agent::ClaudeCode, Safety::Clear { state: Some("idle".to_owned()) });
     assert_eq!(press_key(&mut app, KeyCode::Char('X'), KeyModifiers::SHIFT), Effect::None);
-    assert!(render(&mut app, 120, 12).contains("Discard the notes of this reply? y/n"));
+    assert!(render(&mut app, 120, 12).contains("Discard the notes of this reply? · y discard · n keep"));
     assert_eq!(press_key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE), Effect::None);
     assert!(app.review().is_some_and(|review| !review.is_empty()));
     press_key(&mut app, KeyCode::Char('X'), KeyModifiers::SHIFT);
@@ -958,7 +959,10 @@ fn x_removes_an_unreadable_draft_of_an_empty_review() {
     let mut app = app("alpha beta\n");
     app.set_save_error(Some("the draft x.json cannot be read".to_owned()));
     press(&mut app, "X");
-    assert!(render(&mut app, 120, 12).contains("Remove the draft file that Annorex cannot read? y/n"));
+    assert!(
+        render(&mut app, 120, 12)
+            .contains("Remove the draft file that Annorex cannot read? · y remove · n keep")
+    );
     assert_eq!(press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE), Effect::Discard);
 }
 

@@ -601,7 +601,7 @@ fn prompt_text(app: &App, what: Confirm, width: u16) -> String {
         Confirm::Annotation(id) => {
             let annotation = app.review().and_then(|review| review.annotations.iter().find(|a| a.id == id));
             let Some(annotation) = annotation else {
-                return "Remove this note? y remove · n keep".to_owned();
+                return "Remove this note? · y remove · n keep".to_owned();
             };
             // The first line of the note, or of the quote when the note has no text.
             let text = if annotation.note.trim().is_empty() { &annotation.quote } else { &annotation.note };
@@ -612,16 +612,19 @@ fn prompt_text(app: &App, what: Confirm, width: u16) -> String {
             format!("{head}{}{tail}", fit(text, room))
         }
         Confirm::Discard if app.review().is_none_or(Review::is_empty) => {
-            "Remove the draft file that Annorex cannot read? y/n".to_owned()
+            "Remove the draft file that Annorex cannot read? · y remove · n keep".to_owned()
         }
-        Confirm::Discard if app.shown_file().is_some() => "Discard the notes of this file? y/n".to_owned(),
-        Confirm::Discard => "Discard the notes of this reply? y/n".to_owned(),
+        Confirm::Discard if app.shown_file().is_some() => {
+            "Discard the notes of this file? · y discard · n keep".to_owned()
+        }
+        Confirm::Discard => "Discard the notes of this reply? · y discard · n keep".to_owned(),
         Confirm::CloseFile => {
             let path = app.shown_file().map_or_else(String::new, |path| path.display().to_string());
-            format!("Close {path}? It has unsent notes. y/n")
+            format!("Close {path}? It has unsent notes · y close · n keep open")
         }
         Confirm::Paste => {
-            "Paste the notes into the agent prompt, without Enter? Annorex closes after. y/n".to_owned()
+            "Paste the notes into the agent prompt, without Enter? Annorex closes after · y paste · n cancel"
+                .to_owned()
         }
         Confirm::Quit if app.unsent_file_count() > 1 => {
             let count = app.unsent_file_count();

@@ -143,7 +143,7 @@ fn closing_a_file_with_unsent_notes_asks() {
     let mut app = two_files();
     press(&mut app, "jcnote a\n");
     press(&mut app, "W");
-    assert!(render(&mut app, 120, 12).contains("Close a.md? It has unsent notes. y/n"));
+    assert!(render(&mut app, 120, 12).contains("Close a.md? It has unsent notes · y close · n keep open"));
     press(&mut app, "n");
     assert_eq!(app.reply_ids().len(), 2);
     press(&mut app, "Wy");

@@ -232,12 +232,12 @@ fn the_header_names_the_position_among_replies_or_among_files() {
 fn the_questions_name_the_document_on_the_screen() {
     let mut app = noted();
     press(&mut app, "X");
-    assert!(render(&mut app, 100, 24).contains("Discard the notes of this file? y/n"));
+    assert!(render(&mut app, 100, 24).contains("Discard the notes of this file? · y discard · n keep"));
     press(&mut app, "n");
     press(&mut app, "[");
     press(&mut app, "[");
     press(&mut app, "X");
-    assert!(render(&mut app, 100, 24).contains("Discard the notes of this reply? y/n"));
+    assert!(render(&mut app, 100, 24).contains("Discard the notes of this reply? · y discard · n keep"));
     press(&mut app, "n");
     press_key(&mut app, KeyCode::Char('q'), KeyModifiers::NONE);
     assert!(render(&mut app, 120, 24).contains("Unsent notes in 2 documents."));
