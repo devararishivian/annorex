@@ -171,10 +171,11 @@ To turn off the check, use one of these ways:
 5. Press `o` to mark the block as good or `c` to comment. Press `d` to mark it for removal or `s` to replace it.
 6. For `c` and `s`, type the note in the note box and press `enter`. `o` and `d` save at once and need no text.
 
-If the focused pane is not an agent, Annorex finds the agent panes of the Rex session. With one agent pane, it opens
-that pane. With two or more, the command palette asks "Annorex: pick the agent". Choose a pane. The action focuses that
-pane and opens Annorex. If you cancel the question, nothing opens and no message shows. If the session has no agent
-pane, the action shows an error. The action `annorex_files` works in the same way.
+If the focused pane runs no supported agent, Annorex says so and asks which agent pane to open. The command palette
+shows the reason in its title, for example "this pane runs omp, which Annorex does not support". It asks also when the
+session has only one agent pane. Choose a pane. The action focuses that pane and opens Annorex. If you cancel the
+question, nothing opens and no message shows. If the session has no agent pane, the action shows an error. The action
+`annorex_files` works in the same way.
 
 In the note box, the arrow keys, `home`, `end`, `ctrl+a`, and `ctrl+e` move the caret. `ctrl+left` and `ctrl+right` move
 by word. `ctrl+w` deletes the word before the caret. `ctrl+u` and `ctrl+k` delete to the start or the end of the line.

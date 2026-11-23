@@ -17,6 +17,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 
 ### Changed
 
+- When the focused pane runs no supported agent, the action always asks which agent pane to open, also when the
+  session has only one. The title of the question gives the reason, for example "this pane runs omp, which Annorex does
+  not support".
 - Annorex runs once for each Rex tab, not once for each session. A second tab opens its own Annorex. The notice for
   another agent in the same tab now says that Annorex is already open in this tab.
 - OpenCode 2.3.2 is the first supported OpenCode version.
