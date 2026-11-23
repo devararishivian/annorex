@@ -259,7 +259,7 @@ action bar above it.
 | `PageDown` / `PageUp`     | Scroll one page, then focus the first block in the view                                                               |
 | `o` / `d`                 | Note on the block: looks good or remove (saves at once, no text, no note box)                                         |
 | `c` / `s`                 | Note on the block: comment or replace (opens the note box)                                                            |
-| `e` / `x`                 | Edit or delete the note of the block                                                                                  |
+| `e` / `x`                 | Edit or remove the note of the block                                                                                  |
 | `enter`                   | Show the action bar for the whole block. Block mode stays. Without a focus, focus the first block on the screen first |
 | `v`                       | Enter text mode and start a selection at the start of the block                                                       |
 | `V`                       | Enter text mode with the lines of the block selected                                                                  |
@@ -332,9 +332,9 @@ and an open note box close it too.
 | `q`, `ctrl+c` | Close the viewer                                                 |
 
 In the list of notes and on a card, `j` and `k` move between notes, and `enter` goes to the note. `e` and `x` edit
-and delete the note. `esc` returns to the document. In the list of replies, the document shows the selected reply while you press `up` or `down`. `enter` keeps it. `esc`
-shows the reply again that was on the screen when you opened the list. A note that you edited during the preview stays
-with its reply.
+and remove the note. `esc` returns to the document. In the list of replies, the document shows the selected reply while
+you press `up` or `down`. `enter` keeps it. `esc` and `p` show the reply again that was on the screen when you opened
+the list. A note that you edited during the preview stays with its reply.
 
 ### The note box
 

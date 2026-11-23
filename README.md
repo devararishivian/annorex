@@ -191,7 +191,7 @@ session has only one agent pane. Choose a pane. The action focuses that pane and
 question, nothing opens and no message shows. If the session has no agent pane, the action shows an error. The action
 `annorex_files` works in the same way.
 
-The card rail marks one active note. Its card has a thick border and the sign `▸`. The other cards are dim.
+The card rail marks one active note. Its card has a thick border and the sign `▸`. The cards that are not at the focus are dim.
 
 If several notes are at the focus, press `e` or `x`. The focus moves to the card rail, and the footer says
 `N notes here · ↑↓ choose · x remove · esc back`. Press `up` or `down` to choose a note. Press `x` to remove it. The
