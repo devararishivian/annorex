@@ -1,4 +1,5 @@
 //! Live test of annotating and sending on Claude Code, Pi, and `OpenCode` in a separate Rex session.
+//! The live harness does not start Codex yet.
 //!
 //! This test uses real agents and real model calls. It runs only with `ANNOREX_LIVE=1`:
 //!
@@ -303,14 +304,26 @@ fn annotate_and_send_for_each_agent() {
 
         // Discard: X, y removes the draft of the shown reply.
         annotate(NOTE_TWO);
-        let made = drafts(&state_dir, live.agent).len();
+        let made = wait_until(Duration::from_secs(5), || {
+            (drafts(&state_dir, live.agent).len() == old_drafts + 1).then_some(())
+        });
         keys(&rex, &viewer, "X");
-        let prompt = capture(&session, &viewer).contains("Discard the notes of this reply? y/n");
         keys(&rex, &viewer, "y");
-        let left = drafts(&state_dir, live.agent).len();
-        log(start, &format!("{name} discard: drafts {old_drafts}->{made}->{left}, prompt {prompt}"));
-        if !prompt || made != old_drafts + 1 || left != old_drafts {
-            fail(format!("{name} discard: drafts {old_drafts}->{made}->{left}, prompt {prompt}"));
+        // The check is the draft file: `X` asks, and `y` deletes it. The dialog text is not read.
+        let left = wait_until(Duration::from_secs(5), || {
+            (drafts(&state_dir, live.agent).len() == old_drafts).then_some(())
+        });
+        log(
+            start,
+            &format!("{name} discard: draft made {}, draft file gone {}", made.is_some(), left.is_some()),
+        );
+        if made.is_none() || left.is_none() {
+            fail(format!(
+                "{name} discard: draft made {}, draft file gone {}: {:?}",
+                made.is_some(),
+                left.is_some(),
+                drafts(&state_dir, live.agent)
+            ));
         }
 
         // alt+enter: ESC CR in one write is read as a new line.

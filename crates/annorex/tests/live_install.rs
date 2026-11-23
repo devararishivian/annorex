@@ -14,6 +14,7 @@
     clippy::panic,
     clippy::print_stderr,
     clippy::indexing_slicing,
+    clippy::too_many_lines,
     reason = "a live test is one script that reports by printing and asserts by panicking"
 )]
 
@@ -135,8 +136,9 @@ fn installed_module_works_with_the_environment_of_a_rex_action() {
 
     // 4. A module of an older version, and an open on a shell pane. The open ends with `NotAgent`,
     // and the action then goes on to ask which agent to open. `rex open` must not refresh the module
-    // now (see `refreshes_module`): a reload would come while the action runs. The open of the
-    // chosen agent pane refreshes it, but this test starts no agent, so it checks the guard only.
+    // now (see `refreshes_module`): a reload would come while the action runs. The refresh follows a
+    // successful `annorex rex open` of an agent (see `refresh_module`), but this test starts no
+    // agent, so it checks the guard only.
     let config = work.path().join("config-old");
     let init = install(&config, "require(\"annorex\").setup{}");
     let module = config.join("annorex.lua");
@@ -157,6 +159,27 @@ fn installed_module_works_with_the_environment_of_a_rex_action() {
     }
     if !stderr.contains(NOT_AGENT) {
         failures.push(format!("old module: expected {NOT_AGENT:?}, got {stderr:?}"));
+    }
+
+    // 5. The install without `--no-init`: it adds the setup block to `init.lua` of `--dir`, checks
+    // it, and reloads Rex. The reload acts on the config of the running server, which the owner
+    // accepts in a live test run by hand.
+    let config = work.path().join("config-init");
+    let output = Command::new(BIN).args(["rex", "install", "--dir"]).arg(&config).output().expect("install");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    log(start, &format!("install with init: exit {:?}, {}", output.status.code(), stdout.trim()));
+    let init = config.join("init.lua");
+    let created = format!("Created {} with these lines:", init.display());
+    for expected in [created.as_str(), "Checked init.lua with rex config check: no errors."] {
+        if !stdout.contains(expected) {
+            failures.push(format!("install with init: expected {expected:?}, got {stdout:?}"));
+        }
+    }
+    let text = std::fs::read_to_string(&init).unwrap_or_default();
+    for line in ["require(\"annorex\").setup{}", "rex.bind(\"cmd+shift+a\", \"annorex_last\")"] {
+        if !text.contains(line) {
+            failures.push(format!("install with init: init.lua lacks {line:?}: {text:?}"));
+        }
     }
 
     cleanup.dirs.push(work);

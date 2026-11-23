@@ -1,4 +1,5 @@
 //! Live delivery into Claude Code, Pi, and `OpenCode` in a separate Rex session.
+//! The live harness does not start Codex yet.
 //!
 //! This test uses real agents and real model calls. It runs only with `ANNOREX_LIVE=1`:
 //!

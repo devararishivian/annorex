@@ -1,4 +1,5 @@
 //! Live test of the files review on Claude Code, Pi, and `OpenCode` in a separate Rex session.
+//! The live harness does not start Codex yet.
 //!
 //! This test uses real agents. It runs only with `ANNOREX_LIVE=1`:
 //!
@@ -47,7 +48,8 @@ const TWO: &str = "alpha line\nbeta line\n";
 /// A note ends with a Return key. The text of `one.md` shows without the `# `, so `vll` marks `One`.
 const STEPS: [&str; 10] = ["0", "v", "llll", "c", NOTE_TWO, "\r", "[", "v", "ll", "c"];
 
-/// Write the project of one agent: a `.gitignore`, two files to review, and a file that `.gitignore` hides (the tree lists it).
+/// Write the project of one agent: a `.gitignore`, two files to review, and a file that `.gitignore`
+/// hides (the tree lists it).
 fn write_project(cwd: &Path) {
     std::fs::write(cwd.join(".gitignore"), "ignored.txt\n").expect(".gitignore");
     std::fs::write(cwd.join("one.md"), ONE).expect("one.md");
@@ -273,7 +275,11 @@ fn review_files_for_each_agent() {
             ));
         }
         keys(&rex, &viewer, "\x1b");
-        keys(&rex, &viewer, "q");
+        // Close the viewer only while it is open: it asks about the unsent note, and `k` keeps the draft.
+        if has_block(&rex, &viewer) {
+            keys(&rex, &viewer, "q");
+            keys(&rex, &viewer, "k");
+        }
     }
 
     drop(cleanup);

@@ -147,12 +147,10 @@ fn one_message_holds_a_reply_note_and_a_file_note() {
             fail(format!("{name} send: no message with both notes.\nclosest:\n{closest}"));
         }
 
-        // 5. Both drafts have sent_at.
-        let sent = wait_until(Duration::from_secs(10), || {
-            let all = drafts(&state_dir, live.agent);
-            (all.len() == 2 && all.iter().all(|draft| draft["sent_at"].is_string())).then_some(())
-        });
-        log(start, &format!("{name} drafts: both have sent_at {}", sent.is_some()));
+        // 5. The send took both notes: the drafts are gone, and none has sent_at.
+        let sent =
+            wait_until(Duration::from_secs(10), || drafts(&state_dir, live.agent).is_empty().then_some(()));
+        log(start, &format!("{name} drafts: both gone after the send {}", sent.is_some()));
         if sent.is_none() {
             fail(format!("{name} drafts: {:?}", drafts(&state_dir, live.agent)));
         }
