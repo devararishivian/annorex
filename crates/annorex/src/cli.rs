@@ -248,6 +248,9 @@ fn update(
             Ok(EXIT_OK)
         }
         Plan::Run(command) => {
+            // Map the path before the upgrade. Homebrew removes the old keg afterwards, and then
+            // `stable_bin` cannot resolve the old path any more.
+            let bin = stable_bin(&exe);
             writeln!(out, "Running: {}", command_text(channel)).map_err(|e| io_failure(&e))?;
             let _ = out.flush();
             let (program, args) = command
@@ -264,15 +267,20 @@ fn update(
                 let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
                 let _ = write_cache(&path, &Cache { checked_at: now, latest: None });
             }
-            let bin = stable_bin(&exe);
             writeln!(out, "Running: {} rex install", bin.display()).map_err(|e| io_failure(&e))?;
             let _ = out.flush();
-            let line =
-                after_upgrade(&bin, |bin| std::process::Command::new(bin).args(["rex", "install"]).status());
+            let line = after_upgrade(&bin, |bin| rex_install_command(bin).status());
             writeln!(out, "{line}").map_err(|e| io_failure(&e))?;
             Ok(EXIT_OK)
         }
     }
+}
+
+/// The command `<bin> rex install`.
+fn rex_install_command(bin: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(bin);
+    command.args(["rex", "install"]);
+    command
 }
 
 /// Run `<bin> rex install` after an upgrade. The child output goes to the user. Return the closing line.
@@ -766,6 +774,15 @@ mod tests {
         });
         assert_eq!(seen, Some(bin));
         assert_eq!(line, "Annorex is updated.");
+    }
+
+    #[test]
+    fn rex_install_command_is_bin_rex_install() {
+        let bin = Path::new("/opt/homebrew/bin/annorex");
+        let command = rex_install_command(bin);
+        assert_eq!(command.get_program(), bin.as_os_str());
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["rex", "install"]);
     }
 
     #[test]
