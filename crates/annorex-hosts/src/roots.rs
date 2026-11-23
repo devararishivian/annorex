@@ -9,12 +9,16 @@ use crate::opencode;
 /// The directory where Pi keeps its agent state, relative to the home directory.
 pub const PI_DEFAULT_AGENT_DIR: &str = ".pi/agent";
 
+/// The folder of `OhMyPi` in the home directory when `PI_CONFIG_DIR` is not set.
+pub const OMP_DEFAULT_CONFIG_DIR: &str = ".omp";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Roots {
     home: PathBuf,
     claude_config: PathBuf,
     pi_session_dir: Option<PathBuf>,
     pi_agent_dir: Option<PathBuf>,
+    omp_config_dir: Option<PathBuf>,
     opencode_db: Option<PathBuf>,
     codex_home: PathBuf,
     xdg_data_home: PathBuf,
@@ -33,6 +37,7 @@ impl Roots {
             claude_config: path("CLAUDE_CONFIG_DIR").unwrap_or_else(|| home.join(".claude")),
             pi_session_dir: path("PI_CODING_AGENT_SESSION_DIR"),
             pi_agent_dir: path("PI_CODING_AGENT_DIR"),
+            omp_config_dir: path("PI_CONFIG_DIR"),
             opencode_db: path("OPENCODE_DB"),
             codex_home: path("CODEX_HOME").unwrap_or_else(|| home.join(".codex")),
             xdg_data_home,
@@ -49,6 +54,20 @@ impl Roots {
         self.pi_session_dir.clone().unwrap_or_else(|| {
             self.pi_agent_dir.clone().unwrap_or_else(|| self.home.join(PI_DEFAULT_AGENT_DIR)).join("sessions")
         })
+    }
+
+    /// `OhMyPi` sessions of the default profile: `$PI_CODING_AGENT_DIR/sessions`, else
+    /// `~/$PI_CONFIG_DIR/agent/sessions`, else `~/.omp/agent/sessions`. `PI_CONFIG_DIR` is a name
+    /// under home, so an absolute value also goes under home. The profile and XDG rules are not read.
+    pub fn omp_sessions(&self) -> PathBuf {
+        let agent = self.pi_agent_dir.clone().unwrap_or_else(|| {
+            let config = self
+                .omp_config_dir
+                .as_deref()
+                .map_or(Path::new(OMP_DEFAULT_CONFIG_DIR), |dir| dir.strip_prefix("/").unwrap_or(dir));
+            self.home.join(config).join("agent")
+        });
+        agent.join("sessions")
     }
 
     /// Codex CLI's rollout files: `$CODEX_HOME/sessions`, else `~/.codex/sessions`.

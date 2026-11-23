@@ -57,3 +57,25 @@ fn codex_sessions_follow_codex_home() {
     let roots = Roots::from_lookup(PathBuf::from("home"), |_| None);
     assert_eq!(roots.codex_sessions(), PathBuf::from("home/.codex/sessions"));
 }
+
+// OMP roots follow can1357/oh-my-pi @ v19.1.1 `packages/utils/src/dirs.ts`: `PI_CODING_AGENT_DIR` replaces
+// `<root>/agent`; `PI_CONFIG_DIR` is a folder name under home (default `.omp`).
+#[test]
+fn omp_sessions_follow_the_agent_dir_then_the_config_dir_then_the_default() {
+    let roots = |pairs: &[(&'static str, &'static str)]| {
+        let set: HashMap<&str, OsString> = pairs.iter().map(|(k, v)| (*k, (*v).into())).collect();
+        Roots::from_lookup(PathBuf::from("/h"), move |key| set.get(key).cloned())
+    };
+    assert_eq!(roots(&[]).omp_sessions(), PathBuf::from("/h/.omp/agent/sessions"));
+    assert_eq!(roots(&[("PI_CONFIG_DIR", ".cfg")]).omp_sessions(), PathBuf::from("/h/.cfg/agent/sessions"));
+    assert_eq!(roots(&[("PI_CONFIG_DIR", "")]).omp_sessions(), PathBuf::from("/h/.omp/agent/sessions"));
+    assert_eq!(
+        roots(&[("PI_CONFIG_DIR", ".cfg"), ("PI_CODING_AGENT_DIR", "/x/agent")]).omp_sessions(),
+        PathBuf::from("/x/agent/sessions")
+    );
+    // The Pi folder variable for sessions is not an OMP root.
+    assert_eq!(
+        roots(&[("PI_CODING_AGENT_SESSION_DIR", "/p")]).omp_sessions(),
+        PathBuf::from("/h/.omp/agent/sessions")
+    );
+}

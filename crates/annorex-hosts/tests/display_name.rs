@@ -10,6 +10,12 @@ fn display_name_is_the_product_name() {
 #[test]
 fn codex_is_the_fourth_host() {
     assert_eq!(Host::Codex.display_name(), "Codex CLI");
-    assert_eq!(Host::ALL.len(), 4);
     assert_eq!(Host::ALL[3], Host::Codex);
+}
+
+#[test]
+fn ohmypi_is_the_fifth_host() {
+    assert_eq!(Host::OhMyPi.display_name(), "OhMyPi");
+    assert_eq!(Host::ALL.len(), 5);
+    assert_eq!(Host::ALL[4], Host::OhMyPi);
 }

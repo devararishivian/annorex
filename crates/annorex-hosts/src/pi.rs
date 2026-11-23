@@ -129,11 +129,19 @@ pub fn sessions_for_cwd(
     cwd: &Path,
     limit: usize,
 ) -> Vec<(PathBuf, std::time::SystemTime)> {
-    let mut ranked: Vec<(PathBuf, std::time::SystemTime)> = jsonl_files(&sessions_dir.join(encoded_dir(cwd)))
-        .into_iter()
+    ranked_sessions(&[sessions_dir.join(encoded_dir(cwd))], limit)
+}
+
+/// The sessions with a reply in `dirs`, newest modification first, a maximum of `limit`. The
+/// files are ranked first, so only the files that the list needs are read.
+pub(crate) fn ranked_sessions(dirs: &[PathBuf], limit: usize) -> Vec<(PathBuf, std::time::SystemTime)> {
+    let mut ranked: Vec<(PathBuf, std::time::SystemTime)> = dirs
+        .iter()
+        .flat_map(|dir| jsonl_files(dir))
         .filter_map(|path| modified(&path).map(|time| (path, time)))
         .collect();
     ranked.sort_by(|(a, a_time), (b, b_time)| b_time.cmp(a_time).then_with(|| b.cmp(a)));
+    ranked.dedup_by(|a, b| a.0 == b.0);
     ranked
         .into_iter()
         .filter(|(path, _)| {
@@ -143,11 +151,11 @@ pub fn sessions_for_cwd(
         .collect()
 }
 
-fn modified(path: &Path) -> Option<std::time::SystemTime> {
+pub(crate) fn modified(path: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).and_then(|data| data.modified()).ok()
 }
 
-fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     entries
         .flatten()
@@ -175,6 +183,13 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
+/// The `activeLeafId` key of an `OhMyPi` entry.
+enum Leaf {
+    Absent,
+    Null,
+    Id(String),
+}
+
 /// One entry line, reduced to what the chain walk and rendering need.
 struct Entry {
     id: Option<String>,
@@ -183,6 +198,7 @@ struct Entry {
     /// `\n`-joined text blocks, as Plannotator's pi extension reads them.
     message: Option<(String, String)>,
     timestamp: Option<String>,
+    active_leaf: Leaf,
 }
 
 impl Entry {
@@ -208,6 +224,10 @@ impl Entry {
             parent: string("parentId"),
             message,
             timestamp: object.get("timestamp").and_then(iso_timestamp),
+            active_leaf: match object.get("activeLeafId") {
+                None => Leaf::Absent,
+                Some(leaf) => leaf.as_str().map_or(Leaf::Null, |id| Leaf::Id(id.to_owned())),
+            },
         })
     }
 }
@@ -250,9 +270,26 @@ pub fn parse_messages(jsonl: &str, n: usize) -> Vec<Message> {
 }
 
 fn active_branch(entries: &[Entry]) -> Option<std::collections::HashSet<String>> {
-    let newest = entries.iter().rev().find(|e| e.id.is_some())?;
+    let last = entries.iter().rev().find(|e| e.id.is_some())?;
     let by_id: std::collections::HashMap<&str, &Entry> =
         entries.iter().filter_map(|e| e.id.as_deref().map(|i| (i, e))).collect();
+    // `OhMyPi` marks an entry written off the active branch with the leaf at append time.
+    // A null leaf means no branch. An unknown leaf falls back to the newest entry on its own branch.
+    let newest = match &last.active_leaf {
+        Leaf::Absent => last,
+        Leaf::Null => return None,
+        Leaf::Id(leaf) => match by_id.get(leaf.as_str()) {
+            Some(entry) => entry,
+            None => entries.iter().rev().find(|e| {
+                e.id.is_some()
+                    && match &e.active_leaf {
+                        Leaf::Absent => true,
+                        Leaf::Null => false,
+                        Leaf::Id(leaf) => Some(leaf.as_str()) == e.id.as_deref(),
+                    }
+            })?,
+        },
+    };
     let mut chain = std::collections::HashSet::new();
     let mut current = newest;
     loop {

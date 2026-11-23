@@ -14,7 +14,7 @@ pub fn parse_changed(jsonl: &str, turns: usize) -> Vec<Changed> {
     )
 }
 
-fn events(line: &Value) -> Vec<Event> {
+pub(crate) fn events(line: &Value) -> Vec<Event> {
     if line.get("type").and_then(Value::as_str) != Some("message") {
         return Vec::new();
     }

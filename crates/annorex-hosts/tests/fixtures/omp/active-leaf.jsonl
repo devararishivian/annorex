@@ -1,0 +1,8 @@
+{"type":"title","v":1,"title":"Fix the loop guard","source":"auto","updatedAt":"2026-11-23T10:00:00.000Z","pad":"                                                                                                                                            "}
+{"type":"session","version":3,"id":"0193a000","timestamp":"2026-11-23T10:00:00.000Z","cwd":"/work/project"}
+{"type":"model_change","id":"a1b2c3d4","parentId":null,"timestamp":"2026-11-23T10:00:00.100Z","model":"anthropic/claude-sonnet-5"}
+{"type":"message","id":"b1000001","parentId":"a1b2c3d4","timestamp":"2026-11-23T10:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"first prompt"}]}}
+{"type":"message","id":"b1000002","parentId":"b1000001","timestamp":"2026-11-23T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"first reply"}]}}
+{"type":"message","id":"b1000003","parentId":"b1000002","timestamp":"2026-11-23T10:00:10.000Z","message":{"role":"user","content":[{"type":"text","text":"second prompt"}]}}
+{"type":"message","id":"b1000004","parentId":"b1000003","timestamp":"2026-11-23T10:00:15.000Z","message":{"role":"assistant","content":[{"type":"text","text":"second reply"}]}}
+{"type":"model_usage","id":"c1000001","parentId":"b1000002","timestamp":"2026-11-23T10:00:20.000Z","activeLeafId":"b1000004"}

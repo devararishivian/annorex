@@ -245,3 +245,29 @@ fn newer_record_types_leave_the_replies_unchanged() {
     assert_eq!(newer, plain);
     assert!(!newer.iter().any(|m| m.text.contains("system text")), "{newer:?}");
 }
+
+#[test]
+fn the_active_leaf_of_the_last_entry_picks_the_branch_and_its_absence_changes_nothing() {
+    let line = |id: &str, parent: &str, role: &str, text: &str, extra: &str| {
+        format!(
+            r#"{{"type":"message","id":"{id}","parentId":{parent},"message":{{"role":"{role}","content":[{{"type":"text","text":"{text}"}}]}}{extra}}}"#
+        )
+    };
+    let base = [
+        line("a", "null", "user", "p1", ""),
+        line("b", r#""a""#, "assistant", "first", ""),
+        line("c", r#""b""#, "user", "p2", ""),
+        line("d", r#""c""#, "assistant", "second", ""),
+    ];
+    // A late entry on an older branch: without the key the walk starts there.
+    let late = line("e", r#""b""#, "assistant", "late", r#","activeLeafId":"d""#);
+    let with_key = [base.join("\n"), late.clone()].join("\n");
+    assert_eq!(parse_messages(&with_key, 1)[0].text, "second");
+    let without_key = [base.join("\n"), late.replace(r#","activeLeafId":"d""#, "")].join("\n");
+    assert_eq!(parse_messages(&without_key, 1)[0].text, "late");
+    // A null leaf clears the branch; an unknown id falls back to the newest entry on its own branch.
+    let cleared = [base.join("\n"), late.replace(r#""d""#, "null")].join("\n");
+    assert_eq!(parse_messages(&cleared, 1), []);
+    let unknown = [base.join("\n"), late.replace(r#""d""#, r#""zz""#)].join("\n");
+    assert_eq!(parse_messages(&unknown, 1)[0].text, "second");
+}

@@ -10,6 +10,8 @@ pub mod changes;
 pub mod claude;
 pub mod codex;
 pub mod codex_changes;
+pub mod omp;
+pub mod omp_changes;
 pub mod opencode;
 pub mod opencode_changes;
 pub mod pi;
@@ -31,6 +33,8 @@ pub enum Host {
     /// Codex CLI: rollout files under `<codex home>/sessions/YYYY/MM/DD/`, found by the folder in
     /// their `session_meta`.
     Codex,
+    /// `OhMyPi` (`omp`): Pi-format session files with other folder names, under `~/.omp/agent/sessions`.
+    OhMyPi,
 }
 
 impl Host {
@@ -41,6 +45,7 @@ impl Host {
             Self::Pi => "pi",
             Self::OpenCode => "opencode",
             Self::Codex => "codex",
+            Self::OhMyPi => "omp",
         }
     }
 
@@ -51,11 +56,12 @@ impl Host {
             Self::Pi => "Pi",
             Self::OpenCode => "OpenCode",
             Self::Codex => "Codex CLI",
+            Self::OhMyPi => "OhMyPi",
         }
     }
 
     /// Every host with a transcript reader, for messages that list them.
-    pub const ALL: [Host; 4] = [Host::ClaudeCode, Host::Pi, Host::OpenCode, Host::Codex];
+    pub const ALL: [Host; 5] = [Host::ClaudeCode, Host::Pi, Host::OpenCode, Host::Codex, Host::OhMyPi];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
