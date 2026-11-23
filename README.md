@@ -172,7 +172,7 @@ To turn off the check, use one of these ways:
 6. For `c` and `s`, type the note in the note box and press `enter`. `o` and `d` save at once and need no text.
 
 If the focused pane runs no supported agent, Annorex says so and asks which agent pane to open. The command palette
-shows the reason in its title, for example "this pane runs omp, which Annorex does not support". It asks also when the
+shows the reason in its title, for example "omp is not supported". It asks also when the
 session has only one agent pane. Choose a pane. The action focuses that pane and opens Annorex. If you cancel the
 question, nothing opens and no message shows. If the session has no agent pane, the action shows an error. The action
 `annorex_files` works in the same way.
