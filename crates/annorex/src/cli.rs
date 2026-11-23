@@ -518,11 +518,39 @@ const SETUP_LINES: [&str; 3] = [
 
 /// `rex config check` of `file` with `rex`. Without `rex`, or when it cannot run, the check is
 /// skipped.
-fn config_check(rex: Option<&Path>, file: &Path) -> Check {
+/// The text of the error is set when `rex` was found but did not start.
+fn config_check(rex: Option<&Path>, file: &Path) -> (Check, Option<String>) {
     match rex.map(|rex| run_rex_config_check(rex, file)) {
-        Some(Ok(probe)) if probe.success => Check::Passed,
-        Some(Ok(probe)) => Check::Failed(probe.message),
-        Some(Err(_)) | None => Check::Skipped,
+        Some(Ok(probe)) if probe.success => (Check::Passed, None),
+        Some(Ok(probe)) => (Check::Failed(probe.message), None),
+        Some(Err(error)) => (Check::Skipped, Some(error.to_string())),
+        None => (Check::Skipped, None),
+    }
+}
+
+/// The line that tells why a check or a reload did not run.
+fn rex_unavailable(what: &str, start_error: Option<&str>) -> String {
+    match start_error {
+        Some(error) => format!("Skipped {what}: Could not run rex: {error}"),
+        None => format!("Skipped {what}: rex is not available."),
+    }
+}
+
+/// The note for a key that `init.lua` binds already, so Annorex left out its line.
+fn bound_key_note(key: &str) -> Vec<String> {
+    let action = if key == crate::setup::KEY_LAST { "annorex_last" } else { "annorex_files" };
+    vec![
+        String::new(),
+        format!("init.lua already binds {key}, so Annorex left out its line. Choose a free key and add:"),
+        format!("  rex.bind(\"KEY\", \"{action}\")"),
+    ]
+}
+
+/// The state of `init.lua` that has the keys `skipped` bound.
+fn state_with_bound(skipped: &[&str]) -> crate::setup::InitState {
+    crate::setup::InitState::NotLoaded {
+        binds_a: skipped.contains(&crate::setup::KEY_LAST),
+        binds_f: skipped.contains(&crate::setup::KEY_FILES),
     }
 }
 
@@ -532,11 +560,14 @@ fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, i
     use crate::setup::{Change, InitState, KEY_FILES, KEY_LAST, SetupError, apply, block};
     let indented = |text: &str| text.lines().map(|line| format!("  {line}")).collect::<Vec<_>>();
     let mut checked = Check::Skipped;
+    let mut start_error = None;
     let mut failed = false;
     let mut message = None;
     match apply(init, |file| {
-        checked = config_check(rex, file);
-        checked.clone()
+        let (result, error) = config_check(rex, file);
+        checked = result.clone();
+        start_error = error;
+        result
     }) {
         Ok(Change::Created) => {
             lines.push(format!("Created {} with these lines:", init.display()));
@@ -544,39 +575,45 @@ fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, i
             lines.extend(indented(&block(&InitState::Missing, true)));
         }
         Ok(Change::Appended { skipped }) => {
-            let state = InitState::NotLoaded {
-                binds_a: skipped.contains(&KEY_LAST),
-                binds_f: skipped.contains(&KEY_FILES),
-            };
+            let state = state_with_bound(&skipped);
             lines.push(format!("Added these lines to {}:", init.display()));
             lines.push(String::new());
             lines.extend(indented(&block(&state, true)));
             for key in skipped {
-                let action = if key == KEY_LAST { "annorex_last" } else { "annorex_files" };
-                lines.push(String::new());
-                lines.push(format!(
-                    "init.lua already binds {key}, so Annorex left out its line. Choose a free key and add:"
-                ));
-                lines.push(format!("  rex.bind(\"KEY\", \"{action}\")"));
+                lines.extend(bound_key_note(key));
             }
         }
         Ok(Change::Unchanged) => {
             lines.push("init.lua already loads Annorex. No change.".to_owned());
             // The module can be new, so check the real init.lua in place.
-            checked = config_check(rex, init);
+            (checked, start_error) = config_check(rex, init);
             if let Check::Failed(text) = &checked {
                 failed = true;
                 message = Some(format!("rex config check found errors in init.lua:\n{text}"));
             }
         }
-        Err(SetupError::CheckFailed(text)) => {
+        Err(SetupError::CheckFailed { message: text, state }) => {
             failed = true;
             lines.push(
                 "rex config check found errors. init.lua was not changed. Add these lines by hand:"
                     .to_owned(),
             );
             lines.push(String::new());
-            lines.extend(SETUP_LINES.iter().map(|line| format!("  {line}")));
+            // The hand list is the setup block without its comment line and without a bound key.
+            lines.extend(
+                block(&state, true)
+                    .lines()
+                    .filter(|line| !line.starts_with("--"))
+                    .map(|line| format!("  {line}")),
+            );
+            if let InitState::NotLoaded { binds_a, binds_f } = state {
+                for key in [(binds_a, KEY_LAST), (binds_f, KEY_FILES)]
+                    .into_iter()
+                    .filter_map(|(b, k)| b.then_some(k))
+                {
+                    lines.extend(bound_key_note(key));
+                }
+            }
             message = Some(text);
         }
         Err(SetupError::Io(error)) => {
@@ -594,15 +631,20 @@ fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, i
     } else if !failed {
         lines.push(match checked {
             Check::Passed => "Checked init.lua with rex config check: no errors.".to_owned(),
-            _ => "Skipped the check of init.lua: rex is not available.".to_owned(),
+            _ => rex_unavailable("the check of init.lua", start_error.as_deref()),
         });
     }
     if failed {
         return EXIT_FAILURE;
     }
+    // A rex that did not start would not start for the reload, so skip it.
+    if start_error.is_some() {
+        lines.push(rex_unavailable("rex config reload", start_error.as_deref()));
+        return EXIT_OK;
+    }
     // Rex does not watch init.lua. This runs from a terminal, not from a Rex action, so it waits.
     lines.push(match rex.map(crate::rex::reload_config) {
-        None => "Skipped rex config reload: rex is not available.".to_owned(),
+        None => rex_unavailable("rex config reload", None),
         Some(Ok(probe)) if probe.success => {
             "Ran rex config reload: Rex uses the new configuration.".to_owned()
         }
@@ -758,6 +800,19 @@ fn refresh_module(dir: Option<PathBuf>, bin: &Path, reload: impl FnOnce() -> boo
 #[allow(clippy::expect_used, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rex_that_does_not_start_is_named_and_is_not_called_unavailable() {
+        let missing = Path::new("/nonexistent-annorex-test/rex");
+        let (checked, error) = config_check(Some(missing), Path::new("init.lua"));
+        assert_eq!(checked, Check::Skipped);
+        let error = error.expect("a start error");
+        let line = rex_unavailable("the check of init.lua", Some(&error));
+        assert!(line.contains("Could not run rex: "), "{line}");
+        assert!(!line.contains("not available"), "{line}");
+        assert_eq!(config_check(None, Path::new("init.lua")), (Check::Skipped, None));
+        assert!(rex_unavailable("rex config reload", None).ends_with("rex is not available."));
+    }
 
     fn exit(code: i32) -> std::process::ExitStatus {
         use std::os::unix::process::ExitStatusExt;

@@ -250,6 +250,28 @@ fn rex_install_reports_a_failed_reload_and_exits_0() {
 }
 
 #[test]
+fn rex_install_hand_list_leaves_out_a_bound_key_and_names_it() {
+    let rex = fake_rex_config();
+    std::fs::write(rex.path().join("check-fails"), "").expect("flag");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mine = "rex.bind(\"shift+cmd+f\", \"find\")\n";
+    std::fs::write(dir.path().join("init.lua"), mine).expect("init");
+    let output = install_with_fake_rex(&rex, dir.path(), &[]);
+    assert_eq!(output.status.code(), Some(1), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    assert!(out.contains("annorex_last"), "{out}");
+    let list = out.split("error init.lua").next().expect("list");
+    assert!(!list.contains("rex.bind(\"cmd+shift+f\", \"annorex_files\")"), "{out}");
+    assert!(
+        out.contains(
+            "init.lua already binds cmd+shift+f, so Annorex left out its line. Choose a free key and add:"
+        ),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(dir.path().join("init.lua")).expect("init"), mine);
+}
+
+#[test]
 fn rex_install_does_not_write_init_lua_when_the_check_fails() {
     let rex = fake_rex_config();
     std::fs::write(rex.path().join("check-fails"), "").expect("flag");

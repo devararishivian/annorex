@@ -43,8 +43,9 @@ pub enum Change {
 #[derive(Debug, thiserror::Error)]
 pub enum SetupError {
     /// `rex config check` found errors in the new `init.lua`. The message is what Rex printed.
-    #[error("rex config check found errors:\n{0}")]
-    CheckFailed(String),
+    #[error("rex config check found errors:\n{message}")]
+    /// `state` is what `init.lua` held, so the caller can print the lines to add by hand.
+    CheckFailed { message: String, state: InitState },
     #[error("cannot change init.lua: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -182,7 +183,9 @@ pub fn apply(path: &Path, check: impl FnOnce(&Path) -> Check) -> Result<Change, 
     let result = written.map(|()| check(&check_file));
     let _ = std::fs::remove_file(&check_file);
     match result? {
-        Check::Failed(message) => return Err(SetupError::CheckFailed(message.replace(&name, "init.lua"))),
+        Check::Failed(message) => {
+            return Err(SetupError::CheckFailed { message: message.replace(&name, "init.lua"), state });
+        }
         Check::Passed | Check::Skipped | Check::NoScratch => {}
     }
     crate::install::write_atomic_with_mode(&target, &contents, mode)?;
@@ -362,7 +365,7 @@ mod tests {
             Check::Failed(format!("error {name}:3: boom"))
         });
         match result {
-            Err(SetupError::CheckFailed(message)) => assert_eq!(message, "error init.lua:3: boom"),
+            Err(SetupError::CheckFailed { message, .. }) => assert_eq!(message, "error init.lua:3: boom"),
             other => panic!("expected CheckFailed, got {other:?}"),
         }
         assert_eq!(std::fs::read_to_string(&path).expect("init"), "-- mine\n");
@@ -374,7 +377,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("init.lua");
         let result = apply(&path, |_| Check::Failed("error x".to_owned()));
-        assert!(matches!(result, Err(SetupError::CheckFailed(_))), "{result:?}");
+        assert!(matches!(result, Err(SetupError::CheckFailed { .. })), "{result:?}");
         assert!(names(dir.path()).is_empty(), "{:?}", names(dir.path()));
     }
 
