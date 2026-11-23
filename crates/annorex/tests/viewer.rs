@@ -249,6 +249,45 @@ fn enter_in_the_reply_list_keeps_the_previewed_reply() {
     assert!(screen.contains("Oldest reply: short."), "{screen}");
 }
 
+/// A viewer with a note being edited on the reply `r1`, and a new reply that parked that editor.
+fn viewer_with_a_parked_editor() -> App {
+    let mut app = viewer();
+    press(&mut app, "cnote");
+    assert!(app.editor().is_some());
+    let mut all = vec![reply("r0", "A new reply.")];
+    all.extend(replies());
+    app.set_replies(all);
+    assert_eq!(app.reply_position(), (0, 4));
+    assert!(app.editor().is_none(), "the new reply parks the editor");
+    app
+}
+
+#[test]
+fn a_preview_in_the_reply_list_keeps_a_parked_editor_closed() {
+    let mut app = viewer_with_a_parked_editor();
+    press(&mut app, "pj");
+    assert_eq!(app.reply_position(), (1, 4));
+    assert!(app.editor().is_none(), "no editor during the preview");
+    press(&mut app, "j");
+    assert_eq!(app.reply_position(), (2, 4), "the keys move the list");
+    press(&mut app, "k");
+    press(&mut app, "\n");
+    assert_eq!(app.reply_position(), (1, 4));
+    assert_eq!(app.editor().expect("the editor is back").text, "note");
+}
+
+#[test]
+fn esc_and_p_in_the_reply_list_restore_the_reply_and_its_parked_editor() {
+    let mut app = viewer_with_a_parked_editor();
+    press(&mut app, "pj\u{1b}");
+    assert_eq!(app.reply_position(), (0, 4));
+    assert!(app.editor().is_none());
+    press(&mut app, "pjp");
+    assert_eq!(app.reply_position(), (0, 4), "p restores like esc");
+    press(&mut app, "pj\n");
+    assert_eq!(app.editor().expect("the editor is back").text, "note");
+}
+
 #[test]
 fn esc_in_the_reply_list_restores_the_reply_from_the_open() {
     let mut app = viewer();

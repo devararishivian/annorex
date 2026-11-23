@@ -224,7 +224,7 @@ pub struct App {
     /// The reply list at the start of the last-reply view is open. `esc` quits there.
     pub(crate) start_box: bool,
     /// The reply that showed when the reply list opened. `esc` restores it.
-    reply_at_open: usize,
+    reply_at_open: Option<String>,
     /// What the last frame showed beside the document. The keys `tab`, `T`, and `a` use it.
     pub(crate) docked: Docked,
     /// The cursor of the reply list.
@@ -343,7 +343,7 @@ impl App {
             list_open: false,
             boxed: None,
             start_box: false,
-            reply_at_open: 0,
+            reply_at_open: None,
             docked: Docked::default(),
             panel_index: 0,
             picker_index: 0,
@@ -429,7 +429,7 @@ impl App {
             self.boxed = Some(BoxView::Replies);
             self.focus = Focus::Box;
             self.panel_index = 0;
-            self.reply_at_open = self.selected;
+            self.reply_at_open = self.replies.get(self.selected).map(|reply| reply.id.clone());
             self.start_box = true;
         }
     }
@@ -1083,9 +1083,11 @@ impl App {
         self.selected = index;
         self.panel_index = index;
         let outgoing = self.editor.as_ref().map(|editor| self.editing_of(editor));
-        // The text can be new, so the place of the rail hint can be stale.
-        self.rail_hint = None;
-        self.rail_scope = None;
+        // The rail hint stays while the same text is on the screen.
+        if self.shown_id.as_deref() != Some(id.as_str()) || self.doc.source != reply.text {
+            self.rail_hint = None;
+            self.rail_scope = None;
+        }
         self.doc = match self.files.get(&id) {
             Some(file) => Doc::for_kind(file.kind, &reply.text),
             None => Doc::parse(&reply.text),
@@ -1113,11 +1115,18 @@ impl App {
             self.confirm = None;
             self.annotation_index = 0;
             self.shown_id = Some(id.clone());
-            if let Some(editing) = self.parked.remove(&id) {
-                self.editing_id = editing.annotation;
-                self.editor = Some(Editor::from_editing(editing));
+            // During a preview in the reply list, a parked editor stays closed.
+            if self.boxed != Some(BoxView::Replies) {
+                self.restore_parked();
             }
         }
+    }
+
+    /// Open the parked editor of the shown reply again.
+    fn restore_parked(&mut self) {
+        let Some(editing) = self.shown_id.as_ref().and_then(|id| self.parked.remove(id)) else { return };
+        self.editing_id = editing.annotation;
+        self.editor = Some(Editor::from_editing(editing));
     }
 
     /// The review of the reply on the screen.
@@ -1523,7 +1532,8 @@ impl App {
     /// Open the box, or close it when it shows the same view.
     fn toggle_box(&mut self, view: BoxView) {
         if self.boxed == Some(view) {
-            self.close_box();
+            // `p` acts like `esc`: only `enter` keeps a preview.
+            self.cancel_box();
             return;
         }
         self.boxed = Some(view);
@@ -1532,7 +1542,7 @@ impl App {
         match view {
             BoxView::Replies => {
                 self.panel_index = self.selected;
-                self.reply_at_open = self.selected;
+                self.reply_at_open = self.replies.get(self.selected).map(|reply| reply.id.clone());
             }
             BoxView::Finder => self.finder = Finder::new(self.tree.file_paths()),
         }
@@ -1547,6 +1557,7 @@ impl App {
     fn close_box_only(&mut self) {
         self.boxed = None;
         self.start_box = false;
+        self.restore_parked();
     }
 
     /// The keys that work the same in the tree, the rail, and the reply list. `None` when the key is
@@ -1770,11 +1781,12 @@ impl App {
 
     /// Close the box without a choice. The reply list restores the reply from the open.
     pub(super) fn cancel_box(&mut self) {
-        if self.boxed == Some(BoxView::Replies)
-            && !matches!(self.reply_source, ReplySource::Pick(_))
-            && self.selected != self.reply_at_open
-        {
-            self.show_reply(self.reply_at_open);
+        if self.boxed == Some(BoxView::Replies) && !matches!(self.reply_source, ReplySource::Pick(_)) {
+            let at_open = self.reply_at_open.take();
+            let index = at_open.and_then(|id| self.replies.iter().position(|reply| reply.id == id));
+            if let Some(index) = index.filter(|&index| index != self.selected) {
+                self.show_reply(index);
+            }
         }
         self.close_box();
     }
@@ -2664,6 +2676,20 @@ mod tests {
         sender.send(NOTICE.to_owned()).expect("send");
         app.start_update_check(receiver);
         assert!(app.poll_background(), "the notice changes the screen");
+    }
+
+    #[test]
+    fn a_poll_keeps_the_rail_scope_of_an_unchanged_reply() {
+        let reply = |text: &str| Reply { id: "r1".to_owned(), text: text.to_owned(), at: None };
+        let mut app = app();
+        app.set_replies(vec![reply("alpha\n")]);
+        app.rail_hint = Some((2, true));
+        app.rail_scope = Some(vec![1, 2]);
+        app.set_replies(vec![reply("alpha\n")]);
+        assert_eq!(app.rail_hint, Some((2, true)));
+        assert_eq!(app.rail_scope, Some(vec![1, 2]));
+        app.set_replies(vec![reply("beta\n")]);
+        assert_eq!((app.rail_hint, app.rail_scope.clone()), (None, None));
     }
 
     #[test]
