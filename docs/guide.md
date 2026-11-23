@@ -142,9 +142,12 @@ Annorex always opens over the full window of the agent. The agent pane keeps its
 placement. The key `placement` in `config.toml` and the option `--placement` give an error.
 
 Only one Annorex runs in each Rex tab (window). If you start Annorex while one is open in the tab, Annorex shows the
-open one. It does not open a second one, also for another agent. A second tab opens its own Annorex. Rex ends the zoom of a pane when the layer opens. Rex does not restore the zoom when you close the
-viewer. If the open Annorex is for another agent, the action shows this message: `Annorex is already open in this tab, for
-{agent}. It is in front now. Press q there to close it, then open Annorex again.`
+open one. It does not open a second one, also for another agent. A second tab opens its own Annorex.
+
+Rex ends the zoom of a pane when the layer opens. Rex does not restore the zoom when you close the viewer. If the open
+Annorex is for another agent, the action shows this message:
+
+`Annorex is already open in this tab, for {agent}. It is in front now. Press q there to close it, then open Annorex again.`
 
 The replies of the agent and the files of its work directory are in the same Annorex. `annorex_last` and
 `annorex_files` open the same viewer. They differ in the first document: the newest reply, or the files that you name
@@ -786,7 +789,8 @@ Supported agents: Claude Code, Pi, OpenCode, and Codex CLI, in Rex on macOS.
 plannotator-tui is a separate project with its own scope. It now has its own Rex integration, "Rex Annotate" (keys
 Shift+Cmd+O). These points describe Annorex only:
 
-- Annorex works only in Rex. It opens one full-window layer in each Rex session and never opens a second one.
+- Annorex works only in Rex. It opens one full-window layer in each Rex tab and never opens a
+  second one in the same tab.
 - Annorex shows the replies and the files of the agent in one viewer. One send gives the notes on all of them to the
   agent in one message.
 - The file tree puts the files that the agent changed at the top.

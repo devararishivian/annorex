@@ -315,8 +315,8 @@ These projects are the base of the Annorex idea:
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the
-rule of one review layer for each tab of Rex. Two more ideas come from plannotator-tui. Annorex tests the Lua module with
-`rex config check` on a scratch copy. It finds the window of the agent pane with `session.describe_block`.
+rule of one review layer for each tab of Rex. Two more ideas come from plannotator-tui. Annorex tests the Lua module
+with `rex config check` on a scratch copy. It finds the window of the agent pane with `session.describe_block`.
 
 Annorex uses these projects:
 
