@@ -230,12 +230,13 @@ pub(crate) fn trust_live_root(rex: &Rex<SystemRunner>, session: &str, anchor_blo
         rex.write(&block, "\r").expect("enter");
     }
     let trusted = wait_until(Duration::from_secs(30), || live_root_trusted().then_some(()));
+    let pane = capture(session, &block);
     // Closing: leave Claude Code. The pane ends with its command.
     let _ = rex.write(&block, "\x1b");
     let _ = rex.write(&block, "/exit\r");
     assert!(
         trusted.is_some(),
-        "Claude Code did not trust {LIVE_ROOT} within 30 s: accept the dialog by hand once, then run again"
+        "Claude Code did not trust {LIVE_ROOT} within 30 s. Check the trust dialog text in the pane capture.\n{pane}"
     );
 }
 
@@ -259,9 +260,7 @@ pub(crate) fn start_agents(start: Instant, cleanup: &mut Cleanup) -> (String, Ve
             }
         }
     };
-    // The session starts with Pi, so that Claude Code starts only after the root is trusted.
-    let order = [1usize, 0, 2];
-    let (first_agent, first_cwd) = dirs[order[0]].clone();
+    let (first_agent, first_cwd) = dirs[0].clone();
     let cwd_text = first_cwd.to_string_lossy().into_owned();
     let mut args: Vec<String> =
         ["new", "annorex-live", "--json", "-c", &cwd_text, "--"].map(String::from).to_vec();
@@ -272,10 +271,8 @@ pub(crate) fn start_agents(start: Instant, cleanup: &mut Cleanup) -> (String, Ve
     let anchor = created["initial_windows"][0]["block_ids"][0].as_str().expect("block id").to_owned();
     let rex = Rex::discover_with(|key| std::env::var_os(key), Some(session.clone())).expect("rex");
     trust_live_root(&rex, &session, &anchor);
-    let mut started =
-        vec![(order[0], LiveAgent { agent: first_agent, block: anchor.clone(), cwd: first_cwd })];
-    for &index in &order[1..] {
-        let (agent, cwd) = dirs[index].clone();
+    let mut agents = vec![LiveAgent { agent: first_agent, block: anchor.clone(), cwd: first_cwd }];
+    for (agent, cwd) in dirs.into_iter().skip(1) {
         let cwd_text = cwd.to_string_lossy().into_owned();
         let mut args: Vec<String> =
             ["split", "-s", &session, "-b", &anchor, "-c", &cwd_text, "--focus=false", "--json", "--"]
@@ -284,14 +281,8 @@ pub(crate) fn start_agents(start: Instant, cleanup: &mut Cleanup) -> (String, Ve
         args.extend(command(agent, &cwd));
         let split = rex_json(&args.iter().map(String::as_str).collect::<Vec<_>>());
         let block = split["block_ids"][0].as_str().expect("block id").to_owned();
-        started.push((index, LiveAgent { agent, block, cwd }));
+        agents.push(LiveAgent { agent, block, cwd });
     }
-    // Callers expect the order Claude Code, Pi, `OpenCode`.
-    let mut by_index: Vec<Option<LiveAgent>> = (0..3).map(|_| None).collect();
-    for (index, live) in started {
-        by_index[index] = Some(live);
-    }
-    let agents: Vec<LiveAgent> = by_index.into_iter().map(|live| live.expect("agent")).collect();
     log(start, &format!("started session {session}"));
     (session, agents)
 }
