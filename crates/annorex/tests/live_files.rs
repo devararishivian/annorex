@@ -174,7 +174,7 @@ fn review_files_for_each_agent() {
         if !all_listed {
             fail(format!("{name} tree: the tree must list one.md, two.txt, and ignored.txt:\n{tree}"));
         }
-        keys(&rex, &viewer, "\x1b");
+        // No `esc` here: with nothing selected or focused it quits Annorex (docs/guide.md, key rules).
 
         // 2. Annotate a line in each file and send.
         for step in STEPS {
