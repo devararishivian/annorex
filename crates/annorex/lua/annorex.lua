@@ -169,7 +169,7 @@ local function open_view(ctx, view)
   local not_agent = error_line(result, "no supported agent here")
   local agents = agent_panes(ctx)
   if #agents == 0 then
-    fail(not_agent .. ". No pane of this session runs Claude Code, Pi, OpenCode, or Codex CLI.")
+    fail(not_agent .. ". No pane of this session runs Claude Code, Pi, OpenCode, Codex CLI, or OhMyPi.")
   end
   local id, why = pick_agent(agents, "Annorex: " .. not_agent .. ". Pick an agent")
   if id == nil then
@@ -198,7 +198,7 @@ function M.setup(opts)
     title = "Annorex: review the last reply",
     description = "Open the last reply of the agent in the focused pane, over the full window.",
     category = "Annorex",
-    keywords = "annorex review reply agent claude pi opencode codex",
+    keywords = "annorex review reply agent claude pi opencode codex omp",
     run = function(ctx) return open_last(ctx) end,
   }
   rex.action{
@@ -206,7 +206,7 @@ function M.setup(opts)
     title = "Annorex: review files",
     description = "Open the files of the work directory of the agent in the focused pane, over the full window.",
     category = "Annorex",
-    keywords = "annorex review files tree agent claude pi opencode codex",
+    keywords = "annorex review files tree agent claude pi opencode codex omp",
     run = function(ctx) return open_files(ctx) end,
   }
   return M

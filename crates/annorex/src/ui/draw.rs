@@ -461,11 +461,10 @@ fn send_button(app: &App) -> (String, Style) {
     }
     let effect = match (&app.state.safety, app.state.agent) {
         (Safety::Clear { state: Some(state) }, Some(Agent::ClaudeCode)) if state == "working" => " · queued",
-        (Safety::Clear { state: Some(state) }, Some(Agent::Pi | Agent::OpenCode | Agent::Codex))
-            if state == "working" =>
-        {
-            " · steers"
-        }
+        (
+            Safety::Clear { state: Some(state) },
+            Some(Agent::Pi | Agent::OpenCode | Agent::Codex | Agent::OhMyPi),
+        ) if state == "working" => " · steers",
         _ => "",
     };
     let agent =

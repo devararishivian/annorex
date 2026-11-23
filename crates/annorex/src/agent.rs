@@ -15,6 +15,8 @@ pub enum Agent {
     OpenCode,
     #[serde(rename = "codex")]
     Codex,
+    #[serde(rename = "omp")]
+    OhMyPi,
 }
 
 /// What a message does when it arrives while the agent works.
@@ -27,10 +29,10 @@ pub enum BusyEffect {
 }
 
 /// The message when a pane does not run a supported agent (spec §6.1).
-pub const NOT_AGENT: &str = "the focused pane is not running Claude Code, Pi, OpenCode, or Codex CLI";
+pub const NOT_AGENT: &str = "the focused pane is not running Claude Code, Pi, OpenCode, Codex CLI, or OhMyPi";
 
 impl Agent {
-    const ALL: [Agent; 4] = [Agent::ClaudeCode, Agent::Pi, Agent::OpenCode, Agent::Codex];
+    const ALL: [Agent; 5] = [Agent::ClaudeCode, Agent::Pi, Agent::OpenCode, Agent::Codex, Agent::OhMyPi];
 
     /// The `app` value of the agent's root status record.
     pub fn status_app(self) -> &'static str {
@@ -39,6 +41,7 @@ impl Agent {
             Self::Pi => "pi",
             Self::OpenCode => "opencode",
             Self::Codex => "codex",
+            Self::OhMyPi => "omp",
         }
     }
 
@@ -49,6 +52,7 @@ impl Agent {
             Self::Pi => "pi",
             Self::OpenCode => "opencode",
             Self::Codex => "codex",
+            Self::OhMyPi => "omp",
         }
     }
 
@@ -65,6 +69,7 @@ impl Agent {
             Self::Pi => Host::Pi,
             Self::OpenCode => Host::OpenCode,
             Self::Codex => Host::Codex,
+            Self::OhMyPi => Host::OhMyPi,
         }
     }
 
@@ -72,7 +77,7 @@ impl Agent {
     pub fn busy_effect(self) -> BusyEffect {
         match self {
             Self::ClaudeCode => BusyEffect::Queued,
-            Self::Pi | Self::OpenCode | Self::Codex => BusyEffect::Steers,
+            Self::Pi | Self::OpenCode | Self::Codex | Self::OhMyPi => BusyEffect::Steers,
         }
     }
 }
@@ -107,6 +112,7 @@ mod tests {
             "pi" => include_str!("../tests/fixtures/rex/process-pi.json"),
             "opencode" => include_str!("../tests/fixtures/rex/process-opencode.json"),
             "codex" => include_str!("../tests/fixtures/rex/process-codex.json"),
+            "omp" => include_str!("../tests/fixtures/rex/process-omp.json"),
             _ => include_str!("../tests/fixtures/rex/process-shell.json"),
         };
         serde_json::from_str(text).expect("process fixture")
@@ -118,6 +124,9 @@ mod tests {
             "pi" => include_str!("../tests/fixtures/rex/status-pi-idle.json"),
             "opencode" => include_str!("../tests/fixtures/rex/status-opencode-idle.json"),
             "codex" => include_str!("../tests/fixtures/rex/status-codex-idle.json"),
+            // The record shape of can1357/oh-my-pi @ v19.1.1 `packages/coding-agent/src/utils/run-status.ts`:
+            // root record only, `app=omp`, owned by the `omp` process.
+            "omp" => include_str!("../tests/fixtures/rex/status-omp-idle.json"),
             _ => include_str!("../tests/fixtures/rex/status-empty.json"),
         };
         serde_json::from_str(text).expect("status fixture")
@@ -133,6 +142,7 @@ mod tests {
         assert_eq!(detect(&process("pi"), &status("pi")), Some(Agent::Pi));
         assert_eq!(detect(&process("opencode"), &status("opencode")), Some(Agent::OpenCode));
         assert_eq!(detect(&process("codex"), &status("codex")), Some(Agent::Codex));
+        assert_eq!(detect(&process("omp"), &status("omp")), Some(Agent::OhMyPi));
     }
 
     #[test]
@@ -161,7 +171,7 @@ mod tests {
     fn leftover_record_with_a_shell_in_the_foreground_is_not_an_agent() {
         // Rex keeps `done` and `idle` records after the agent exits to the shell.
         let shell = process("shell");
-        for name in ["claude", "pi", "opencode", "codex"] {
+        for name in ["claude", "pi", "opencode", "codex", "omp"] {
             let mut leftover = status(name);
             for record in &mut leftover.records {
                 record.state = "done".to_owned();
@@ -176,6 +186,7 @@ mod tests {
         assert_eq!(detect(&process("pi"), &empty()), Some(Agent::Pi));
         assert_eq!(detect(&process("opencode"), &empty()), Some(Agent::OpenCode));
         assert_eq!(detect(&process("codex"), &empty()), Some(Agent::Codex));
+        assert_eq!(detect(&process("omp"), &empty()), Some(Agent::OhMyPi));
     }
 
     #[test]
@@ -189,6 +200,7 @@ mod tests {
         assert_eq!(Agent::Pi.busy_effect(), BusyEffect::Steers);
         assert_eq!(Agent::OpenCode.busy_effect(), BusyEffect::Steers);
         assert_eq!(Agent::Codex.busy_effect(), BusyEffect::Steers);
+        assert_eq!(Agent::OhMyPi.busy_effect(), BusyEffect::Steers);
     }
 
     #[test]
@@ -197,6 +209,8 @@ mod tests {
         assert_eq!(Agent::Pi.status_app(), "pi");
         assert_eq!(Agent::OpenCode.status_app(), "opencode");
         assert_eq!(Agent::Codex.status_app(), "codex");
+        assert_eq!(Agent::OhMyPi.status_app(), "omp");
+        assert_eq!(Agent::OhMyPi.host(), Host::OhMyPi);
         assert_eq!(Agent::Codex.host(), Host::Codex);
         assert_eq!(Agent::ClaudeCode.host(), Host::ClaudeCode);
         assert_eq!(Agent::Pi.host(), Host::Pi);
@@ -218,6 +232,8 @@ mod tests {
         assert_eq!(Agent::from_argv0("pi"), Some(Agent::Pi));
         assert_eq!(Agent::from_argv0("/Users/dev/.local/bin/claude"), Some(Agent::ClaudeCode));
         assert_eq!(Agent::from_argv0("/usr/bin/zsh"), None);
+        assert_eq!(Agent::from_argv0("/opt/homebrew/bin/omp"), Some(Agent::OhMyPi));
+        assert_eq!(Agent::from_argv0("omp"), Some(Agent::OhMyPi));
         assert_eq!(
             Agent::from_argv0(
                 "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"

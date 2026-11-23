@@ -45,6 +45,11 @@ impl Roots {
         }
     }
 
+    /// The home directory that the roots use.
+    pub fn home(&self) -> &Path {
+        &self.home
+    }
+
     /// Claude Code's configuration directory: `sessions/` and `projects/` live here.
     pub fn claude_config(&self) -> &Path {
         &self.claude_config

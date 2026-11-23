@@ -70,7 +70,7 @@ pub enum Outcome {
 /// Why delivery did not write, or failed.
 #[derive(Debug, thiserror::Error)]
 pub enum DeliverError {
-    #[error("no supported agent (Claude Code, Pi, OpenCode, Codex) runs in the target pane")]
+    #[error("no supported agent (Claude Code, Pi, OpenCode, Codex, OhMyPi) runs in the target pane")]
     NoAgent,
     #[error("the agent shows a dialog{}; answer it first", dialog_text(.kind.as_deref(), .msg.as_deref()))]
     Blocked { kind: Option<String>, msg: Option<String> },

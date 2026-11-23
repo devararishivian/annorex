@@ -140,9 +140,9 @@ impl<R: Runner> OpenApi for Rex<R> {
 pub struct Existing {
     /// The agent block that the open Annorex serves.
     pub target: String,
-    /// The name of that agent (`claude-code`, `pi`, `opencode`, or `codex`), when Rex still reports it.
+    /// The name of that agent (`claude-code`, `pi`, `opencode`, `codex`, or `omp`), when Rex still reports it.
     pub agent: Option<String>,
-    /// The product name of that agent (`Claude Code`, `Pi`, `OpenCode`, or `Codex CLI`) for the notice.
+    /// The product name of that agent (`Claude Code`, `Pi`, `OpenCode`, `Codex CLI`, or `OhMyPi`) for the notice.
     /// The JSON does not carry it.
     #[serde(skip)]
     pub agent_label: Option<&'static str>,
@@ -477,16 +477,16 @@ mod tests {
     #[test]
     fn a_pane_without_an_agent_opens_nothing() {
         let fake = Fake {
-            process: include_str!("../tests/fixtures/rex/process-omp.json"),
+            process: include_str!("../tests/fixtures/rex/process-aider.json"),
             status: include_str!("../tests/fixtures/rex/status-empty.json"),
             ..Fake::claude(vec![agent_only()])
         };
         let error = open(&fake).expect_err("not an agent");
         assert!(
-            matches!(&error, OpenError::NotAgent { program } if program.as_deref() == Some("omp")),
+            matches!(&error, OpenError::NotAgent { program } if program.as_deref() == Some("aider")),
             "{error:?}"
         );
-        assert_eq!(error.to_string(), "omp is not supported");
+        assert_eq!(error.to_string(), "aider is not supported");
         assert_eq!(fake.called(), ["process 0004", "program_status 0004"]);
     }
 

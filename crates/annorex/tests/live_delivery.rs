@@ -45,7 +45,7 @@ fn closest(rex: &Rex<SystemRunner>, roots: &Roots, live: &LiveAgent) -> String {
 fn busy_task(agent: Agent) -> &'static str {
     match agent {
         Agent::ClaudeCode => "Write a 1200-word essay about the history of tea. Do not use any tools.",
-        Agent::Pi | Agent::OpenCode | Agent::Codex => {
+        Agent::Pi | Agent::OpenCode | Agent::Codex | Agent::OhMyPi => {
             "Run the shell command `sleep 25` with your shell tool. Then reply with exactly: SLEPT"
         }
     }

@@ -448,13 +448,13 @@ progress messages that Codex writes while it works (`phase: commentary`).
 ### The agent picker
 
 The actions `annorex_last` and `annorex_files` need an agent pane. If the focused pane runs no supported agent, the
-command `annorex rex open` exits with code 5. Its message names the program, for example "omp is not
+command `annorex rex open` exits with code 5. Its message names the program, for example "aider is not
 supported". The Lua module then runs `annorex rex agents --session SESSION`. This command prints the
 agent panes of the session as JSON. The action then does one of these:
 
 - If the session has no agent pane, the action fails with the message and says that no pane runs a supported agent.
 - If the session has one or more agent panes, the command palette asks which one to open. It asks also for one pane.
-  The title gives the reason, for example "Annorex: omp is not supported. Pick an agent".
+  The title gives the reason, for example "Annorex: aider is not supported. Pick an agent".
   Each choice shows the agent, its work directory, and its window. The action focuses the pane that you choose and opens
   Annorex there.
 

@@ -47,6 +47,7 @@ fn heading(agent: Agent) -> String {
         Agent::Pi => "PI",
         Agent::OpenCode => "OPENCODE",
         Agent::Codex => "CODEX",
+        Agent::OhMyPi => "OMP",
     };
     format!("ANNOREX-M1-{name}")
 }

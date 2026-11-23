@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use annorex_hosts::opencode::Found;
 use annorex_hosts::roots::Roots;
-use annorex_hosts::{HostError, Message, Role, claude, codex, opencode, pi};
+use annorex_hosts::{HostError, Message, Role, claude, codex, omp, opencode, pi};
 
 use crate::agent::Agent;
 use crate::rex::{ProcessInfo, Rex, RexError, Runner, lsof_path};
@@ -48,14 +48,15 @@ pub enum SessionRef {
     Claude(PathBuf),
     Pi(PathBuf),
     Codex(PathBuf),
+    OhMyPi(PathBuf),
     OpenCode { db: PathBuf, found: Found },
 }
 
 impl SessionRef {
-    /// The id of the session: the file stem for Claude Code, Pi, and Codex, the session id for `OpenCode`.
+    /// The id of the session: the file stem for Claude Code, Pi, Codex, and `OhMyPi`, the session id for `OpenCode`.
     pub fn id(&self) -> String {
         match self {
-            Self::Claude(path) | Self::Pi(path) | Self::Codex(path) => {
+            Self::Claude(path) | Self::Pi(path) | Self::Codex(path) | Self::OhMyPi(path) => {
                 path.file_stem().map_or_else(String::new, |stem| stem.to_string_lossy().into_owned())
             }
             Self::OpenCode { found, .. } => found.id.clone(),
@@ -137,6 +138,7 @@ fn agent_name(agent: Agent) -> &'static str {
         Agent::Pi => "Pi",
         Agent::OpenCode => "OpenCode",
         Agent::Codex => "Codex CLI",
+        Agent::OhMyPi => "OhMyPi",
     }
 }
 
@@ -148,7 +150,7 @@ pub fn process_table() -> std::io::Result<Vec<(u32, u32)>> {
 }
 
 /// The sessions that can hold the replies of `source`. Claude Code gives one session (found by
-/// pid). Pi, Codex, and `OpenCode` give all sessions of the directory, newest first.
+/// pid). Pi, Codex, `OhMyPi`, and `OpenCode` give all sessions of the directory, newest first.
 pub fn candidates(
     source: &Source,
     roots: &Roots,
@@ -213,6 +215,15 @@ pub fn sessions_up_to(
             searched = sessions.display().to_string();
             for (path, updated) in codex::sessions_for_cwd(&sessions, &source.cwd, limit) {
                 found.push((SessionRef::Codex(path), updated));
+            }
+        }
+        Agent::OhMyPi => {
+            let sessions = roots.omp_sessions();
+            searched = sessions.display().to_string();
+            for (path, updated) in
+                omp::sessions_for_cwd(&sessions, &source.cwd, roots.home(), &std::env::temp_dir(), limit)
+            {
+                found.push((SessionRef::OhMyPi(path), updated));
             }
         }
         Agent::OpenCode => {
@@ -280,6 +291,7 @@ pub fn load_replies(session: &SessionRef) -> Result<Vec<Reply>, LoadError> {
         SessionRef::Claude(path) => claude::parse_messages(&std::fs::read_to_string(path)?, REPLY_LIMIT),
         SessionRef::Pi(path) => pi::parse_messages(&std::fs::read_to_string(path)?, REPLY_LIMIT),
         SessionRef::Codex(path) => codex::parse_messages(&std::fs::read_to_string(path)?, REPLY_LIMIT),
+        SessionRef::OhMyPi(path) => omp::parse_messages(&std::fs::read_to_string(path)?, REPLY_LIMIT),
         SessionRef::OpenCode { db, found } => {
             opencode::messages_for_session(db, &found.id, found.schema, REPLY_LIMIT)?
         }
@@ -431,6 +443,28 @@ mod tests {
         assert_eq!(replies.len(), 2);
         assert_eq!(replies[0].first_line(), "The requested fixture changes are complete.");
         assert_eq!(replies[1].first_line(), "## Changes");
+    }
+
+    // The session file has the shape of can1357/oh-my-pi @ v19.1.1: a title line, the header, and an
+    // entry with `activeLeafId` as the last line. The folder name is `session-paths.ts`.
+    #[test]
+    fn an_omp_session_is_found_by_its_home_relative_folder_and_loads_its_replies() {
+        let agent_dir = std::env::temp_dir().join(format!("annorex-omp-replies-{}", std::process::id()));
+        let bucket = agent_dir.join("sessions").join("-work");
+        std::fs::create_dir_all(&bucket).expect("bucket");
+        let fixture =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../annorex-hosts/tests/fixtures/omp/active-leaf.jsonl");
+        std::fs::copy(fixture, bucket.join("2026-11-23T10-00-00-000Z_0193a000.jsonl")).expect("copy");
+        let roots = Roots::from_lookup(PathBuf::from("/nonexistent-home"), |key| {
+            (key == "PI_CODING_AGENT_DIR").then(|| agent_dir.clone().into_os_string())
+        });
+        let source = Source { agent: Agent::OhMyPi, cwd: PathBuf::from("/nonexistent-home/work"), pid: 1 };
+        let found = sessions(&source, &roots, &[]).expect("sessions");
+        assert_eq!(found.len(), 1);
+        assert!(matches!(found[0].0, SessionRef::OhMyPi(_)));
+        assert_eq!(found[0].0.id(), "2026-11-23T10-00-00-000Z_0193a000");
+        assert_eq!(load_replies(&found[0].0).expect("replies")[0].first_line(), "second reply");
+        std::fs::remove_dir_all(&agent_dir).expect("cleanup");
     }
 
     #[test]
