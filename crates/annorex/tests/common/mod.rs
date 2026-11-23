@@ -4,6 +4,10 @@
 //! `antigravity/gemini-3.8-flash-low` on `OmniRoute`. The cleanup removes the Rex session, the
 //! temporary directories, and the sessions that the agents stored for those directories, also
 //! when a test fails.
+//!
+//! The live tests start the agents in subfolders of `LIVE_ROOT`. Claude Code trusts that folder
+//! once, and the trust covers new subfolders. The harness accepts the trust dialog of the root
+//! itself on the first run. No human step is needed.
 
 #![allow(
     dead_code,
@@ -30,6 +34,9 @@ pub(crate) const CLAUDE_MODEL: &str = "claude-haiku-5-5";
 pub(crate) const PI_MODEL: &str = "omni/antigravity/gemini-3.8-flash-low";
 pub(crate) const OPENCODE_CONFIG: &str =
     r#"{"$schema":"https://opencode.ai/config.json","model":"omniroute/antigravity/gemini-3.8-flash-low"}"#;
+/// The folder that holds every agent folder of the live tests. It uses the real path, because
+/// `/tmp` is a link and Claude Code keys the trust on the real path.
+pub(crate) const LIVE_ROOT: &str = "/private/tmp/annorex-live";
 pub(crate) const ARRIVAL_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// True when `ANNOREX_LIVE=1`. Else the test prints that it is skipped.
@@ -173,10 +180,69 @@ pub(crate) fn wait_for_state(
     wait_until(timeout, || state(rex, block).filter(|s| wanted.contains(&s.as_str())))
 }
 
+/// Makes a folder for an agent under `LIVE_ROOT`. The root is made when it is missing.
+pub(crate) fn live_tempdir(prefix: &str) -> tempfile::TempDir {
+    std::fs::create_dir_all(LIVE_ROOT).expect("live root");
+    tempfile::Builder::new().prefix(prefix).tempdir_in(LIVE_ROOT).expect("temp dir")
+}
+
+/// True when Claude Code records the trust of `LIVE_ROOT` in `~/.claude.json`. Read-only.
+fn live_root_trusted() -> bool {
+    let Some(home) = std::env::var_os("HOME") else { return false };
+    let Ok(text) = std::fs::read_to_string(Path::new(&home).join(".claude.json")) else { return false };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
+    json["projects"][LIVE_ROOT]["hasTrustDialogAccepted"].as_bool() == Some(true)
+}
+
+/// Makes Claude Code trust `LIVE_ROOT`. It does nothing when the trust exists. Else it starts
+/// Claude Code in a pane of the session, accepts the dialog, waits until Claude Code writes the
+/// flag, and closes the pane. The tests never write `~/.claude.json`.
+pub(crate) fn trust_live_root(rex: &Rex<SystemRunner>, session: &str, anchor_block: &str) {
+    std::fs::create_dir_all(LIVE_ROOT).expect("live root");
+    if live_root_trusted() {
+        return;
+    }
+    let split = rex_json(&[
+        "split",
+        "-s",
+        session,
+        "-b",
+        anchor_block,
+        "-c",
+        LIVE_ROOT,
+        "--focus=false",
+        "--json",
+        "--",
+        "claude",
+        "--model",
+        CLAUDE_MODEL,
+    ]);
+    let block = split["block_ids"][0].as_str().expect("block id").to_owned();
+    let shown = wait_until(Duration::from_secs(30), || {
+        if state(rex, &block).is_some() {
+            return Some(false);
+        }
+        capture(session, &block).contains("trust this folder").then_some(true)
+    });
+    if shown == Some(true) {
+        rex.write(&block, "\x1b[B").expect("down");
+        std::thread::sleep(Duration::from_millis(300));
+        rex.write(&block, "\r").expect("enter");
+    }
+    let trusted = wait_until(Duration::from_secs(30), || live_root_trusted().then_some(()));
+    // Closing: leave Claude Code. The pane ends with its command.
+    let _ = rex.write(&block, "\x1b");
+    let _ = rex.write(&block, "/exit\r");
+    assert!(
+        trusted.is_some(),
+        "Claude Code did not trust {LIVE_ROOT} within 30 s: accept the dialog by hand once, then run again"
+    );
+}
+
 pub(crate) fn start_agents(start: Instant, cleanup: &mut Cleanup) -> (String, Vec<LiveAgent>) {
     let mut dirs = Vec::new();
     for agent in [Agent::ClaudeCode, Agent::Pi, Agent::OpenCode] {
-        let dir = tempfile::Builder::new().prefix("annorex-live-").tempdir().expect("temp dir");
+        let dir = live_tempdir("annorex-live-");
         let cwd = dir.path().canonicalize().expect("canonical dir");
         cleanup.agents.push((agent, cwd.clone()));
         dirs.push((agent, cwd));
@@ -193,7 +259,9 @@ pub(crate) fn start_agents(start: Instant, cleanup: &mut Cleanup) -> (String, Ve
             }
         }
     };
-    let (first_agent, first_cwd) = dirs[0].clone();
+    // The session starts with Pi, so that Claude Code starts only after the root is trusted.
+    let order = [1usize, 0, 2];
+    let (first_agent, first_cwd) = dirs[order[0]].clone();
     let cwd_text = first_cwd.to_string_lossy().into_owned();
     let mut args: Vec<String> =
         ["new", "annorex-live", "--json", "-c", &cwd_text, "--"].map(String::from).to_vec();
@@ -202,8 +270,12 @@ pub(crate) fn start_agents(start: Instant, cleanup: &mut Cleanup) -> (String, Ve
     let session = created["session_id"].as_str().expect("session id").to_owned();
     cleanup.session = Some(session.clone());
     let anchor = created["initial_windows"][0]["block_ids"][0].as_str().expect("block id").to_owned();
-    let mut agents = vec![LiveAgent { agent: first_agent, block: anchor.clone(), cwd: first_cwd }];
-    for (agent, cwd) in dirs.into_iter().skip(1) {
+    let rex = Rex::discover_with(|key| std::env::var_os(key), Some(session.clone())).expect("rex");
+    trust_live_root(&rex, &session, &anchor);
+    let mut started =
+        vec![(order[0], LiveAgent { agent: first_agent, block: anchor.clone(), cwd: first_cwd })];
+    for &index in &order[1..] {
+        let (agent, cwd) = dirs[index].clone();
         let cwd_text = cwd.to_string_lossy().into_owned();
         let mut args: Vec<String> =
             ["split", "-s", &session, "-b", &anchor, "-c", &cwd_text, "--focus=false", "--json", "--"]
@@ -212,8 +284,14 @@ pub(crate) fn start_agents(start: Instant, cleanup: &mut Cleanup) -> (String, Ve
         args.extend(command(agent, &cwd));
         let split = rex_json(&args.iter().map(String::as_str).collect::<Vec<_>>());
         let block = split["block_ids"][0].as_str().expect("block id").to_owned();
-        agents.push(LiveAgent { agent, block, cwd });
+        started.push((index, LiveAgent { agent, block, cwd }));
     }
+    // Callers expect the order Claude Code, Pi, `OpenCode`.
+    let mut by_index: Vec<Option<LiveAgent>> = (0..3).map(|_| None).collect();
+    for (index, live) in started {
+        by_index[index] = Some(live);
+    }
+    let agents: Vec<LiveAgent> = by_index.into_iter().map(|live| live.expect("agent")).collect();
     log(start, &format!("started session {session}"));
     (session, agents)
 }
