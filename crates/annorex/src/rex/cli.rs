@@ -152,6 +152,16 @@ pub fn find_binary(env: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, Re
     find_binary_with(env, || executable_of(std::os::unix::process::parent_id()))
 }
 
+/// Run `rex config reload` and wait for it: the running server reads its config file again. Use
+/// it from a terminal. During a Rex action, use `Rex::reload_config_later`, because a reload
+/// cancels the action.
+pub fn reload_config(rex_bin: &Path) -> std::io::Result<crate::install::Probe> {
+    let output = Command::new(rex_bin).args(["config", "reload"]).stdin(Stdio::null()).output()?;
+    let mut message = String::from_utf8_lossy(&output.stdout).into_owned();
+    message.push_str(&String::from_utf8_lossy(&output.stderr));
+    Ok(crate::install::Probe { success: output.status.success(), message: message.trim().to_owned() })
+}
+
 /// Find the `rex` binary, in this order:
 ///
 /// 1. `$REX_BIN_DIR/rex`. Rex sets `REX_BIN_DIR` in its terminals.
@@ -564,6 +574,28 @@ mod tests {
         assert!(rex.runner.calls.borrow().is_empty(), "the reload does not use the runner");
         std::thread::sleep(Duration::from_millis(300));
         assert!(!failed.exists(), "a reload that works writes no marker");
+    }
+
+    #[test]
+    fn reload_config_waits_and_gives_the_result() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("dir");
+        let log = dir.path().join("args");
+        let bin = dir.path().join("rex");
+        let script = format!(
+            "#!/bin/sh\necho \"$@\" > '{}'\n[ -e '{}/fail' ] && {{ echo 'Error: no server' >&2; exit 1; }}\nexit 0\n",
+            log.display(),
+            dir.path().display()
+        );
+        std::fs::write(&bin, script).expect("script");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let probe = reload_config(&bin).expect("run");
+        assert!(probe.success, "{probe:?}");
+        assert_eq!(std::fs::read_to_string(&log).expect("args"), "config reload\n");
+        std::fs::write(dir.path().join("fail"), "").expect("flag");
+        let probe = reload_config(&bin).expect("run");
+        assert!(!probe.success);
+        assert_eq!(probe.message, "Error: no server");
     }
 
     #[test]

@@ -32,7 +32,8 @@ const NOT_AGENT: &str = "Annorex: the focused pane is not running Claude Code, P
 
 /// Install the module into `dir` and write an `init.lua` with `init_line`.
 fn install(dir: &Path, init_line: &str) -> PathBuf {
-    let output = Command::new(BIN).args(["rex", "install", "--dir"]).arg(dir).output().expect("install");
+    let output =
+        Command::new(BIN).args(["rex", "install", "--no-init", "--dir"]).arg(dir).output().expect("install");
     assert!(output.status.success(), "install: {}", String::from_utf8_lossy(&output.stderr));
     let init = dir.join("init.lua");
     std::fs::write(&init, format!("{init_line}\n")).expect("init.lua");

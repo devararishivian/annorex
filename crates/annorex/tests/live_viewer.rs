@@ -70,7 +70,8 @@ fn newest_reply(rex: &Rex<SystemRunner>, roots: &Roots, live: &LiveAgent) -> Opt
 
 /// Write the module and an `init.lua` that loads it with the built binary.
 fn write_init(dir: &Path) -> String {
-    let output = Command::new(BIN).args(["rex", "install", "--dir"]).arg(dir).output().expect("install");
+    let output =
+        Command::new(BIN).args(["rex", "install", "--no-init", "--dir"]).arg(dir).output().expect("install");
     assert!(output.status.success(), "install: {}", String::from_utf8_lossy(&output.stderr));
     let init = dir.join("init.lua");
     std::fs::write(&init, format!("require(\"annorex\").setup{{ bin = \"{BIN}\" }}\n")).expect("init.lua");

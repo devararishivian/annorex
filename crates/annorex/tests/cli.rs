@@ -1,6 +1,6 @@
 //! The `annorex` binary: commands, usage errors, and exit codes.
 
-#![allow(clippy::expect_used, reason = "tests assert by panicking")]
+#![allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 
 use std::io::Write as _;
 use std::process::{Command, Output, Stdio};
@@ -65,23 +65,242 @@ fn missing_target_exits_64() {
 }
 
 #[test]
-fn rex_install_prints_setup_lines() {
+fn rex_install_without_rex_writes_init_lua_and_skips_the_check_and_the_reload() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().to_str().expect("utf-8 path");
     let output = annorex(&["rex", "install", "--dir", path], &[("PATH", "/usr/bin")], "");
     assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
     let out = text(&output.stdout);
-    assert!(out.contains(&format!("{path}/annorex.lua")), "{out}");
-    assert!(out.contains("require(\"annorex\").setup{}"), "{out}");
-    assert!(out.contains("rex.bind(\"cmd+shift+a\", \"annorex_last\")"), "{out}");
-    assert!(out.contains("rex.bind(\"cmd+shift+f\", \"annorex_files\")"), "{out}");
-    assert!(out.contains("rex config reload"), "{out}");
+    assert!(out.contains(&format!("Wrote {path}/annorex.lua")), "{out}");
+    assert!(out.contains(&format!("Created {path}/init.lua with these lines:")), "{out}");
+    assert!(out.contains("Skipped the check of init.lua: rex is not available."), "{out}");
+    assert!(out.contains("Skipped rex config reload: rex is not available."), "{out}");
     // The module starts the binary that installed it, so no bin option is needed.
     let bin = env!("CARGO_BIN_EXE_annorex");
     assert!(out.contains(&format!("Rex starts: {bin}")), "{out}");
     assert!(!out.contains("setup{ bin = \""), "{out}");
     let module = std::fs::read_to_string(dir.path().join("annorex.lua")).expect("module");
     assert!(module.contains(&format!("local INSTALLED_BIN = \"{bin}\"\n")), "{module}");
+    let init = std::fs::read_to_string(dir.path().join("init.lua")).expect("init.lua");
+    assert_eq!(init, SETUP_LINES.join("\n") + "\n");
+}
+
+/// The lines of the setup block, as `rex install` writes them into a new `init.lua`.
+const SETUP_LINES: [&str; 4] = [
+    "-- Added by `annorex rex install`. Remove these lines to remove Annorex.",
+    "require(\"annorex\").setup{}",
+    "rex.bind(\"cmd+shift+a\", \"annorex_last\")",
+    "rex.bind(\"cmd+shift+f\", \"annorex_files\")",
+];
+
+/// A fake `rex` in a new folder, for `rex config check` and `rex config reload`. It logs each
+/// call to `log`. The file `check-fails` makes the check fail; `reload-fails` makes the reload
+/// fail. Put the folder first on `PATH`.
+fn fake_rex_config() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().expect("temp dir");
+    let script = "#!/bin/sh\nhere=$(dirname \"$0\")\necho \"$* REX_CONFIG=$REX_CONFIG\" >> \"$here/log\"\n\
+         case \"$1 $2\" in\n  \
+         'config check') if [ -e \"$here/check-fails\" ]; then echo \"error $(basename \"$3\"):1: boom\"; \
+         echo 'Error: the configuration has errors' >&2; exit 1; fi; echo \"path: $3\" ;;\n  \
+         'config reload') if [ -e \"$here/reload-fails\" ]; then echo 'Error: cannot reload' >&2; exit 1; fi ;;\n  \
+         *) exit 2 ;;\nesac\n";
+    let rex = dir.path().join("rex");
+    std::fs::write(&rex, script).expect("fake rex");
+    std::fs::set_permissions(&rex, std::fs::Permissions::from_mode(0o755)).expect("mode");
+    dir
+}
+
+/// Run `annorex rex install --dir DIR` with the fake `rex` first on `PATH`.
+fn install_with_fake_rex(rex: &tempfile::TempDir, dir: &std::path::Path, extra: &[&str]) -> Output {
+    let path = format!("{}:/usr/bin:/bin", rex.path().display());
+    let mut args = vec!["rex", "install", "--dir", dir.to_str().expect("utf-8 path")];
+    args.extend_from_slice(extra);
+    annorex(&args, &[("PATH", path.as_str())], "")
+}
+
+fn rex_log(rex: &tempfile::TempDir) -> String {
+    std::fs::read_to_string(rex.path().join("log")).unwrap_or_default()
+}
+
+/// Assert that `needles` are in `out`, in this order.
+fn assert_in_order(out: &str, needles: &[&str]) {
+    let mut from = 0;
+    for needle in needles {
+        let at = out.get(from..).and_then(|rest| rest.find(needle)).unwrap_or_else(|| {
+            panic!("{needle:?} is missing after byte {from} in:\n{out}");
+        });
+        from += at + needle.len();
+    }
+}
+
+#[test]
+fn rex_install_creates_init_lua_checks_it_and_reloads_rex() {
+    let rex = fake_rex_config();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().to_str().expect("utf-8 path");
+    let output = install_with_fake_rex(&rex, dir.path(), &[]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    let wrote = format!("Wrote {path}/annorex.lua");
+    let created = format!("Created {path}/init.lua with these lines:");
+    let mut order = vec![wrote.as_str(), created.as_str()];
+    order.extend(SETUP_LINES);
+    order.extend([
+        "Rex starts: ",
+        "Checked init.lua with rex config check: no errors.",
+        "Ran rex config reload: Rex uses the new configuration.",
+    ]);
+    assert_in_order(&out, &order);
+    assert!(!out.contains("Add these lines"), "{out}");
+    let init = std::fs::read_to_string(dir.path().join("init.lua")).expect("init.lua");
+    assert_eq!(init, SETUP_LINES.join("\n") + "\n");
+    let log = rex_log(&rex);
+    // The check ran on a file beside init.lua, so `require("annorex")` finds the module.
+    assert!(log.contains(&format!("config check {path}/.init.lua.annorex-check.")), "{log}");
+    assert!(log.contains("config reload"), "{log}");
+    let names: Vec<_> =
+        std::fs::read_dir(dir.path()).expect("dir").map(|e| e.expect("entry").file_name()).collect();
+    assert_eq!(names.len(), 2, "only annorex.lua and init.lua stay: {names:?}");
+}
+
+#[test]
+fn rex_install_appends_to_init_lua_and_names_a_bound_key() {
+    let rex = fake_rex_config();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().to_str().expect("utf-8 path");
+    std::fs::write(dir.path().join("init.lua"), "rex.bind(\"shift+cmd+f\", \"find\")\n").expect("init");
+    let output = install_with_fake_rex(&rex, dir.path(), &[]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    let added = format!("Added these lines to {path}/init.lua:");
+    assert_in_order(
+        &out,
+        &[
+            &added,
+            SETUP_LINES[0],
+            SETUP_LINES[1],
+            SETUP_LINES[2],
+            "init.lua already binds cmd+shift+f, so Annorex left out its line. Choose a free key and add:",
+            "rex.bind(\"KEY\", \"annorex_files\")",
+            "Checked init.lua with rex config check: no errors.",
+            "Ran rex config reload",
+        ],
+    );
+    let init = std::fs::read_to_string(dir.path().join("init.lua")).expect("init.lua");
+    assert!(!init.contains("\"cmd+shift+f\""), "{init}");
+    assert!(init.starts_with("rex.bind(\"shift+cmd+f\", \"find\")\n\n-- Added by"), "{init}");
+}
+
+#[test]
+fn rex_install_leaves_init_lua_that_loads_annorex_and_still_reloads() {
+    let rex = fake_rex_config();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().to_str().expect("utf-8 path");
+    let mine = "require('annorex').setup{ update_check = false }\n";
+    std::fs::write(dir.path().join("init.lua"), mine).expect("init");
+    let output = install_with_fake_rex(&rex, dir.path(), &[]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    assert_in_order(
+        &out,
+        &[
+            "init.lua already loads Annorex. No change.",
+            "Checked init.lua with rex config check: no errors.",
+            "Ran rex config reload: Rex uses the new configuration.",
+        ],
+    );
+    assert_eq!(std::fs::read_to_string(dir.path().join("init.lua")).expect("init"), mine);
+    // The real init.lua is checked in place.
+    let log = rex_log(&rex);
+    assert!(log.contains(&format!("config check {path}/init.lua REX_CONFIG={path}/init.lua")), "{log}");
+}
+
+#[test]
+fn rex_install_of_a_loaded_init_lua_with_errors_exits_1() {
+    let rex = fake_rex_config();
+    std::fs::write(rex.path().join("check-fails"), "").expect("flag");
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("init.lua"), "require(\"annorex\").setup{}\n").expect("init");
+    let output = install_with_fake_rex(&rex, dir.path(), &[]);
+    assert_eq!(output.status.code(), Some(1), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    assert_in_order(
+        &out,
+        &[
+            "init.lua already loads Annorex. No change.",
+            "rex config check found errors in init.lua:",
+            "error init.lua:1: boom",
+        ],
+    );
+    assert!(!rex_log(&rex).contains("config reload"), "{}", rex_log(&rex));
+}
+
+#[test]
+fn rex_install_reports_a_failed_reload_and_exits_0() {
+    let rex = fake_rex_config();
+    std::fs::write(rex.path().join("reload-fails"), "").expect("flag");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let output = install_with_fake_rex(&rex, dir.path(), &[]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    assert!(out.contains("Could not reload Rex. Run: rex config reload"), "{out}");
+    assert!(!out.contains("Ran rex config reload"), "{out}");
+    assert!(dir.path().join("init.lua").exists());
+}
+
+#[test]
+fn rex_install_does_not_write_init_lua_when_the_check_fails() {
+    let rex = fake_rex_config();
+    std::fs::write(rex.path().join("check-fails"), "").expect("flag");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mine = "-- mine\n";
+    std::fs::write(dir.path().join("init.lua"), mine).expect("init");
+    let output = install_with_fake_rex(&rex, dir.path(), &[]);
+    assert_eq!(output.status.code(), Some(1), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    let mut order = vec!["rex config check found errors. init.lua was not changed. Add these lines by hand:"];
+    // The hand-written lines are the three lines, without the comment that names `rex install`.
+    order.extend(&SETUP_LINES[1..]);
+    order.push("error init.lua:1: boom");
+    assert_in_order(&out, &order);
+    assert_eq!(std::fs::read_to_string(dir.path().join("init.lua")).expect("init"), mine);
+    assert!(dir.path().join("annorex.lua").exists(), "the module stays written");
+    assert!(!rex_log(&rex).contains("config reload"), "{}", rex_log(&rex));
+    assert_eq!(std::fs::read_dir(dir.path()).expect("dir").count(), 2, "no check file stays");
+}
+
+#[test]
+fn rex_install_no_init_keeps_the_old_output() {
+    let rex = fake_rex_config();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().to_str().expect("utf-8 path");
+    let output = install_with_fake_rex(&rex, dir.path(), &["--no-init"]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let out = text(&output.stdout);
+    let wrote = format!("Wrote {path}/annorex.lua");
+    assert_in_order(
+        &out,
+        &[
+            &wrote,
+            "Add these lines to init.lua:",
+            "  require(\"annorex\").setup{}",
+            "  rex.bind(\"cmd+shift+a\", \"annorex_last\")",
+            "  rex.bind(\"cmd+shift+f\", \"annorex_files\")",
+            "Rex starts: ",
+            "Checked the module with rex config check: no errors.",
+            "Then run: rex config reload",
+        ],
+    );
+    assert!(!dir.path().join("init.lua").exists());
+    assert!(!rex_log(&rex).contains("config reload"), "{}", rex_log(&rex));
+}
+
+#[test]
+fn rex_install_help_names_init_lua_and_no_init() {
+    let help = text(&annorex(&["rex", "install", "--help"], &[], "").stdout);
+    assert!(help.contains("Write the Lua module and add the setup lines to `init.lua`"), "{help}");
+    assert!(help.contains("--no-init"), "{help}");
 }
 
 #[test]

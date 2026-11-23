@@ -4,7 +4,7 @@
 mod cli;
 mod types;
 
-pub use cli::{Rex, RexError, Runner, SystemRunner, find_binary, lsof_path};
+pub use cli::{Rex, RexError, Runner, SystemRunner, find_binary, lsof_path, reload_config};
 pub use types::{
     BlockInfo, Layer, LayerKind, LayerState, Located, Mode, Modes, NewLayer, Owner, Proc, ProcessInfo,
     SessionEntry, SessionList, SessionView, Size, StatusList, StatusRecord, Window,

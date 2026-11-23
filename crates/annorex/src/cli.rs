@@ -13,8 +13,8 @@ use crate::config::Config;
 use crate::deliver::{DeliverError, DeliveryMode, Outcome, RealSleeper, deliver};
 use crate::draft::{DraftStore, drafts_dir};
 use crate::install::{
-    Check, InstallError, Refresh, check_module, config_dir, install, refresh, run_rex_config_check,
-    stable_bin,
+    Check, InstallError, Refresh, check_module, config_dir, config_file, install, refresh,
+    run_rex_config_check, stable_bin,
 };
 use crate::open::{Existing, OpenError, Opened, View, open_view};
 use crate::payload::sanitize;
@@ -115,11 +115,16 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum RexCommand {
-    /// Write the Lua module `annorex.lua` beside the `init.lua` of Rex. It never changes `init.lua`.
+    /// Write the Lua module and add the setup lines to `init.lua`. Then check `init.lua` and run
+    /// `rex config reload`.
     Install {
-        /// The directory. The default is the directory of the `init.lua` that Rex reads.
+        /// The directory of `annorex.lua` and `init.lua`. The default is the directory of the
+        /// `init.lua` that Rex reads.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Write only the module. Do not change `init.lua` and do not reload Rex.
+        #[arg(long)]
+        no_init: bool,
     },
     /// Open a viewer next to an agent pane. The Lua module runs this command.
     Open {
@@ -197,7 +202,9 @@ pub fn run(
             viewer(&env, &target, session, &Start::Files(paths), no_update_check)
         }
         Command::Update { check } => update(&env, check, out, err),
-        Command::Rex { command: RexCommand::Install { dir } } => rex_install(&env, dir, out),
+        Command::Rex { command: RexCommand::Install { dir, no_init } } => {
+            rex_install(&env, dir, no_init, out)
+        }
         Command::Rex {
             command: RexCommand::Open { view: OpenView::Last { target, session, no_update_check } },
         } => rex_open(&env, &View::Last, &target, session, no_update_check, out),
@@ -420,8 +427,11 @@ fn viewer(
 fn rex_install(
     env: &impl Fn(&str) -> Option<OsString>,
     dir: Option<PathBuf>,
+    no_init: bool,
     out: &mut impl Write,
 ) -> Result<i32, Failure> {
+    // With --dir, init.lua is in that folder. Else it is the file that Rex reads.
+    let init = dir.as_ref().map(|dir| dir.join("init.lua")).or_else(|| config_file(env));
     let dir = dir.or_else(|| config_dir(env)).ok_or_else(|| Failure {
         code: EXIT_USAGE,
         message:
@@ -436,35 +446,145 @@ fn rex_install(
         message: error.to_string(),
     })?;
     let verb = if installed.replaced { "Updated" } else { "Wrote" };
-    let mut lines = vec![
-        format!("{verb} {}", installed.path.display()),
-        String::new(),
-        "Add these lines to init.lua:".to_owned(),
-        String::new(),
-        "  require(\"annorex\").setup{}".to_owned(),
-        "  rex.bind(\"cmd+shift+a\", \"annorex_last\")".to_owned(),
-        "  rex.bind(\"cmd+shift+f\", \"annorex_files\")".to_owned(),
-    ];
+    let rex = crate::rex::find_binary(env).ok();
+    let mut lines = vec![format!("{verb} {}", installed.path.display()), String::new()];
+    let code = if no_init {
+        module_only(&mut lines, rex.as_deref(), exe.as_deref())
+    } else {
+        let init = init.unwrap_or_else(|| dir.join("init.lua"));
+        setup_init(&mut lines, rex.as_deref(), exe.as_deref(), &init)
+    };
+    writeln!(out, "{}", lines.join("\n")).map_err(|error| io_failure(&error))?;
+    Ok(code)
+}
+
+/// `rex install --no-init`: the module only. Print the lines to add, check the module in a private
+/// scratch folder, and ask for the reload. Returns the exit code.
+fn module_only(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>) -> i32 {
+    lines.push("Add these lines to init.lua:".to_owned());
     lines.push(String::new());
-    lines.extend(install_note(exe.as_deref()));
+    lines.extend(SETUP_LINES.iter().map(|line| format!("  {line}")));
+    lines.push(String::new());
+    lines.extend(install_note(exe));
     let scratch = std::env::temp_dir().join(format!("annorex-check-{}", std::process::id()));
-    let checked = match crate::rex::find_binary(env) {
-        Ok(rex) => match crate::install::make_scratch(&scratch) {
+    let checked = match rex {
+        Some(rex) => match crate::install::make_scratch(&scratch) {
             Ok(()) => {
-                let result = check_module(&scratch, exe.as_deref(), |init| run_rex_config_check(&rex, init));
+                let result = check_module(&scratch, exe, |init| run_rex_config_check(rex, init));
                 let _ = std::fs::remove_dir_all(&scratch);
                 result
             }
             Err(_) => Check::NoScratch,
         },
-        Err(_) => Check::Skipped,
+        None => Check::Skipped,
     };
     lines.push(String::new());
     lines.push(checked.summary());
     lines.push(String::new());
     lines.push("Then run: rex config reload".to_owned());
-    writeln!(out, "{}", lines.join("\n")).map_err(|error| io_failure(&error))?;
-    Ok(if matches!(checked, Check::Failed(_)) { EXIT_FAILURE } else { EXIT_OK })
+    if matches!(checked, Check::Failed(_)) { EXIT_FAILURE } else { EXIT_OK }
+}
+
+/// The three setup lines, without the comment line of the setup block.
+const SETUP_LINES: [&str; 3] = [
+    "require(\"annorex\").setup{}",
+    "rex.bind(\"cmd+shift+a\", \"annorex_last\")",
+    "rex.bind(\"cmd+shift+f\", \"annorex_files\")",
+];
+
+/// `rex config check` of `file` with `rex`. Without `rex`, or when it cannot run, the check is
+/// skipped.
+fn config_check(rex: Option<&Path>, file: &Path) -> Check {
+    match rex.map(|rex| run_rex_config_check(rex, file)) {
+        Some(Ok(probe)) if probe.success => Check::Passed,
+        Some(Ok(probe)) => Check::Failed(probe.message),
+        Some(Err(_)) | None => Check::Skipped,
+    }
+}
+
+/// `rex install`: add the setup lines to `init.lua`, check it, and reload Rex. Returns the exit
+/// code.
+fn setup_init(lines: &mut Vec<String>, rex: Option<&Path>, exe: Option<&Path>, init: &Path) -> i32 {
+    use crate::setup::{Change, InitState, KEY_FILES, KEY_LAST, SetupError, apply, block};
+    let indented = |text: &str| text.lines().map(|line| format!("  {line}")).collect::<Vec<_>>();
+    let mut checked = Check::Skipped;
+    let mut failed = false;
+    let mut message = None;
+    match apply(init, |file| {
+        checked = config_check(rex, file);
+        checked.clone()
+    }) {
+        Ok(Change::Created) => {
+            lines.push(format!("Created {} with these lines:", init.display()));
+            lines.push(String::new());
+            lines.extend(indented(&block(&InitState::Missing, true)));
+        }
+        Ok(Change::Appended { skipped }) => {
+            let state = InitState::NotLoaded {
+                binds_a: skipped.contains(&KEY_LAST),
+                binds_f: skipped.contains(&KEY_FILES),
+            };
+            lines.push(format!("Added these lines to {}:", init.display()));
+            lines.push(String::new());
+            lines.extend(indented(&block(&state, true)));
+            for key in skipped {
+                let action = if key == KEY_LAST { "annorex_last" } else { "annorex_files" };
+                lines.push(String::new());
+                lines.push(format!(
+                    "init.lua already binds {key}, so Annorex left out its line. Choose a free key and add:"
+                ));
+                lines.push(format!("  rex.bind(\"KEY\", \"{action}\")"));
+            }
+        }
+        Ok(Change::Unchanged) => {
+            lines.push("init.lua already loads Annorex. No change.".to_owned());
+            // The module can be new, so check the real init.lua in place.
+            checked = config_check(rex, init);
+            if let Check::Failed(text) = &checked {
+                failed = true;
+                message = Some(format!("rex config check found errors in init.lua:\n{text}"));
+            }
+        }
+        Err(SetupError::CheckFailed(text)) => {
+            failed = true;
+            lines.push(
+                "rex config check found errors. init.lua was not changed. Add these lines by hand:"
+                    .to_owned(),
+            );
+            lines.push(String::new());
+            lines.extend(SETUP_LINES.iter().map(|line| format!("  {line}")));
+            message = Some(text);
+        }
+        Err(SetupError::Io(error)) => {
+            failed = true;
+            lines.push(format!("Cannot change {}: {error}. Add these lines by hand:", init.display()));
+            lines.push(String::new());
+            lines.extend(SETUP_LINES.iter().map(|line| format!("  {line}")));
+        }
+    }
+    lines.push(String::new());
+    lines.extend(install_note(exe));
+    lines.push(String::new());
+    if let Some(message) = message {
+        lines.push(message);
+    } else if !failed {
+        lines.push(match checked {
+            Check::Passed => "Checked init.lua with rex config check: no errors.".to_owned(),
+            _ => "Skipped the check of init.lua: rex is not available.".to_owned(),
+        });
+    }
+    if failed {
+        return EXIT_FAILURE;
+    }
+    // Rex does not watch init.lua. This runs from a terminal, not from a Rex action, so it waits.
+    lines.push(match rex.map(crate::rex::reload_config) {
+        None => "Skipped rex config reload: rex is not available.".to_owned(),
+        Some(Ok(probe)) if probe.success => {
+            "Ran rex config reload: Rex uses the new configuration.".to_owned()
+        }
+        Some(_) => "Could not reload Rex. Run: rex config reload".to_owned(),
+    });
+    EXIT_OK
 }
 
 /// What `rex install` says about the binary that the module starts.

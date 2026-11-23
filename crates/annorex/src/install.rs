@@ -61,6 +61,15 @@ pub fn config_dir(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     get("HOME").map(|home| home.join(".config").join("rex"))
 }
 
+/// The `init.lua` that Rex reads: `REX_CONFIG` itself, else `init.lua` in `config_dir`. Empty
+/// values count as not set.
+pub fn config_file(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    if let Some(config) = env("REX_CONFIG").filter(|value| !value.is_empty()) {
+        return Some(PathBuf::from(config));
+    }
+    config_dir(env).map(|dir| dir.join("init.lua"))
+}
+
 /// The result of an install.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Installed {
@@ -78,7 +87,7 @@ pub enum InstallError {
 }
 
 /// Write the module to `dir`, with `bin` as the installed binary. Create `dir` if necessary.
-/// Replace only a file that an earlier install wrote. Never open `init.lua`.
+/// Replace only a file that an earlier install wrote. Never open `init.lua`: `crate::setup` does that.
 pub fn install(dir: &Path, bin: Option<&Path>) -> Result<Installed, InstallError> {
     let path = dir.join(MODULE_FILE);
     let replaced = match std::fs::read_to_string(&path) {
@@ -378,7 +387,18 @@ mod tests {
     }
 
     #[test]
-    fn install_never_touches_init_lua() {
+    fn config_file_is_rex_config_else_init_lua_in_the_config_dir() {
+        let pairs = [("REX_CONFIG", "/etc/rex/main.lua"), ("HOME", "/h")];
+        assert_eq!(config_file(env(&pairs)), Some(PathBuf::from("/etc/rex/main.lua")));
+        let pairs = [("REX_CONFIG", ""), ("XDG_CONFIG_HOME", "/x"), ("HOME", "/h")];
+        assert_eq!(config_file(env(&pairs)), Some(PathBuf::from("/x/rex/init.lua")));
+        assert_eq!(config_file(env(&[("HOME", "/h")])), Some(PathBuf::from("/h/.config/rex/init.lua")));
+        assert_eq!(config_file(env(&[])), None);
+    }
+
+    /// `rex install` changes `init.lua` through `crate::setup`. The module install alone never does.
+    #[test]
+    fn install_alone_never_touches_init_lua() {
         let dir = tempfile::tempdir().expect("temp dir");
         let init = dir.path().join("init.lua");
         std::fs::write(&init, "rex.bind(\"cmd+d\", \"pane.split\")\n").expect("init");
