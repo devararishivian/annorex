@@ -162,13 +162,29 @@ fn review_files_for_each_agent() {
             fail(format!("{name} list: one.md and two.txt are not both listed:\n{list}"));
         }
         keys(&rex, &viewer, "\x1b");
-        // The tree shows by default (`T` would hide it). Since 0.2.3 it lists the files that
-        // `.gitignore` hides.
-        let tree = wait_until(Duration::from_secs(5), || {
-            let screen = capture(&session, &viewer);
-            screen.contains("two.txt").then_some(screen)
-        })
-        .unwrap_or_default();
+        // `esc` closed the list. The tree shows by default at 100 columns or more. In a narrower pane it
+        // opens over the document with `T` (docs/guide.md, "Review files"). Since 0.2.3 it lists the
+        // files that `.gitignore` hides.
+        let tree_of = |screen: &str| screen.contains("two.txt") && screen.contains("ignored.txt");
+        let mut tree = String::new();
+        let mut shown_tree = wait_until(Duration::from_secs(5), || {
+            tree = capture(&session, &viewer);
+            tree_of(&tree).then_some(())
+        });
+        let mut opened_tree = false;
+        if shown_tree.is_none() {
+            opened_tree = true;
+            keys(&rex, &viewer, "T");
+            shown_tree = wait_until(Duration::from_secs(5), || {
+                tree = capture(&session, &viewer);
+                tree_of(&tree).then_some(())
+            });
+        }
+        log(start, &format!("{name} tree: shown {}", shown_tree.is_some()));
+        if opened_tree {
+            // A second `T` closes the tree over the document, so the next keys go to the document.
+            keys(&rex, &viewer, "T");
+        }
         let all_listed = tree.contains("one.md") && tree.contains("two.txt") && tree.contains("ignored.txt");
         log(start, &format!("{name} tree: ignored.txt listed {all_listed}"));
         if !all_listed {
@@ -260,18 +276,30 @@ fn review_files_for_each_agent() {
             continue;
         }
         keys(&rex, &viewer, "r");
+        let after_r = wait_until(Duration::from_secs(5), || {
+            let screen = capture(&session, &viewer);
+            screen.contains("a new first line").then_some(screen)
+        })
+        .unwrap_or_default();
+        // A wide pane shows the note box beside line 2 of the file. A narrow pane has no room for it,
+        // so the notes list (`a`) gives the line number.
+        let wide = after_r.lines().any(|line| line.chars().count() >= 100);
+        let beside = after_r.lines().any(|line| line.contains("alpha line") && line.contains("comment"));
+        let detached_of =
+            |screen: &str| screen.lines().any(|line| line.trim_start_matches(['│', ' ']).starts_with('!'));
         keys(&rex, &viewer, "a");
         let screen = capture(&session, &viewer);
-        let clear = !screen.contains("changed on disk");
-        let moved = screen.contains("l.2") && screen.contains("a new first line");
-        let detached = screen.lines().any(|line| line.trim_start_matches(['│', ' ']).starts_with('!'));
+        let clear = !after_r.contains("changed on disk");
+        let moved =
+            after_r.contains("a new first line") && if wide { beside } else { screen.contains("l.2") };
+        let detached = detached_of(&after_r) || detached_of(&screen);
         log(
             start,
             &format!("{name} reload: banner gone {clear}, note moved to l.2 {moved}, detached {detached}"),
         );
         if !clear || !moved || detached {
             fail(format!(
-                "{name} reload: banner gone {clear}, note on l.2 {moved}, detached {detached}:\n{screen}"
+                "{name} reload: banner gone {clear}, note on l.2 {moved}, detached {detached}:\nafter r:\n{after_r}\nafter a:\n{screen}"
             ));
         }
         keys(&rex, &viewer, "\x1b");
