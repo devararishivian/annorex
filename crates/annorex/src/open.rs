@@ -155,7 +155,7 @@ impl Existing {
         }
         let agent = self.agent.as_deref().unwrap_or("an agent");
         Some(format!(
-            "Annorex is already open in this session, for {agent}. It is in front now; press q there to close it, then start Annorex again."
+            "Annorex is already open in this tab, for {agent}. It is in front now. Press q there to close it, then open Annorex again."
         ))
     }
 }
@@ -228,8 +228,8 @@ fn focus_existing(api: &impl OpenApi, found: &Located<'_>, target: &str) -> Resu
     })
 }
 
-/// Open the viewer of `view` for the agent in `target` over the full window of the agent. A session has one
-/// Annorex: if one is open, show it and open nothing. With `no_update_check`, the viewer does not check
+/// Open the viewer of `view` for the agent in `target` over the full window of the agent. A tab (Rex window) has one
+/// Annorex: if one is open in the tab of the agent, show it and open nothing. With `no_update_check`, the viewer does not check
 /// for a newer release.
 pub fn open_view(
     api: &impl OpenApi,
@@ -244,11 +244,11 @@ pub fn open_view(
     if detect(&process, &status).is_none() {
         return Err(OpenError::NotAgent);
     }
+    let window = api.window_of(target)?;
     let before = api.view()?;
-    if let Some(found) = before.locate(is_annorex).first() {
+    if let Some(found) = before.locate(is_annorex).iter().find(|found| found.window.window_id == window) {
         return focus_existing(api, found, target);
     }
-    let window = api.window_of(target)?;
     let cwd = process.foreground.as_ref().and_then(|fg| fg.cwd.as_deref());
     let request = layer_request_for(view, target, session, &window, exe, cwd, no_update_check);
     let layer = api.new_layer(&request)?;
@@ -261,7 +261,8 @@ pub fn open_view(
     // its own layer. Block ids are time-ordered, so the smaller id is the older block. Both starts compare
     // the same ids in the same way, so exactly one stays, also when two ids have the same millisecond.
     if let Ok(after) = api.view() {
-        let found = after.locate(is_annorex);
+        let found: Vec<_> =
+            after.locate(is_annorex).into_iter().filter(|found| found.window.window_id == window).collect();
         if let Some(oldest) = found.iter().min_by(|a, b| a.block.block_id.cmp(&b.block.block_id))
             && oldest.block.block_id != block_id
         {
@@ -320,6 +321,22 @@ mod tests {
             layers.push(layer);
         }
         json!({ "windows": [{ "window_id": WINDOW, "focused_block_id": TARGET, "layers": layers }] })
+    }
+
+    const WINDOW_2: &str = "window:01a1b000-0000-7000-8000-000000000012";
+
+    /// A view of two tabs. Tab 1 has the given floating layers. Tab 2 holds the agent block `TARGET`
+    /// and the given floating layers.
+    fn two_tabs(first: &[Floating<'_>], second: &[Floating<'_>]) -> Value {
+        let (mut one, mut two) = (view(first), view(second));
+        one["windows"][0]["layers"].as_array_mut().expect("layers").remove(0);
+        one["windows"][0]["layers"].as_array_mut().expect("layers").insert(
+            0,
+            json!({ "layer_id": "layer:tiled1", "kind": "tiled",
+                    "blocks": [{ "block_id": OTHER, "label": "claude" }] }),
+        );
+        two["windows"][0]["window_id"] = json!(WINDOW_2);
+        json!({ "windows": [one["windows"][0].clone(), two["windows"][0].clone()] })
     }
 
     struct Fake {
@@ -718,12 +735,46 @@ mod tests {
     }
 
     #[test]
-    fn the_notice_names_the_agent_when_the_target_differs() {
+    fn the_notice_names_the_tab() {
         let same = Existing { target: TARGET.into(), agent: Some("pi".into()), same_target: true };
         assert_eq!(same.notice(), None);
         let other = Existing { same_target: false, ..same };
-        let text = other.notice().expect("notice");
-        assert!(text.contains("pi") && text.contains("press q"), "{text}");
+        assert_eq!(
+            other.notice().expect("notice"),
+            "Annorex is already open in this tab, for pi. It is in front now. Press q there to close it, then open Annorex again."
+        );
+    }
+
+    // One Annorex for each tab: an Annorex in tab 1 does not stop a new one in tab 2.
+    #[test]
+    fn an_annorex_in_another_tab_does_not_stop_a_new_one() {
+        let (other_label, own_label) = (pane_label(OTHER), pane_label(TARGET));
+        let first = [("layer:a", None, &[("block:a", other_label.as_str())][..])];
+        let second = [("layer:new", None, &[("block:new", own_label.as_str())][..])];
+        let fake = Fake {
+            window: Some(WINDOW_2),
+            ..Fake::claude(vec![two_tabs(&first, &[]), two_tabs(&first, &second)])
+        };
+        let opened = open(&fake).expect("open");
+        assert!(!opened.focused_existing);
+        assert_eq!(opened.block_id, "block:new");
+        assert_eq!(fake.requests.borrow()[0]["window_id"], WINDOW_2);
+        assert!(!fake.called().iter().any(|call| call.starts_with("set_layer_state")), "{:?}", fake.called());
+    }
+
+    #[test]
+    fn the_race_check_looks_only_in_the_own_tab() {
+        let old = "block:01a1b000-0000-7000-8000-0000000000a1";
+        let (other_label, own_label) = (pane_label(OTHER), pane_label(TARGET));
+        let first = [("layer:a", None, &[(old, other_label.as_str())][..])];
+        let second = [("layer:new", None, &[("block:new", own_label.as_str())][..])];
+        let fake = Fake {
+            window: Some(WINDOW_2),
+            ..Fake::claude(vec![two_tabs(&first, &[]), two_tabs(&first, &second)])
+        };
+        let opened = open(&fake).expect("open");
+        assert!(!opened.focused_existing);
+        assert!(!fake.called().iter().any(|call| call.starts_with("close_layer")), "{:?}", fake.called());
     }
 
     #[test]
