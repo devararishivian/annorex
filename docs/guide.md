@@ -752,7 +752,7 @@ Exit codes:
 | 1    | Another failure, for example a file or the output that Annorex cannot write                                 |
 | 3    | Refused: no agent (not `annorex rex open`), a dialog, no agent status, or no bracketed paste. Or Enter held |
 | 4    | A Rex call failed, or the `rex` binary was not found                                                        |
-| 5    | `annorex rex open` only: the target pane runs no supported agent                                                  |
+| 5    | `annorex rex open` only: the target pane runs no supported agent                                            |
 | 64   | Usage error: a bad argument, no session, or an empty message                                                |
 
 ## Troubleshooting
