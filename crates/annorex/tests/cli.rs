@@ -274,6 +274,11 @@ fn rex_install_hand_list_leaves_out_a_bound_key_and_names_it() {
 #[test]
 fn rex_install_hand_list_of_a_write_error_leaves_out_a_bound_key_and_names_it() {
     use std::os::unix::fs::PermissionsExt as _;
+    // Root writes into a read-only folder, so the final write would not fail.
+    let id = Command::new("id").arg("-u").output().expect("id");
+    if text(&id.stdout).trim() == "0" {
+        return;
+    }
     let rex = fake_rex_config();
     let dir = tempfile::tempdir().expect("temp dir");
     // init.lua is a link to a file in a read-only folder, so the final write fails.

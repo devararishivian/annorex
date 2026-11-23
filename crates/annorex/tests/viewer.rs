@@ -371,7 +371,7 @@ fn picker_keeps_the_selected_session_visible() {
 
 #[test]
 fn not_an_agent_shows_in_the_pane() {
-    let message = "the focused pane is not running Claude Code, Pi, OpenCode, or Codex";
+    let message = "the focused pane is not running Claude Code, Pi, OpenCode, or Codex CLI";
     let state = AgentState { agent: None, safety: Safety::Clear { state: None } };
     let mut app = App::new(state, Screen::Error(message.into()), Vec::new(), &Config::default());
     let screen = render(&mut app, 100, 12);

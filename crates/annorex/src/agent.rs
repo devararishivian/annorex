@@ -27,7 +27,7 @@ pub enum BusyEffect {
 }
 
 /// The message when a pane does not run a supported agent (spec §6.1).
-pub const NOT_AGENT: &str = "the focused pane is not running Claude Code, Pi, OpenCode, or Codex";
+pub const NOT_AGENT: &str = "the focused pane is not running Claude Code, Pi, OpenCode, or Codex CLI";
 
 impl Agent {
     const ALL: [Agent; 4] = [Agent::ClaudeCode, Agent::Pi, Agent::OpenCode, Agent::Codex];

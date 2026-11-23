@@ -229,11 +229,17 @@ pub(crate) fn trust_live_root(rex: &Rex<SystemRunner>, session: &str, anchor_blo
         std::thread::sleep(Duration::from_millis(300));
         rex.write(&block, "\r").expect("enter");
     }
-    let trusted = wait_until(Duration::from_secs(30), || live_root_trusted().then_some(()));
+    // Claude Code starts without a dialog when a parent folder is trusted: nothing to write then.
+    let trusted = if shown == Some(false) {
+        Some(())
+    } else {
+        wait_until(Duration::from_secs(30), || live_root_trusted().then_some(()))
+    };
     let pane = capture(session, &block);
-    // Closing: leave Claude Code. The pane ends with its command.
+    // Closing: leave Claude Code. The pane ends with its command. Wait until the pane is gone.
     let _ = rex.write(&block, "\x1b");
     let _ = rex.write(&block, "/exit\r");
+    let _ = wait_until(Duration::from_secs(10), || state(rex, &block).is_none().then_some(()));
     assert!(
         trusted.is_some(),
         "Claude Code did not trust {LIVE_ROOT} within 30 s. Check the trust dialog text in the pane capture.\n{pane}"

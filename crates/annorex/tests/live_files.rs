@@ -299,7 +299,8 @@ fn review_files_for_each_agent() {
         );
         if !clear || !moved || detached {
             fail(format!(
-                "{name} reload: banner gone {clear}, note on l.2 {moved}, detached {detached}:\nafter r:\n{after_r}\nafter a:\n{screen}"
+                "{name} reload: banner gone {clear}, note on l.2 {moved}, detached {detached}:\n\
+                 after r:\n{after_r}\nafter a:\n{screen}"
             ));
         }
         keys(&rex, &viewer, "\x1b");

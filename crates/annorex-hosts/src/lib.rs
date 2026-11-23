@@ -50,7 +50,7 @@ impl Host {
             Self::ClaudeCode => "Claude Code",
             Self::Pi => "Pi",
             Self::OpenCode => "OpenCode",
-            Self::Codex => "Codex",
+            Self::Codex => "Codex CLI",
         }
     }
 

@@ -200,7 +200,7 @@ mod tests {
                 AgentPane {
                     block_id: CODEX.into(),
                     agent: Agent::Codex,
-                    title: "Codex".into(),
+                    title: "Codex CLI".into(),
                     subtitle: "~/work/project".into(),
                     detail: "tab 2 · pane 1".into(),
                 },

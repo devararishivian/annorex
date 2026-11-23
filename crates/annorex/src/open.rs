@@ -142,7 +142,7 @@ pub struct Existing {
     pub target: String,
     /// The name of that agent (`claude-code`, `pi`, `opencode`, or `codex`), when Rex still reports it.
     pub agent: Option<String>,
-    /// The product name of that agent (`Claude Code`, `Pi`, `OpenCode`, or `Codex`) for the notice.
+    /// The product name of that agent (`Claude Code`, `Pi`, `OpenCode`, or `Codex CLI`) for the notice.
     /// The JSON does not carry it.
     #[serde(skip)]
     pub agent_label: Option<&'static str>,

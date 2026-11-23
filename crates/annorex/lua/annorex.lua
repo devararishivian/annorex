@@ -169,7 +169,7 @@ local function open_view(ctx, view)
   local not_agent = error_line(result, "no supported agent here")
   local agents = agent_panes(ctx)
   if #agents == 0 then
-    fail(not_agent .. ". No pane of this session runs Claude Code, Pi, OpenCode, or Codex.")
+    fail(not_agent .. ". No pane of this session runs Claude Code, Pi, OpenCode, or Codex CLI.")
   end
   local id, why = pick_agent(agents, "Annorex: " .. not_agent .. ". Pick an agent")
   if id == nil then

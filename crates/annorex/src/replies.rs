@@ -136,7 +136,7 @@ fn agent_name(agent: Agent) -> &'static str {
         Agent::ClaudeCode => "Claude Code",
         Agent::Pi => "Pi",
         Agent::OpenCode => "OpenCode",
-        Agent::Codex => "Codex",
+        Agent::Codex => "Codex CLI",
     }
 }
 
