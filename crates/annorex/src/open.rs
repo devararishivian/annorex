@@ -1,5 +1,5 @@
 //! `annorex rex open last` and `annorex rex open files`: open the viewer in a floating layer over the
-//! full window of the agent, or show the viewer that is already open in the session.
+//! full window of the agent, or show the viewer that is already open in the tab.
 
 use std::path::Path;
 
@@ -135,7 +135,7 @@ impl<R: Runner> OpenApi for Rex<R> {
     }
 }
 
-/// The Annorex that was already open in the session, when `open_view` showed it and opened nothing.
+/// The Annorex that was already open in the tab, when `open_view` showed it and opened nothing.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Existing {
     /// The agent block that the open Annorex serves.
@@ -185,7 +185,7 @@ pub fn open_last(api: &impl OpenApi, target: &str, session: &str, exe: &Path) ->
 }
 
 /// Open the files viewer for the agent in `target`, with `paths` open. If an Annorex is open in the
-/// session, focus it. Then the paths are not used.
+/// tab, focus it. Then the paths are not used.
 pub fn open_files(
     api: &impl OpenApi,
     target: &str,
@@ -229,8 +229,8 @@ fn focus_existing(api: &impl OpenApi, found: &Located<'_>, target: &str) -> Resu
 }
 
 /// Open the viewer of `view` for the agent in `target` over the full window of the agent. A tab (Rex window) has one
-/// Annorex: if one is open in the tab of the agent, show it and open nothing. With `no_update_check`, the viewer does not check
-/// for a newer release.
+/// Annorex: if one is open in the tab of the agent, show it and open nothing. With `no_update_check`, the viewer does
+/// not check for a newer release.
 pub fn open_view(
     api: &impl OpenApi,
     view: &View<'_>,
