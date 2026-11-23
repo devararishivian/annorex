@@ -320,8 +320,9 @@ These projects are the base of the Annorex idea:
 
 The idea of the full-window layer comes from herdr-annotate and memex, which both cover the screen. Annorex adds the
 rule of one review layer for each tab of Rex. Two more ideas come from plannotator-tui. Annorex tests the Lua module
-with `rex config check`. The check of `init.lua` runs on a check file beside the real `init.lua`, before the write. It
-finds the window of the agent pane with `session.describe_block`.
+with `rex config check`. When `init.lua` loads Annorex already, the check of `init.lua` runs on the real file in place.
+Otherwise it runs on a check file beside the real `init.lua`, before the write. Annorex finds the window of the agent
+pane with `session.describe_block`.
 
 Annorex uses these projects:
 
