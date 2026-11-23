@@ -39,7 +39,7 @@ use common::{
 const BIN: &str = env!("CARGO_BIN_EXE_annorex");
 /// The sizes that the resize case requests.
 const SIZES: [(u16, u16); 5] = [(218, 69), (40, 12), (120, 40), (30, 8), (80, 24)];
-const NOT_AGENT: &str = "Annorex: the focused pane is not running Claude Code, Pi, OpenCode, or Codex";
+const NOT_AGENT: &str = "Annorex: this pane runs ";
 
 fn heading(agent: Agent) -> String {
     let name = match agent {

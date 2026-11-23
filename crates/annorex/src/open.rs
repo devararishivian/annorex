@@ -169,10 +169,23 @@ pub struct Opened {
     pub existing: Option<Existing>,
 }
 
+/// The file name of an `argv0`, without the dash of a login shell. `None` if nothing is left.
+fn program_name(argv0: &str) -> Option<String> {
+    let name = argv0.rsplit('/').next().unwrap_or(argv0).trim_start_matches('-');
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+fn not_agent_text(program: Option<&str>) -> String {
+    match program {
+        Some(program) => format!("this pane runs {program}, which Annorex does not support"),
+        None => "this pane runs no supported agent".to_owned(),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
-    #[error("{}", crate::agent::NOT_AGENT)]
-    NotAgent,
+    #[error("{}", not_agent_text(program.as_deref()))]
+    NotAgent { program: Option<String> },
     #[error("Rex did not give the id of the new pane")]
     NoNewBlock,
     #[error(transparent)]
@@ -242,7 +255,8 @@ pub fn open_view(
     let process = api.process(target)?;
     let status = api.program_status(target)?;
     if detect(&process, &status).is_none() {
-        return Err(OpenError::NotAgent);
+        let program = process.foreground.as_ref().and_then(|fg| fg.argv0.as_deref()).and_then(program_name);
+        return Err(OpenError::NotAgent { program });
     }
     let window = api.window_of(target)?;
     let before = api.view()?;
@@ -451,18 +465,33 @@ mod tests {
         assert_eq!(request.get("anchor_id"), None, "no split");
     }
 
-    // S11: no layer opens for a pane without an agent.
+    // S11: no layer opens for a pane without an agent. The error names the program.
     #[test]
     fn a_pane_without_an_agent_opens_nothing() {
         let fake = Fake {
-            process: include_str!("../tests/fixtures/rex/process-shell.json"),
+            process: include_str!("../tests/fixtures/rex/process-omp.json"),
             status: include_str!("../tests/fixtures/rex/status-empty.json"),
             ..Fake::claude(vec![agent_only()])
         };
         let error = open(&fake).expect_err("not an agent");
-        assert!(matches!(error, OpenError::NotAgent));
-        assert_eq!(error.to_string(), "the focused pane is not running Claude Code, Pi, OpenCode, or Codex");
+        assert!(
+            matches!(&error, OpenError::NotAgent { program } if program.as_deref() == Some("omp")),
+            "{error:?}"
+        );
+        assert_eq!(error.to_string(), "this pane runs omp, which Annorex does not support");
         assert_eq!(fake.called(), ["process 0004", "program_status 0004"]);
+    }
+
+    #[test]
+    fn a_pane_without_a_program_name_gives_the_text_without_a_program() {
+        let fake = Fake {
+            process: include_str!("../tests/fixtures/rex/process-no-argv0.json"),
+            status: include_str!("../tests/fixtures/rex/status-empty.json"),
+            ..Fake::claude(vec![agent_only()])
+        };
+        let error = open(&fake).expect_err("not an agent");
+        assert!(matches!(&error, OpenError::NotAgent { program: None }), "{error:?}");
+        assert_eq!(error.to_string(), "this pane runs no supported agent");
     }
 
     // S3: the same viewer again shows the open layer and opens no second one.

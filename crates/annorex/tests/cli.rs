@@ -474,7 +474,7 @@ fn rex_open_of_a_pane_without_an_agent_exits_5_and_deliver_still_exits_3() {
     let rex = fake_rex_with_a_shell_pane();
     let bin_dir = rex.path().to_str().expect("utf-8 path");
     let env = [("REX_BIN_DIR", bin_dir), ("PATH", "/usr/bin:/bin"), ("REX_SESSION", "session:x")];
-    let not_agent = "the focused pane is not running Claude Code, Pi, OpenCode, or Codex";
+    let not_agent = "this pane runs ";
     for view in ["last", "files"] {
         let output = annorex(&["rex", "open", view, "--target", "block:b1"], &env, "");
         assert_eq!(output.status.code(), Some(5), "{view}: {}", text(&output.stderr));
@@ -507,4 +507,15 @@ fn the_module_asks_for_the_agent_on_exit_5() {
     assert!(module.contains("rex.ui.pick"));
     assert!(module.contains("local NOT_AGENT_CODE = 5"));
     assert_eq!(annorex::cli::EXIT_NOT_AGENT, 5);
+}
+
+#[test]
+fn the_installed_module_always_asks_which_agent_to_open() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().to_str().expect("utf-8 path");
+    let output = annorex(&["rex", "install", "--dir", path], &[("PATH", "/usr/bin")], "");
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let module = std::fs::read_to_string(dir.path().join("annorex.lua")).expect("module");
+    assert!(module.contains("Pick an agent"), "{module}");
+    assert!(!module.contains("#agents == 1"), "{module}");
 }

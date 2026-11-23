@@ -22,7 +22,7 @@
 --   4. ~/.local/bin/annorex
 --
 -- This module only starts `annorex rex open last`, `annorex rex open files`, and `annorex rex agents`.
--- When the focused pane runs no agent, it asks in the command palette which agent pane to open.
+-- When the focused pane runs no supported agent, it asks in the command palette which agent pane to open.
 -- The binary does all other work.
 
 local M = {}
@@ -49,7 +49,7 @@ local function fail(message)
   error("Annorex: " .. tostring(message), 0)
 end
 
--- The exit code of `annorex rex open` when the target pane runs no agent.
+-- The exit code of `annorex rex open` when the target pane runs no supported agent.
 local NOT_AGENT_CODE = 5
 
 -- True when path is a file. io.open also opens a directory, so "path/." is tried too: it opens
@@ -137,10 +137,11 @@ local function agent_panes(ctx)
   return list.agents
 end
 
--- Ask in the command palette which agent pane to open. Returns its block id, or nil and the reason.
+-- Ask in the command palette which agent pane to open. The title gives the reason for the question.
+-- Returns its block id, or nil and the reason.
 -- rex.ui.pick works only in the run of an action and in the functions that it calls directly, not in
 -- pcall.
-local function pick_agent(agents)
+local function pick_agent(agents, title)
   local items = {}
   for index, agent in ipairs(agents) do
     items[index] = {
@@ -152,7 +153,7 @@ local function pick_agent(agents)
     }
   end
   return rex.ui.pick{
-    title = "Annorex: pick the agent",
+    title = title,
     placeholder = "Filter agents",
     confirm = "Open",
     items = items,
@@ -163,21 +164,17 @@ local function open_view(ctx, view)
   if ctx.block_id == nil or ctx.session_id == nil then fail("no focused pane") end
   local result = run_open(ctx, view, ctx.block_id)
   if result.code ~= NOT_AGENT_CODE then return check_open(result) end
-  -- The focused pane runs no agent: open an agent pane of the session.
-  local not_agent = error_line(result, "the focused pane runs no agent")
+  -- The focused pane runs no supported agent. Say so and ask which agent pane of the session to open,
+  -- also when there is only one. Never go to another pane without an answer.
+  local not_agent = error_line(result, "this pane runs no supported agent")
   local agents = agent_panes(ctx)
-  local id
   if #agents == 0 then
-    fail(not_agent)
-  elseif #agents == 1 then
-    id = agents[1].block_id
-  else
-    local why
-    id, why = pick_agent(agents)
-    if id == nil then
-      if why == "cancelled" then return nil end
-      fail(not_agent .. " (no answer from the command palette: " .. tostring(why) .. ")")
-    end
+    fail(not_agent .. ". No pane of this session runs Claude Code, Pi, OpenCode, or Codex.")
+  end
+  local id, why = pick_agent(agents, "Annorex: " .. not_agent .. ". Pick an agent")
+  if id == nil then
+    if why == "cancelled" then return nil end
+    fail(not_agent .. " (no answer from the command palette: " .. tostring(why) .. ")")
   end
   -- The viewer opens in the window of the agent pane. A failed focus does not stop the open.
   rex.session.focus_block{ block_id = id }

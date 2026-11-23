@@ -717,7 +717,7 @@ fn rex_open(
         .is_some();
     let opened = opened.map_err(|error| match error {
         OpenError::Rex(rex) => Failure::from(rex),
-        OpenError::NotAgent => Failure { code: EXIT_NOT_AGENT, message: error.to_string() },
+        OpenError::NotAgent { .. } => Failure { code: EXIT_NOT_AGENT, message: error.to_string() },
         OpenError::NoNewBlock => Failure { code: EXIT_REX, message: error.to_string() },
     })?;
     let json = serde_json::to_string(&opened)
@@ -757,7 +757,7 @@ fn rex_agents(
 /// while the action runs, so the open of the chosen pane refreshes the module. Every other result
 /// ends the action at once.
 fn refreshes_module(opened: &Result<Opened, OpenError>) -> bool {
-    !matches!(opened, Err(OpenError::NotAgent))
+    !matches!(opened, Err(OpenError::NotAgent { .. }))
 }
 
 /// The file in the state folder that a failed module reload creates.
@@ -953,7 +953,10 @@ mod tests {
 
     #[test]
     fn the_module_is_not_refreshed_before_the_agent_picker() {
-        assert!(!refreshes_module(&Err(OpenError::NotAgent)), "the action goes on to the picker");
+        assert!(
+            !refreshes_module(&Err(OpenError::NotAgent { program: None })),
+            "the action goes on to the picker"
+        );
         let opened = Opened { block_id: "block:v".into(), focused_existing: false, existing: None };
         assert!(refreshes_module(&Ok(opened)), "a successful open refreshes as before");
         assert!(refreshes_module(&Err(OpenError::NoNewBlock)), "a failed open ends the action");
