@@ -55,7 +55,10 @@ pub enum SetupError {
 pub fn inspect(text: &str) -> InitState {
     let mut rest = text;
     while let Some((_, after)) = rest.split_once("require") {
-        if leading_string(after) == Some("annorex") {
+        // `pcall(require, "annorex")` gives the name after a comma.
+        let argument = after.trim_start();
+        let argument = argument.strip_prefix(',').unwrap_or(argument);
+        if leading_string(argument) == Some("annorex") {
             return InitState::Loaded;
         }
         rest = after;
@@ -75,10 +78,13 @@ pub fn inspect(text: &str) -> InitState {
 }
 
 /// The Lua string at the start of `text`, after an optional `(`: the argument of a call such as
-/// `require("x")`, `require 'x'`, or `rex.bind("x", ...)`.
+/// `require("x")`, `require 'x'`, `require[[x]]`, or `rex.bind("x", ...)`.
 fn leading_string(text: &str) -> Option<&str> {
     let text = text.trim_start();
     let text = text.strip_prefix('(').unwrap_or(text).trim_start();
+    if let Some(long) = text.strip_prefix("[[") {
+        return long.split_once("]]").map(|(body, _)| body);
+    }
     let quote = text.chars().next().filter(|ch| matches!(ch, '"' | '\''))?;
     text.strip_prefix(quote)?.split_once(quote).map(|(body, _)| body)
 }
@@ -212,7 +218,11 @@ mod tests {
             ("require \"annorex\"\n", LOADED),
             ("local a = require( \"annorex\" )\na.setup{}\n", LOADED),
             ("-- require(\"annorex\").setup{}\n", LOADED),
+            ("local ok, m = pcall(require, \"annorex\")\n", LOADED),
+            ("pcall(require,'annorex')\n", LOADED),
+            ("require[[annorex]].setup{}\n", LOADED),
             ("require(\"annorex_extra\")\n", NONE),
+            ("print(\"require annorex\")\n", NONE),
             ("require(\"keys\")\n", NONE),
             ("rex.bind(\"shift+cmd+a\", \"x\")\n", InitState::NotLoaded { binds_a: true, binds_f: false }),
             ("rex.bind('Command+Shift+F', \"x\")\n", InitState::NotLoaded { binds_a: false, binds_f: true }),
