@@ -463,16 +463,14 @@ fn an_empty_document_shows_block_0_of_0() {
 }
 
 #[test]
-fn a_new_text_closes_the_numbered_pick() {
+fn a_new_text_clears_the_hint_of_the_rail_flow() {
     let mut app = both();
     press(&mut app, "cone\n");
     press(&mut app, "ctwo\n");
     press(&mut app, "e");
-    assert!(render(&mut app, 80, 24).contains(" pick "), "two notes on the block open the pick");
+    assert!(render(&mut app, 80, 24).contains("2 notes here"), "two notes on the block open the rail flow");
     app.set_replies(vec![reply("r1", "new start\n\nalpha beta gamma\n"), reply("r2", "older reply text\n")]);
-    assert!(!render(&mut app, 80, 24).contains(" pick "), "the ids of the pick can be stale");
-    press(&mut app, "1");
-    assert!(app.editor().is_none(), "1 does not edit a stale note");
+    assert!(!render(&mut app, 80, 24).contains("notes here"), "the place of the hint can be stale");
 }
 
 #[test]

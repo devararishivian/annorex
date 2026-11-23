@@ -366,7 +366,7 @@ fn annotation_list_goes_edits_and_deletes() {
     assert_eq!(app.review().expect("review").in_order()[0].note, "first!");
     press(&mut app, "ajx");
     let screen = render(&mut app, 120, 24);
-    assert!(screen.contains("Delete annotation 2? y/n"), "{screen}");
+    assert!(screen.contains("Remove this comment? \"second\""), "{screen}");
     press(&mut app, "n");
     assert_eq!(app.review().expect("review").annotations.len(), 2);
     press(&mut app, "x");
@@ -1443,67 +1443,12 @@ fn x_asks_then_removes_it() {
     let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
     press(&mut app, "jcfirst\n");
     press(&mut app, "x");
-    assert!(render(&mut app, 80, 24).contains("Delete annotation 1? y/n"));
+    assert!(render(&mut app, 80, 24).contains("Remove this comment? \"first\" · y remove · n keep"));
     press(&mut app, "n");
     assert_eq!(app.review().expect("review").annotations.len(), 1, "n keeps it");
+    assert_eq!(app.status(), Some("kept"));
     press(&mut app, "xy");
     assert!(app.review().expect("review").is_empty(), "y removes it");
-}
-
-#[test]
-fn several_notes_show_a_numbered_pick() {
-    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
-    press(&mut app, "jcone\n");
-    press(&mut app, "ctwo\n");
-    press(&mut app, "e");
-    assert!(app.editor().is_none(), "two notes: no editor yet");
-    let screen = render(&mut app, 80, 24);
-    let first = row_of(&screen, "1 💬 one");
-    assert_eq!(row_of(&screen, "2 💬 two"), first + 1, "{screen}");
-    assert!(!screen.contains("c comment"), "no action bar under the pick:\n{screen}");
-    press(&mut app, "2");
-    assert_eq!(app.editor().expect("editor").text, "two");
-    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-
-    press(&mut app, "e");
-    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-    assert!(app.editor().is_none(), "esc closes the pick");
-    assert!(!render(&mut app, 80, 24).contains("1 💬 one"));
-
-    press(&mut app, "x9");
-    assert!(app.editor().is_none() && !render(&mut app, 80, 24).contains("y/n"), "9 is not in the list");
-    press(&mut app, "1");
-    assert!(render(&mut app, 80, 24).contains("Delete annotation 1? y/n"));
-    press(&mut app, "y");
-    let review = app.review().expect("review");
-    assert_eq!((review.annotations.len(), review.annotations[0].note.as_str()), (1, "two"));
-}
-
-#[test]
-fn ctrl_esc_in_note_pick_does_nothing() {
-    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
-    press(&mut app, "jcone\n");
-    press(&mut app, "ctwo\n");
-    press(&mut app, "e");
-    press_key(&mut app, KeyCode::Esc, KeyModifiers::CONTROL);
-    assert!(render(&mut app, 80, 24).contains("2 \u{1f4ac} two"), "ctrl+esc keeps the pick open");
-    press_key(&mut app, KeyCode::Esc, KeyModifiers::NONE);
-    assert!(!render(&mut app, 80, 24).contains("2 \u{1f4ac} two"), "esc closes the pick");
-}
-
-#[test]
-fn another_key_closes_the_pick_and_then_acts() {
-    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
-    press(&mut app, "jcone\n");
-    press(&mut app, "ctwo\n");
-    press(&mut app, "e");
-    assert!(render(&mut app, 80, 24).contains("2 \u{1f4ac} two"), "the pick is open");
-    let before = app.focused_block();
-    press(&mut app, "j");
-    let screen = render(&mut app, 80, 24);
-    assert!(!screen.contains("2 \u{1f4ac} two") && app.editor().is_none(), "the pick is closed:\n{screen}");
-    assert_ne!(app.focused_block(), before, "j moved the focus after it closed the pick");
-    assert_eq!(app.focused_block(), before.map(|block| block + 1));
 }
 
 #[test]
@@ -1521,7 +1466,7 @@ fn ctrl_y_keeps_the_note_at_the_delete_question() {
     let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
     press(&mut app, "jcfirst\n");
     press(&mut app, "x");
-    assert!(render(&mut app, 80, 24).contains("Delete annotation 1? y/n"));
+    assert!(render(&mut app, 80, 24).contains("Remove this comment?"));
     press_key(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL);
     assert_eq!(app.review().expect("review").annotations.len(), 1, "ctrl+y keeps the note");
     press(&mut app, "xy");
@@ -1536,19 +1481,6 @@ fn ctrl_y_does_not_answer_the_paste_question() {
     assert_eq!(press_key(&mut app, KeyCode::Char('y'), KeyModifiers::CONTROL), Effect::None);
     press(&mut app, "P");
     assert!(matches!(press_key(&mut app, KeyCode::Char('y'), KeyModifiers::NONE), Effect::Send(_)));
-}
-
-#[test]
-fn ctrl_1_does_not_choose_a_note() {
-    let mut app = app("# Plan\n\nWe change the login page.\n\nThe end.\n");
-    press(&mut app, "jcone\n");
-    press(&mut app, "ctwo\n");
-    press(&mut app, "e");
-    assert!(render(&mut app, 80, 24).contains("2 \u{1f4ac} two"), "the pick is open");
-    press_key(&mut app, KeyCode::Char('1'), KeyModifiers::CONTROL);
-    assert!(app.editor().is_none(), "ctrl+1 opens no note");
-    assert!(!render(&mut app, 80, 24).contains("y/n"), "ctrl+1 asks no question");
-    assert_eq!(app.review().expect("review").annotations.len(), 2);
 }
 
 #[test]
@@ -2039,4 +1971,173 @@ fn the_marker_margin_shows_a_diamond_for_the_active_note_and_a_dot_for_the_other
     press(&mut app, "kk");
     assert_eq!(cell_rows(&mut app, 80, 30, "◆").len(), 1);
     assert_eq!(cell_rows(&mut app, 80, 30, "●").len(), 1);
+}
+
+/// The note text on the row below the title of the active card.
+fn active_card_text(app: &mut App) -> String {
+    let screen = render(app, 120, 40);
+    let rows: Vec<&str> = screen.lines().collect();
+    let title = rows.iter().position(|line| line.contains("┏▸")).expect("active title");
+    rows[title + 1].to_owned()
+}
+
+fn last_row(app: &mut App, width: u16, height: u16) -> String {
+    render(app, width, height).lines().last().unwrap_or_default().to_owned()
+}
+
+#[test]
+fn the_remove_key_with_one_note_asks_at_once() {
+    let mut app = app(bar_text());
+    press(&mut app, "jcfirst\n");
+    render(&mut app, 120, 40);
+    press(&mut app, "x");
+    let footer = last_row(&mut app, 120, 40);
+    assert!(footer.contains("Remove this comment? \"first\" · y remove · n keep"), "{footer}");
+}
+
+#[test]
+fn the_remove_key_with_three_notes_moves_the_focus_to_the_rail() {
+    let mut app = three_notes_on_one_block();
+    render(&mut app, 120, 40);
+    press(&mut app, "x");
+    let footer = last_row(&mut app, 120, 40);
+    assert!(footer.contains("3 notes here · ↑↓ choose · x remove · esc back"), "{footer}");
+    assert!(!footer.contains("Remove this"), "no question yet: {footer}");
+    assert!(active_card_text(&mut app).contains("first"), "the rail cursor is on the first note");
+    // `↓` keeps the hint. Another key clears it and acts as usual.
+    press(&mut app, "j");
+    assert!(last_row(&mut app, 120, 40).contains("3 notes here"));
+    press(&mut app, "l");
+    let footer = last_row(&mut app, 120, 40);
+    assert!(!footer.contains("notes here") && footer.contains("esc back"), "{footer}");
+}
+
+#[test]
+fn the_hint_follows_a_rebound_remove_key() {
+    let dir = tempfile::tempdir().expect("dir");
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[keys]\nremove = \"D\"\n").expect("config");
+    let config = Config::load(&file).expect("config");
+    let mut app = app_with(bar_text(), &config);
+    press(&mut app, "jcone\n");
+    press(&mut app, "ctwo\n");
+    render(&mut app, 120, 40);
+    press(&mut app, "D");
+    let footer = last_row(&mut app, 120, 40);
+    assert!(footer.contains("2 notes here · ↑↓ choose · D remove · esc back"), "{footer}");
+}
+
+#[test]
+fn a_removal_in_the_rail_keeps_the_rail_on_the_next_note_at_that_place() {
+    let mut app = three_notes_on_one_block();
+    render(&mut app, 120, 40);
+    press(&mut app, "xj");
+    assert!(active_card_text(&mut app).contains("middle"));
+    press(&mut app, "x");
+    let footer = last_row(&mut app, 120, 40);
+    assert!(footer.contains("Remove this comment? \"middle\" · y remove · n keep"), "{footer}");
+    press(&mut app, "y");
+    let notes: Vec<String> =
+        app.review().expect("review").in_order().iter().map(|a| a.note.clone()).collect();
+    assert_eq!(notes, ["first", "third"]);
+    assert!(active_card_text(&mut app).contains("third"), "the rail cursor is on the next note");
+    assert!(last_row(&mut app, 120, 40).contains("enter go"), "the rail keeps the focus");
+}
+
+#[test]
+fn the_last_removal_at_the_place_gives_the_focus_back_to_the_document() {
+    let mut app = three_notes_on_one_block();
+    press(&mut app, "jjcelsewhere\n");
+    press(&mut app, "kk");
+    render(&mut app, 120, 40);
+    press(&mut app, "x");
+    for left in [2, 1] {
+        press(&mut app, "xy");
+        assert_eq!(app.annotation_count(), left + 1);
+        assert!(last_row(&mut app, 120, 40).contains("enter go"), "the rail keeps the focus");
+    }
+    press(&mut app, "xy");
+    let notes: Vec<String> =
+        app.review().expect("review").in_order().iter().map(|a| a.note.clone()).collect();
+    assert_eq!(notes, ["elsewhere"]);
+    let footer = last_row(&mut app, 120, 40);
+    assert!(footer.contains("block 2/"), "the document has the focus: {footer}");
+}
+
+#[test]
+fn n_esc_and_another_key_keep_the_note_and_say_kept() {
+    let mut app = app(bar_text());
+    press(&mut app, "jcfirst\n");
+    for key in [KeyCode::Char('n'), KeyCode::Esc, KeyCode::Char('l')] {
+        press(&mut app, "x");
+        press_key(&mut app, key, KeyModifiers::NONE);
+        assert_eq!(app.annotation_count(), 1, "{key:?} keeps the note");
+        assert_eq!(app.status(), Some("kept"), "{key:?}");
+        assert!(last_row(&mut app, 80, 24).contains("kept"));
+    }
+}
+
+#[test]
+fn the_question_cuts_a_long_note_to_fit_the_footer() {
+    let mut app = app(bar_text());
+    let long = "word ".repeat(40);
+    press(&mut app, &format!("jc{long}"));
+    press_key(&mut app, KeyCode::Char('j'), KeyModifiers::CONTROL);
+    press(&mut app, "second line\n");
+    press(&mut app, "x");
+    let footer = last_row(&mut app, 80, 24);
+    assert!(footer.contains("…\" · y remove · n keep"), "{footer}");
+    assert!(!footer.contains("second line"));
+}
+
+#[test]
+fn the_question_shows_the_quote_of_a_note_without_text() {
+    let mut app = app(bar_text());
+    press(&mut app, "jo");
+    press(&mut app, "x");
+    let footer = last_row(&mut app, 80, 24);
+    assert!(footer.contains("Remove this looks good? \"We change the login page.\""), "{footer}");
+}
+
+#[test]
+fn the_edit_key_with_two_notes_that_take_text_moves_the_focus_to_the_rail() {
+    let mut app = app(bar_text());
+    // The looks good note comes first and takes no text, so the flow starts at `one`.
+    press(&mut app, "jo");
+    press(&mut app, "cone\n");
+    press(&mut app, "ctwo\n");
+    render(&mut app, 120, 40);
+    press(&mut app, "e");
+    assert!(app.editor().is_none(), "two notes: no editor yet");
+    let footer = last_row(&mut app, 120, 40);
+    assert!(footer.contains("2 notes here · ↑↓ choose · e edit · esc back"), "{footer}");
+    assert!(active_card_text(&mut app).contains("one"));
+    press(&mut app, "je");
+    assert_eq!(app.editor().expect("editor").text, "two");
+}
+
+#[test]
+fn without_a_card_rail_the_flow_opens_the_annotation_list_beside_the_document() {
+    let mut app = three_notes_on_one_block();
+    render(&mut app, 110, 30);
+    press(&mut app, "x");
+    let screen = render(&mut app, 110, 30);
+    assert!(screen.contains("Annotations"), "the list is open: {screen}");
+    assert!(screen.lines().last().unwrap_or_default().contains("3 notes here"), "{screen}");
+    press(&mut app, "jxy");
+    let notes: Vec<String> =
+        app.review().expect("review").in_order().iter().map(|a| a.note.clone()).collect();
+    assert_eq!(notes, ["first", "third"]);
+}
+
+#[test]
+fn another_key_in_the_rail_flow_clears_the_hint_and_then_acts() {
+    let mut app = three_notes_on_one_block();
+    render(&mut app, 80, 24);
+    press(&mut app, "e");
+    assert!(last_row(&mut app, 80, 24).contains("3 notes here"));
+    // The annotation key gives the focus back to the document.
+    press(&mut app, "a");
+    let footer = last_row(&mut app, 80, 24);
+    assert!(!footer.contains("notes here") && footer.contains("block 2/"), "{footer}");
 }

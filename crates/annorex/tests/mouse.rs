@@ -415,7 +415,7 @@ fn click_on_card_edit_and_remove() {
     let screen = frame(&mut app, WIDE);
     click(&mut app, find(&screen, "x remove"));
     let screen = frame(&mut app, WIDE);
-    assert!(footer(&screen).contains("Delete annotation 2? y/n"), "{}", footer(&screen));
+    assert!(footer(&screen).contains("Remove this comment? \"third\""), "{}", footer(&screen));
     press(&mut app, "y");
     assert_eq!(app.review().expect("review").annotations.len(), 1);
 }
@@ -433,7 +433,7 @@ fn click_on_a_stale_card_does_nothing() {
     click(&mut app, edit);
     assert!(app.editor().is_none());
     let screen = frame(&mut app, WIDE);
-    assert!(!footer(&screen).contains("y/n"), "no question for a removed note: {}", footer(&screen));
+    assert!(!footer(&screen).contains("y remove"), "no question for a removed note: {}", footer(&screen));
 }
 
 #[test]
@@ -589,12 +589,12 @@ fn confirm_question_ignores_clicks() {
     let mut app = two_notes();
     press(&mut app, "x");
     let screen = frame(&mut app, WIDE);
-    assert!(footer(&screen).contains("y/n"));
+    assert!(footer(&screen).contains("y remove"));
     click(&mut app, find(&screen, "para one"));
     click(&mut app, find(&screen, "[ Send"));
     assert_eq!(app.mode(), Mode::Block(2));
     let screen = frame(&mut app, WIDE);
-    assert!(footer(&screen).contains("y/n"), "the question stays: {}", footer(&screen));
+    assert!(footer(&screen).contains("y remove"), "the question stays: {}", footer(&screen));
 }
 
 #[test]
@@ -617,15 +617,18 @@ fn click_outside_a_box_closes_it() {
 }
 
 #[test]
-fn click_on_a_row_of_the_numbered_pick_chooses_the_note() {
+fn click_on_the_edit_button_in_the_rail_flow_edits_the_chosen_note() {
     let mut app = viewer(THREE);
-    press(&mut app, "cfirst\ncsecond\ne");
-    let screen = frame(&mut app, NARROW);
-    assert!(rows(&screen).iter().any(|row| row.contains("pick")), "the pick is open");
-    click(&mut app, find(&screen, "second"));
+    press(&mut app, "cfirst\ncsecond\n");
+    frame(&mut app, WIDE);
+    press(&mut app, "e");
+    let screen = frame(&mut app, WIDE);
+    assert!(footer(&screen).contains("2 notes here"), "{}", footer(&screen));
+    press(&mut app, "j");
+    let screen = frame(&mut app, WIDE);
+    click(&mut app, find(&screen, "e edit"));
     assert_eq!(app.editor().expect("editor").text, "second");
 }
-
 #[test]
 fn wheel_steps_in_one_batch_add_up_in_lists() {
     // run_loop handles all queued events before it draws, so two steps come without a frame between them.

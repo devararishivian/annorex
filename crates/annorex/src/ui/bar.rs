@@ -91,13 +91,12 @@ pub(super) fn strip_rect(area: Rect, width: u16, first: usize, last: usize, col:
     Some(Rect::new(x, area.y + row, width, 1))
 }
 
-/// True when the strip does not show: no finished selection, an editor, the numbered pick, the
+/// True when the strip does not show: no finished selection, an editor, the
 /// help screen, a question, or the find input is open, another part has the focus (the tree, the
 /// rail, a list, or a box), or the document is empty.
 fn hidden(app: &App) -> bool {
     !app.bar_open
         || app.editor.is_some()
-        || app.pick.is_some()
         || app.help_open
         || app.confirm.is_some()
         || app.find_input.is_some()

@@ -8,7 +8,6 @@ use std::time::Instant;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
 
-use super::cards::MAX_PICK;
 use super::editor::{Editor, EditorResult};
 use super::focus::Mode;
 use super::hits::HitMap;
@@ -275,11 +274,9 @@ pub struct App {
     pub(crate) annotation_index: usize,
     /// The annotation that waits for `y` or `n`.
     pub(crate) confirm: Option<Confirm>,
-    /// The numbered pick: the ids of the notes at the focus, when the edit or remove key found more
-    /// than one. The keys `1` to `9` choose one, `esc` closes it.
-    pub(crate) pick: Option<Vec<u64>>,
-    /// True when the pick removes the chosen note, false when it edits it.
-    pub(crate) pick_removes: bool,
+    /// The footer hint of the rail after the edit or the remove key found several notes at the focus:
+    /// the number of notes and true for the remove key. The next key other than up and down clears it.
+    pub(crate) rail_hint: Option<(usize, bool)>,
     /// A send or a discard from the quit question. The viewer ends when it works.
     quit_after: bool,
     exit: bool,
@@ -370,8 +367,7 @@ impl App {
             parked: HashMap::new(),
             annotation_index: 0,
             confirm: None,
-            pick: None,
-            pick_removes: false,
+            rail_hint: None,
             quit_after: false,
             exit: false,
             shown_id: None,
@@ -973,7 +969,7 @@ impl App {
     /// quoted text again. An editor whose text is gone closes, and the footer says so.
     fn place_again(&mut self, changed: &[(String, String, String)]) {
         if !changed.is_empty() {
-            self.pick = None;
+            self.rail_hint = None;
         }
         for (id, old, new) in changed {
             if let Some(review) = self.reviews.get_mut(id) {
@@ -1079,8 +1075,8 @@ impl App {
         self.selected = index;
         self.panel_index = index;
         let outgoing = self.editor.as_ref().map(|editor| self.editing_of(editor));
-        // The text can be new, so the ids of the numbered pick can be stale.
-        self.pick = None;
+        // The text can be new, so the place of the rail hint can be stale.
+        self.rail_hint = None;
         self.doc = match self.files.get(&id) {
             Some(file) => Doc::for_kind(file.kind, &reply.text),
             None => Doc::parse(&reply.text),
@@ -1286,14 +1282,14 @@ impl App {
             return self.request_quit();
         }
         self.status = None;
+        if !matches!(self.action_of(key), Some(Action::Up | Action::Down)) {
+            self.rail_hint = None;
+        }
         if self.editor.is_some() {
             return self.editor_key(key);
         }
         if let Some(what) = self.confirm {
             return self.confirm_key(key, what);
-        }
-        if let Some(effect) = self.pick_key(key) {
-            return effect;
         }
         if self.find_input.is_some() {
             self.find_key(key);
@@ -1488,14 +1484,24 @@ impl App {
             }
             return;
         }
+        // Start at the first note at the focus of the document, else keep the place.
+        self.open_rail(self.notes_here().first().copied());
+    }
+
+    /// Give the focus to the card rail or to the annotation list, with the cursor on the note `at`.
+    /// Without that note, the cursor keeps its place.
+    fn open_rail(&mut self, at: Option<u64>) {
         self.list_open = true;
         self.close_box_only();
         self.focus = Focus::Rail;
-        // Start at the first note at the focus of the document, else keep the place.
-        let here = self.notes_here().first().copied();
+        self.list_at(at);
+    }
+
+    /// Put the cursor of the annotation list on the note `at`. Without that note, the cursor keeps its place.
+    fn list_at(&mut self, at: Option<u64>) {
         let order: Vec<u64> =
             self.review().map(|r| r.in_order().iter().map(|a| a.id).collect()).unwrap_or_default();
-        match here.and_then(|id| order.iter().position(|&other| other == id)) {
+        match at.and_then(|id| order.iter().position(|&other| other == id)) {
             Some(index) => self.annotation_index = index,
             None => self.annotation_index = self.annotation_index.min(order.len().saturating_sub(1)),
         }
@@ -1640,13 +1646,7 @@ impl App {
     fn rail_key(&mut self, key: KeyEvent) -> Effect {
         match key.code {
             KeyCode::Enter => self.rail_enter(),
-            KeyCode::Esc => {
-                // The list stays open only where it stands beside the document.
-                if !self.docked.rail || self.docked.cards {
-                    self.list_open = false;
-                }
-                self.focus = Focus::Doc;
-            }
+            KeyCode::Esc => self.leave_rail(),
             KeyCode::Tab => self.cycle_focus(),
             _ => {
                 let action = self.action_of(key);
@@ -1668,10 +1668,23 @@ impl App {
         Effect::None
     }
 
+    /// Give the focus back to the document. The list stays open only where it stands beside the document.
+    fn leave_rail(&mut self) {
+        if !self.docked.rail || self.docked.cards {
+            self.list_open = false;
+        }
+        self.focus = Focus::Doc;
+    }
+
     /// Move in the annotation list. On the card rail, the document shows the note of the focused card.
     fn rail_move(&mut self, delta: isize) {
         let last = self.review().map_or(0, |review| review.annotations.len()).saturating_sub(1);
         self.annotation_index = self.annotation_index.saturating_add_signed(delta).min(last);
+        self.show_listed();
+    }
+
+    /// On the card rail, the document shows the note under the cursor of the annotation list.
+    fn show_listed(&mut self) {
         if self.docked.cards
             && let Some(start) = self.listed_place()
         {
@@ -1791,15 +1804,28 @@ impl App {
             Confirm::Annotation(id) => {
                 self.confirm = None;
                 if code != KeyCode::Char('y') {
+                    self.status = Some("kept".to_owned());
                     return Effect::None;
                 }
                 let Some(reply) = self.shown_id.clone() else { return Effect::None };
+                let here = if self.focus == Focus::Rail { self.notes_here() } else { Vec::new() };
                 if let Some(review) = self.reviews.get_mut(&reply) {
                     review.remove(id);
                 }
                 self.sent.remove(&reply);
                 let count = self.review().map_or(0, |review| review.annotations.len());
                 self.annotation_index = self.annotation_index.min(count.saturating_sub(1));
+                // A removal from the rail at the focus of the document: the rail goes to the next note at
+                // that place, else the focus goes back to the document.
+                if let Some(at) = here.iter().position(|&other| other == id) {
+                    match here.get(at + 1).or_else(|| at.checked_sub(1).and_then(|before| here.get(before))) {
+                        Some(&next) => {
+                            self.list_at(Some(next));
+                            self.show_listed();
+                        }
+                        None => self.leave_rail(),
+                    }
+                }
                 Effect::SaveDraft
             }
             Confirm::Discard => {
@@ -2236,7 +2262,7 @@ impl App {
     }
 
     /// The edit or the remove key in the document: act on the note at the focus. With several
-    /// notes, open the numbered pick.
+    /// notes, the focus goes to the rail on the first of them, and the footer says how to choose.
     fn note_here(&mut self, remove: bool) -> Effect {
         if self.needs_a_block() {
             return Effect::None;
@@ -2253,10 +2279,9 @@ impl App {
         match ids.as_slice() {
             [] => self.status = Some("no note here".to_owned()),
             [id] => return self.act_on_note(*id, remove),
-            _ => {
-                ids.truncate(MAX_PICK);
-                self.pick = Some(ids);
-                self.pick_removes = remove;
+            [first, ..] => {
+                self.open_rail(Some(*first));
+                self.rail_hint = Some((ids.len(), remove));
             }
         }
         Effect::None
@@ -2269,30 +2294,6 @@ impl App {
             Effect::None
         } else {
             self.begin_edit(id)
-        }
-    }
-
-    /// A key while the numbered pick is open. `1` to `9` choose a note, `esc` closes the pick, a
-    /// number that is not in the list does nothing. Another key closes the pick and then acts as
-    /// usual: the result is `None` then.
-    fn pick_key(&mut self, key: KeyEvent) -> Option<Effect> {
-        let ids = self.pick.take()?;
-        match plain(key) {
-            KeyCode::Esc => Some(Effect::None),
-            // A key with ctrl or alt, such as `ctrl+esc`, does nothing: the pick stays open.
-            KeyCode::Null => {
-                self.pick = Some(ids);
-                Some(Effect::None)
-            }
-            KeyCode::Char(c @ '1'..='9') => {
-                let chosen = c.to_digit(10).and_then(|n| ids.get(usize::try_from(n).ok()? - 1)).copied();
-                if let Some(id) = chosen {
-                    return Some(self.act_on_note(id, self.pick_removes));
-                }
-                self.pick = Some(ids);
-                Some(Effect::None)
-            }
-            _ => None,
         }
     }
 

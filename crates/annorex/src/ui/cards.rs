@@ -1,5 +1,5 @@
 //! The notes beside the document: margin cards in a rail on the right at wide widths, a colored
-//! marker at narrower widths, and the numbered pick when several notes share one place.
+//! marker at narrower widths.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -10,7 +10,6 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::app::{App, Focus};
 use super::bar::shown_rows;
-use super::draw::editor_top;
 use super::hits::Hit;
 use crate::keys::Action;
 use crate::review::{Annotation, Kind};
@@ -22,8 +21,6 @@ const MARKER_WIDTH: u16 = 2;
 const MARKERS_FROM_WIDTH: u16 = 21;
 /// The most rows of note text on one card.
 const MAX_BODY_ROWS: usize = 6;
-/// The most notes in the numbered pick: the keys `1` to `9`.
-pub(super) const MAX_PICK: usize = 9;
 
 /// What shows at the right of the document text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +85,8 @@ pub(super) fn icon(kind: Kind) -> &'static str {
     }
 }
 
-fn word(kind: Kind) -> &'static str {
+/// The word of a note type on its card.
+pub(super) fn word(kind: Kind) -> &'static str {
     match kind {
         Kind::LooksGood => "looks good",
         Kind::Comment => "comment",
@@ -321,40 +319,6 @@ fn draw_card_buttons(frame: &mut Frame, app: &mut App, rect: Rect, id: u64, keys
         app.hits.push(Rect::new(edit_x, y, edit_width, 1), Hit::CardEdit(id));
     }
     app.hits.push(Rect::new(remove_x, y, remove_width, 1), Hit::CardRemove(id));
-}
-
-/// The numbered pick: a small box at the place of the note with one row for each note, `1` to `9`.
-/// `area` is the text area of the document.
-pub(super) fn draw_pick(frame: &mut Frame, app: &mut App, area: Rect) {
-    let Some(ids) = app.pick.clone() else { return };
-    let Some(review) = app.review() else { return };
-    let rows: Vec<(u64, String)> = ids
-        .iter()
-        .enumerate()
-        .filter_map(|(index, id)| {
-            let annotation = review.annotations.iter().find(|a| a.id == *id)?;
-            let text = body_of(annotation).lines().next().unwrap_or_default();
-            let text = if text.trim().is_empty() { word(annotation.kind) } else { text };
-            Some((*id, format!("{} {} {text}", index + 1, icon(annotation.kind))))
-        })
-        .collect();
-    let Ok(height) = u16::try_from(rows.len() + 2) else { return };
-    if rows.is_empty() || area.width < 8 || area.height < height {
-        return;
-    }
-    let longest = rows.iter().map(|(_, text)| text.width()).max().unwrap_or(0);
-    let width = u16::try_from(longest + 2).unwrap_or(u16::MAX).clamp(14, area.width);
-    let anchor = app.action_range().and_then(|range| shown_rows(app, &range));
-    let rect = Rect::new(area.x, editor_top(area, height, anchor), width, height);
-    let lines: Vec<Line<'static>> =
-        rows.iter().map(|(_, text)| Line::raw(fit(text, width.saturating_sub(2)))).collect();
-    let block = Block::new().borders(Borders::ALL).title(" pick ").title_bottom(" esc ");
-    frame.render_widget(Clear, rect);
-    frame.render_widget(Paragraph::new(lines).block(block), rect);
-    for (offset, (id, _)) in rows.iter().enumerate() {
-        let y = rect.y + 1 + u16::try_from(offset).unwrap_or(0);
-        app.hits.push(Rect::new(rect.x + 1, y, width.saturating_sub(2), 1), Hit::Pick(*id));
-    }
 }
 
 #[cfg(test)]

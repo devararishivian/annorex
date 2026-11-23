@@ -142,14 +142,6 @@ impl App {
             }
             Screen::Viewer => {}
         }
-        // A click on a row of the numbered pick chooses that note. Another click closes the pick and
-        // then acts as usual, as another key does.
-        if let Some(ids) = self.pick.take()
-            && let Some(Hit::Pick(id)) = hit
-            && ids.contains(&id)
-        {
-            return self.act_on_note(id, self.pick_removes);
-        }
         if let Some(view) = self.boxed {
             // The box takes the click. A click outside the box closes it, also on a footer hint or on
             // the send button.
@@ -202,7 +194,7 @@ impl App {
                     self.focus_note(id);
                 }
             }
-            // The empty part of the action bar or of a side part, the cover of an overlay, a stale pick, or a stale editor button.
+            // The empty part of the action bar or of a side part, the cover of an overlay, or a stale editor button.
             _ => {}
         }
         Effect::None
@@ -420,7 +412,6 @@ impl App {
                 | Hit::RailPane
                 | Hit::CardEdit(_)
                 | Hit::CardRemove(_)
-                | Hit::Pick(_)
                 | Hit::EditorSave
                 | Hit::EditorCancel,
             ) => Part::Doc,

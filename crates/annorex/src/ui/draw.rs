@@ -13,7 +13,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::app::{App, BoxView, Confirm, Docked, Focus, ReplySource, Screen, StartView, match_ranges};
 use super::bar::{draw_action_bar, shown_rows};
-use super::cards::{Side, draw_pick, draw_side, kind_color, range_style, rank, split_markers};
+use super::cards::{Side, draw_side, kind_color, range_style, rank, split_markers, word};
 use super::editor::MAX_ROWS;
 use super::focus::{Mode, View};
 use super::hits::Hit;
@@ -85,9 +85,6 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
         let newline = if app.shift_enter { "shift+enter new line" } else { "ctrl+j new line" };
         return vec![plain("enter save"), plain(newline), plain("esc cancel")];
     }
-    if app.pick.is_some() {
-        return vec![plain("1-9 choose"), plain("esc close")];
-    }
     // The keys of the document on the screen: a file has the file keys, a reply has the reply keys.
     // With no document on the screen, the view that the viewer started as decides.
     let file_keys = app.has_root()
@@ -144,6 +141,15 @@ pub(super) fn footer_hints(app: &App) -> Vec<Hint> {
             out.extend(send_keys());
             out.push(hint(Action::Tree, format!("{} hide", k(Action::Tree))));
             out
+        }
+        Focus::Rail if let Some((count, remove)) = app.rail_hint => {
+            let (action, verb) = if remove { (Action::Remove, "remove") } else { (Action::Edit, "edit") };
+            return vec![
+                plain(&format!("{count} notes here")),
+                hint(Action::Down, "↑↓ choose".to_owned()),
+                hint(action, format!("{} {verb}", k(action))),
+                plain("esc back"),
+            ];
         }
         Focus::Rail => {
             let mut out = vec![
@@ -221,7 +227,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Layout::Single { .. } => app.focus == Focus::Tree,
         Layout::TooSmall => false,
     };
-    let left = footer_left(app, tree_shown);
+    let left = footer_left(app, tree_shown, area.width);
     let one_row = !viewer || asking || app.editor.is_some() || area.height < SINGLE_BELOW_HEIGHT;
     // A long left text must not push `? help` and `q quit` out: the footer cuts the text instead.
     let kept_width: u16 = hints
@@ -589,12 +595,21 @@ fn title_of(app: &App) -> &'static str {
     }
 }
 
-/// The question in the footer for a pending confirmation.
-fn prompt_text(app: &App, what: Confirm) -> String {
+/// The question in the footer for a pending confirmation. The footer is `width` columns wide.
+fn prompt_text(app: &App, what: Confirm, width: u16) -> String {
     match what {
         Confirm::Annotation(id) => {
-            let number = app.review().and_then(|review| review.in_order().iter().position(|a| a.id == id));
-            format!("Delete annotation {}? y/n", number.map_or(0, |index| index + 1))
+            let annotation = app.review().and_then(|review| review.annotations.iter().find(|a| a.id == id));
+            let Some(annotation) = annotation else {
+                return "Remove this note? y remove · n keep".to_owned();
+            };
+            // The first line of the note, or of the quote when the note has no text.
+            let text = if annotation.note.trim().is_empty() { &annotation.quote } else { &annotation.note };
+            let text = text.lines().next().unwrap_or_default().trim();
+            let head = format!("Remove this {}? \"", word(annotation.kind));
+            let tail = "\" · y remove · n keep";
+            let room = width.saturating_sub(text_width(&head) + text_width(tail));
+            format!("{head}{}{tail}", fit(text, room))
         }
         Confirm::Discard if app.review().is_none_or(Review::is_empty) => {
             "Remove the draft file that Annorex cannot read? y/n".to_owned()
@@ -790,7 +805,6 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
         app.hits.push(body, Hit::BoxInside);
         draw_annotation_list(frame, app, body, Borders::ALL);
     }
-    draw_pick(frame, app, text_area);
     draw_editor(frame, app, text_area);
     if let Some(view) = app.boxed {
         let screen = Rect::new(header.x, header.y, header.width, footer.bottom() - header.y);
@@ -812,14 +826,14 @@ fn draw_viewer(frame: &mut Frame, app: &mut App, layout: Layout, header: Rect, f
 /// The left text of the footer: the question, the find input, the message, or the status of the
 /// document. `tree_shown` is true when the tree is on the screen. The screens Error and Picker have no
 /// left text.
-fn footer_left(app: &App, tree_shown: bool) -> Option<(String, Style)> {
+fn footer_left(app: &App, tree_shown: bool, width: u16) -> Option<(String, Style)> {
     if !matches!(app.screen, Screen::Viewer) {
         return None;
     }
     let bold = Style::new().add_modifier(Modifier::BOLD);
     let question = app
         .confirm
-        .map(|what| prompt_text(app, what))
+        .map(|what| prompt_text(app, what, width))
         .or_else(|| app.find_input.as_ref().map(|input| format!("/{input}")));
     if let Some(question) = question {
         return Some((question, bold));

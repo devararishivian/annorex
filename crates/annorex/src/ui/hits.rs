@@ -21,7 +21,6 @@ pub(crate) enum Hit {
     Card(u64),
     CardEdit(u64),
     CardRemove(u64),
-    Pick(u64),
     Send,
     TreeRow(usize),
     ListRow(usize),
